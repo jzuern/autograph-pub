@@ -121,6 +121,8 @@ class Trainer():
 
         cmap = plt.get_cmap('viridis')
         color_edge_gt = np.hstack([cmap(edge_gt)[:, 0:3], edge_gt[:, None]])
+        color_edge_gt[edge_gt < 0.4] = 0
+
         color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
         color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
         color_node_endpoint_pred = np.hstack([cmap(node_scores_endpoint_pred)[:, 0:3], node_scores_endpoint_pred[:, None]])
@@ -142,12 +144,9 @@ class Trainer():
         axarr_log[1].axis('off')
         axarr_log[2].axis('off')
         axarr_log[3].axis('off')
-        axarr_log[0].set_xlim([0, img_rgb.shape[1]])
-        axarr_log[0].set_ylim([img_rgb.shape[0], 0])
-        axarr_log[1].set_xlim([0, img_rgb.shape[1]])
-        axarr_log[1].set_ylim([img_rgb.shape[0], 0])
-        axarr_log[2].set_xlim([0, img_rgb.shape[1]])
-        axarr_log[2].set_ylim([img_rgb.shape[0], 0])
+        for i in range(len(axarr_log)):
+            axarr_log[i].set_xlim([0, img_rgb.shape[1]])
+            axarr_log[i].set_ylim([img_rgb.shape[0], 0])
 
         # Draw GT graph
         nx.draw_networkx(networkx_graph_gt, ax=axarr_log[0], pos=node_pos, edge_color=color_edge_gt,
@@ -231,7 +230,7 @@ class Trainer():
                 wandb.log({"train/endpoint_loss": loss_dict['endpoint_loss'].item()})
 
             # Visualization
-            if self.total_step % 10 == 0 and self.total_step > 0:
+            if self.total_step % 100 == 0:
                 if self.params.model.dataparallel:
                     data = data_orig
                 th = threading.Thread(target=self.do_logging, args=(data, self.total_step, 'train/Images', 'train'), )
@@ -274,10 +273,6 @@ class Trainer():
 
         for i_val, data in enumerate(dataloader_progress):
 
-            # if i_val > 100:
-            #     print('Stopping eval at {} samples cause they are so many'.format(i_val))
-            #     break
-
             if self.params.model.dataparallel:
                 data = [item.to(self.device) for item in data]
             else:
@@ -294,9 +289,15 @@ class Trainer():
                 data = Batch.from_data_list(data)
 
             # loss and optim
+            edge_weight = torch.ones_like(data.edge_gt)
+            node_weight = torch.ones_like(data.node_gt)
+
+            edge_weight[data.edge_gt < 0.4] = 0.0
+            node_weight[data.node_gt < 0.4] = 0.0
+
             try:
-                edge_loss = self.edge_criterion(edge_scores, data.edge_gt)
-                node_loss = self.node_criterion(node_scores, data.node_gt)
+                edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_gt) # todo: change to onehot
+                node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_gt) # todo: change to onehot
             except Exception as e:
                 print(e)
                 continue

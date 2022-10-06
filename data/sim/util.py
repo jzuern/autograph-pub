@@ -6,10 +6,12 @@ import os
 import matplotlib.pyplot as plt
 
 
-def rasterize_lidar(pts):
+def rasterize_lidar(pts, fov, distance):
 
     img_res = [1024, 1024]
-    pix_per_m = 20
+    fov_rad = fov * np.pi / 180.0
+    pix_per_m = img_res[0] / (2 * distance * np.tan(fov_rad / 2.0))
+
 
     # Create empty image
     img = np.zeros((img_res[0], img_res[1]), dtype=np.uint8)

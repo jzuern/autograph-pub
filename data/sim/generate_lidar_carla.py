@@ -21,7 +21,7 @@ from spawner import spawn
 #########################
 
 use_static_sensors = True
-num_vehicles = 100
+num_vehicles = 200
 dump_root_dir = '/data/self-supervised-graph/'
 # dump_root_dir = '/SSD/dumps/'
 
@@ -46,7 +46,7 @@ client.set_timeout(10.0)  # seconds
 
 # Create world object
 # world = client.get_world()
-world = client.load_world('Town01')
+world = client.load_world('Town03')
 
 # Make fixed time step
 settings = world.get_settings()
@@ -95,16 +95,16 @@ my_vehicle = actor_list[0]
 my_vehicle.set_autopilot(True)
 
 
-
-
 # Create RGB BEV camera
-bev_location = carla.Location(x=95., y=200, z=100)
+bev_location = carla.Location(x=0., y=-100, z=200)
+static_sensor_location = carla.Location(x=0, y=-100, z=1.5)
+
+cam_transform = carla.Transform(bev_location, carla.Rotation(yaw=0, pitch=-90, roll=-90))
 
 camera_bev_rgb = blueprint_library.find('sensor.camera.rgb')
 camera_bev_rgb.set_attribute('image_size_x', '1024')
 camera_bev_rgb.set_attribute('image_size_y', '1024')
-camera_bev_rgb.set_attribute('fov', '20')
-cam_transform = carla.Transform(bev_location, carla.Rotation(yaw=0, pitch=-90, roll=0))
+camera_bev_rgb.set_attribute('fov', '10')
 camera_bev_rgb = world.spawn_actor(camera_bev_rgb, cam_transform)
 camera_bev_rgb_queue = queue.Queue()
 camera_bev_rgb.listen(camera_bev_rgb_queue.put)
@@ -118,7 +118,7 @@ idx = idx + 1
 camera_bev_sem = blueprint_library.find('sensor.camera.semantic_segmentation')
 camera_bev_sem.set_attribute('image_size_x', '1024')
 camera_bev_sem.set_attribute('image_size_y', '1024')
-camera_bev_sem.set_attribute('fov', '20')
+camera_bev_sem.set_attribute('fov', '10')
 camera_bev_sem = world.spawn_actor(camera_bev_sem, cam_transform)
 camera_bev_sem_queue = queue.Queue()
 camera_bev_sem.listen(camera_bev_sem_queue.put)
@@ -144,7 +144,6 @@ camera_distortion[3] = camera_blueprint.get_attribute('lens_kcube')
 camera_distortion[4] = camera_blueprint.get_attribute('lens_x_size')
 camera_distortion[5] = camera_blueprint.get_attribute('lens_y_size')
 
-static_sensor_location = carla.Location(x=95., y=200, z=1.5)
 
 for i in range(0, 1):
     # Modify the attributes of the blueprint to set image resolution and field of view.
@@ -314,6 +313,6 @@ while True:
     pcd.points = o3d.utility.Vector3dVector(lidar_points[:, 0:3])
     o3d.io.write_point_cloud(dump_root_dir + 'lidar/{:08d}.pcd'.format(nowFrame), pcd)
 
-    lidar_render = rasterize_lidar(lidar_points)
+    lidar_render = rasterize_lidar(lidar_points, fov=10, distance=200)
     cv2.imwrite(dump_root_dir + 'lidar_render/{:08d}.png'.format(nowFrame), lidar_render)
 

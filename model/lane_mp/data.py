@@ -21,6 +21,7 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
     def __init__(self, path, params, num_node_samples: int = 500, gt_pointwise: bool = True, N_interp: int = 10):
         super(TrajectoryDataset, self).__init__(path)
         self.params = params
+        self.path = path
 
         self.bev_rgb_files = sorted(glob(path + '/bev_rgb/*.png'))
         self.bev_semantic_files = sorted(glob(path + '/bev_sem/*.png'))
@@ -44,6 +45,10 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
                 lines = f.readlines()
                 for line in lines:
                     vehicle_id, x, y, z = line.strip().split(",")
+
+                    x = float(x) * 14 + 512
+                    y = float(y) * 14 + 512
+
                     if vehicle_id not in self.vehicles_traj_dict:
                         self.vehicles_traj_dict[vehicle_id] = [[time_step, float(x), float(y), float(z)]]
                     else:
@@ -54,20 +59,15 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
             self.vehicles_traj_dict[vehicle_id] = sorted(self.vehicles_traj_dict[vehicle_id], key=lambda x: x[0])
 
 
-        # # remove vehicles that are not in the ROI (region of interest)
-        # for vehicle_id in list(self.vehicles_traj_dict.keys()):
-        #     trajectory = self.vehicles_traj_dict[vehicle_id]
-        #     xs = np.array([t[1] for t in trajectory])
-        #     ys = np.array([t[2] for t in trajectory])
-        #
-        #     lim = 10
-        #     xs = xs[xs < lim]
-        #     xs = xs[xs > -lim]
-        #     ys = ys[ys < lim]
-        #     ys = ys[ys > -lim]
-        #     if len(xs) == 0 or len(ys) == 0:
-        #         print("Removing vehicle {} because it is not in ROI".format(vehicle_id))
-        #         del self.vehicles_traj_dict[vehicle_id]
+        # plot image and trajectories
+        # fig, ax = plt.subplots()
+        # ax.set_aspect('equal')
+        # plt.imshow(np.array(Image.open(self.bev_rgb_files[0])))
+        # for vehicle_id in self.vehicles_traj_dict:
+        #     vehicle_pos = np.array(self.vehicles_traj_dict[vehicle_id])
+        #     ax.plot(vehicle_pos[:, 1], vehicle_pos[:, 2], label=vehicle_id)
+        # ax.legend()
+        # plt.show()
 
     def __len__(self):
         return len(self.vehicles_traj_dict)
@@ -130,7 +130,13 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
 
         return crop
 
+
     def __getitem__(self, index):
+
+        preprocessed_fname = os.path.join(self.path, "preprocessed/{:05d}.pth".format(index))
+
+        if os.path.isfile(preprocessed_fname):
+            return torch.load(preprocessed_fname)
 
         start_time = time.time()
 
@@ -138,12 +144,9 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         trajectory = list(self.vehicles_traj_dict)[index]
         trajectory = self.vehicles_traj_dict[trajectory]
 
-        ts = [t[0] for t in trajectory]
-        xs = [t[1] for t in trajectory]
-        ys = [t[2] for t in trajectory]
-
-        xs = np.linspace(-30, 30, len(xs))
-        ys = np.linspace(12, 12, len(ys))
+        ts = np.array([t[0] for t in trajectory])
+        xs = np.array([t[1] for t in trajectory])
+        ys = np.array([t[2] for t in trajectory])
 
         rgb_file = self.bev_rgb_files[ts[0]]
         sem_file = self.bev_semantic_files[ts[0]]
@@ -153,15 +156,24 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         sem = np.asarray(Image.open(sem_file))
         lidar = np.asarray(Image.open(bev_lidar_file))
 
-        # Transform xs, ys to 256x256 image coordinates
+
+        # resize images
         resize_factor = 256 / rgb.shape[0]
-        shitty_factor = 15.0
+        rgb = cv2.resize(rgb, (256, 256))
+        rgb_context = rgb.copy()
+        sem = cv2.resize(sem, (256, 256))
+        lidar = cv2.resize(lidar, (256, 256))
 
-        xs = np.array([x * shitty_factor * resize_factor + 128 for x in xs])
-        ys = np.array([y * shitty_factor * resize_factor + 128 for y in ys])
+        context_regr_smooth = np.zeros((256, 256), dtype=np.float32)
+        drivable = (sem == 6).astype(np.float32) + (sem == 7).astype(np.float32)
+        non_drivable_mask = drivable < 0.5
 
-        x_filter = np.logical_and(xs > 0, xs < 256)
-        y_filter = np.logical_and(ys > 0, ys < 256)
+
+        xs = xs * resize_factor
+        ys = ys * resize_factor
+
+        x_filter = np.logical_and(xs > -512, xs < 512)
+        y_filter = np.logical_and(ys > -512, ys < 512)
         filter = np.logical_and(x_filter, y_filter)
 
         xs = xs[filter]
@@ -169,23 +181,6 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         ts = np.array(ts)[filter]
 
 
-
-
-        # resize images
-        rgb = cv2.resize(rgb, (256, 256))
-        rgb_context = rgb.copy()
-        sem = cv2.resize(sem, (256, 256))
-        lidar = cv2.resize(lidar, (256, 256))
-
-        #plt.imshow(rgb)
-        #plt.plot(xs, ys, 'ro')
-        #plt.show()
-
-
-        context_regr_smooth = np.zeros((256, 256), dtype=np.float32)
-
-        drivable = (sem == 7).astype(np.float32)
-        non_drivable_mask = drivable < 0.5
 
         # GT graph representation
 
@@ -477,4 +472,7 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
                                          context_regr_smooth=torch.FloatTensor(context_regr_smooth), # [0.0, 1.0]
                                          data_time=torch.tensor(time.time() - start_time),
                                          )
+
+        torch.save(data, preprocessed_fname)
+
         return data
