@@ -312,16 +312,7 @@ while True:
 
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(lidar_points[:, 0:3])
-    #o3d.visualization.draw_geometries([pcd])
     o3d.io.write_point_cloud(dump_root_dir + 'lidar/{:08d}.pcd'.format(nowFrame), pcd)
-
-    # vis = o3d.visualization.Visualizer()
-    # vis.create_window()
-    # vis.get_render_option().point_color_option = o3d.visualization.PointColorOption.Color
-    # vis.get_render_option().point_size = 3.0
-    # vis.add_geometry(pcd)
-    # vis.capture_screen_image(dump_root_dir + "lidar_render/{:08d}.png".format(nowFrame), do_render=True)
-    # vis.destroy_window()
 
     lidar_render = rasterize_lidar(lidar_points)
     cv2.imwrite(dump_root_dir + 'lidar_render/{:08d}.png'.format(nowFrame), lidar_render)

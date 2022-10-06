@@ -293,7 +293,13 @@ def get_nn_direction(angles, angles_mask):
     # Extrapolate
     grid_x, grid_y = np.mgrid[0:256, 0:256]
 
-    dense_dir = griddata(points, angles[dir_pixels], (grid_y, grid_x), method='nearest')
+    try:
+        dense_dir = griddata(points, angles[dir_pixels], (grid_y, grid_x), method='nearest')
+    except:
+        print("Error in griddata")
+        plt.imshow(angles)
+        plt.show()
+        dense_dir = np.zeros_like(angles)
 
     return dense_dir
 
@@ -323,6 +329,62 @@ def get_nn_direction(angles, angles_mask):
 #         plt.show()
 #
 #     return np.sum(gt_sdf * pred_sdf) / np.sum(pred_sdf)
+
+
+
+def get_node_endpoint_gt(rgb, waypoints, relation_labels, edges, node_feats):
+    """
+    Args:
+        waypoints: list of gt graph points
+        relation_labels: list of gt graph edges
+        edges: list of edges
+        node_feats: list of node features
+
+    Returns:
+        node_endpoint_gt: list of node endpoint gt
+
+    """
+
+    # swap x y axis of waypoints
+    waypoints = np.array(waypoints)
+    waypoints[:, 0], waypoints[:, 1] = waypoints[:, 1], waypoints[:, 0].copy()
+
+    node_feats = node_feats.numpy()
+    # possible_endpoints = np.array([edge[1] for edge in edges])
+    # possible_endpoints = np.unique(possible_endpoints)
+    # possible_endpoints_coords = node_feats[possible_endpoints]
+
+
+    gt_starting_indices = np.unique([edge[0] for edge in relation_labels])
+    gt_end_indices = np.unique([edge[1] for edge in relation_labels])
+
+    # get end indices that are not in start indices
+    gt_end_indices = gt_end_indices[~np.isin(gt_end_indices, gt_starting_indices)]
+
+    node_endpoint_gt = torch.zeros(len(node_feats), dtype=torch.float32)
+
+    # Get the node_feats with euclidean distance closest to the endpoints
+    for gt_end in gt_end_indices:
+        gt_end_node_idx = np.argmin(np.sum((node_feats - waypoints[gt_end]) ** 2, axis=1))
+        node_endpoint_gt[gt_end_node_idx] = 1
+
+    # # Visualization
+    # plt.imshow(rgb)
+    # for e in relation_labels:
+    #     s_x, s_y = waypoints[e[0]][1], waypoints[e[0]][0]
+    #     e_x, e_y = waypoints[e[1]][1], waypoints[e[1]][0]
+    #     plt.arrow(s_x, s_y, e_x-s_x, e_y-s_y, color='g', width=0.2, head_width=1)
+    # for i, point in enumerate(node_feats):
+    #     if node_endpoint_gt[i] == 1.0:
+    #         plt.plot(point[1], point[0], 'g.')
+    #     else:
+    #         plt.plot(point[1], point[0], 'k.')
+    # plt.show()
+
+    return node_endpoint_gt
+
+
+
 
 def get_gt_sdf_with_direction(gt_lines_shapely):
 

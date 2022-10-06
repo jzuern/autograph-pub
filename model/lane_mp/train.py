@@ -83,7 +83,6 @@ class Trainer():
         num_edges_in_batch = unbatch_edge_index(data.edge_index, data.batch)[0].shape[1]
         data.x = data.x[data.batch == 0]
         data.edge_gt = data.edge_gt[:num_edges_in_batch]
-        data.edge_gt_onehot = data.edge_gt_onehot[:num_edges_in_batch]
         data.edge_scores = data.edge_scores[:num_edges_in_batch]
         data.edge_index = data.edge_index[:, :num_edges_in_batch]
         data.edge_attr = data.edge_attr[:num_edges_in_batch]
@@ -108,8 +107,8 @@ class Trainer():
         graph_pred_nx = predict_lanegraph(fut_nodes, startpoint_idx, node_scores_pred, endpoint_scores_pred, node_pos)
         # graph_gt_nx = get_gt_graph(get_target_data(self.params, data, split=self.))
 
-
         edge_scores_pred = data.edge_scores.squeeze().cpu().numpy()
+        edge_gt = data.edge_gt.squeeze().cpu().numpy()
         node_scores_pred = node_scores.squeeze().cpu().numpy()
         node_scores_endpoint_pred = endpoint_scores.squeeze().cpu().numpy()
 
@@ -121,13 +120,13 @@ class Trainer():
                                                               edge_attrs=["edge_scores"])
 
         cmap = plt.get_cmap('viridis')
+        color_edge_gt = np.hstack([cmap(edge_gt)[:, 0:3], edge_gt[:, None]])
         color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
         color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
         color_node_endpoint_pred = np.hstack([cmap(node_scores_endpoint_pred)[:, 0:3], node_scores_endpoint_pred[:, None]])
 
         #ego_regression_target = get_ego_regression_target(self.params, data, split)
         img_rgb = data.rgb.cpu().numpy()[0:256, :, :]
-        img_rgb_context = data.rgb_context.cpu().numpy()[0:512, :, :]
         node_pos = data.x.cpu().numpy()
         node_pos[:, [1, 0]] = node_pos[:, [0, 1]]
 
@@ -135,37 +134,26 @@ class Trainer():
         axarr_log[1].cla()
         axarr_log[2].cla()
         axarr_log[3].cla()
-        # axarr_log[4].cla()
         axarr_log[0].imshow(img_rgb)
-        axarr_log[1].imshow(img_rgb_context)
+        axarr_log[1].imshow(img_rgb)
         axarr_log[2].imshow(img_rgb)
         axarr_log[3].imshow(img_rgb)
-        #axarr_log[4].imshow(ego_regression_target, cmap='gray')
         axarr_log[0].axis('off')
         axarr_log[1].axis('off')
         axarr_log[2].axis('off')
         axarr_log[3].axis('off')
-        # axarr_log[4].axis('off')
         axarr_log[0].set_xlim([0, img_rgb.shape[1]])
         axarr_log[0].set_ylim([img_rgb.shape[0], 0])
+        axarr_log[1].set_xlim([0, img_rgb.shape[1]])
+        axarr_log[1].set_ylim([img_rgb.shape[0], 0])
         axarr_log[2].set_xlim([0, img_rgb.shape[1]])
         axarr_log[2].set_ylim([img_rgb.shape[0], 0])
 
-        # axarr_log[0].title.set_text('Node&Edge Score Pred')
-        # axarr_log[1].title.set_text('SDF Context Regressor Pred')
-        # axarr_log[2].title.set_text('UCS Traversals + Endpoint Scores')
-        # axarr_log[3].title.set_text('GT Graph + SDF Ego Regressor Pred')
-        # axarr_log[4].title.set_text('SDF Ego Regression Target')
-
-        context_regr_smooth = data.context_regr_smooth.cpu().numpy()[0:512, :]
-        # context_regr_smooth = context_regr_smooth[128:128+256, 128:128+256]
-        ego_regr_smooth = data.ego_regr_smooth.cpu().numpy()[0:256, :]
-
-        axarr_log[1].imshow(context_regr_smooth, cmap='viridis', alpha=0.5)
-        axarr_log[3].imshow(ego_regr_smooth, cmap='viridis', alpha=0.5)
-
         # Draw GT graph
-        nx.draw_networkx(networkx_graph_gt, ax=axarr_log[0], pos=node_pos, edge_color=color_edge_pred,
+        nx.draw_networkx(networkx_graph_gt, ax=axarr_log[0], pos=node_pos, edge_color=color_edge_gt,
+                            node_color=color_node_pred, with_labels=False, node_size=5)
+
+        nx.draw_networkx(networkx_graph_gt, ax=axarr_log[1], pos=node_pos, edge_color=color_edge_pred,
                             node_color=color_node_pred, with_labels=False, node_size=5)
 
         nx.draw_networkx(graph_pred_nx, ax=axarr_log[2], pos=nx.get_node_attributes(graph_pred_nx, 'pos'), edge_color='w',
@@ -181,7 +169,7 @@ class Trainer():
         figure_log.canvas.draw()
         figure_log.canvas.flush_events()
 
-        imname = "/home/zuern/Desktop/figprint/{:05d}-train.png".format(step)
+        imname = "/home/zuern/Desktop/figprint/{:05d}-ss-graph.png".format(step)
         try:
             plt.savefig(imname)
             print("Saved logging image to {}".format(imname))
@@ -217,32 +205,16 @@ class Trainer():
             edge_scores, node_scores, endpoint_scores = self.model(data)
             edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
             node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
-            endpoint_scores = torch.nn.Sigmoid()(endpoint_scores).squeeze()
 
             # Convert list of Data to DataBatch for post-processing and loss calculation
             if self.params.model.dataparallel:
                 data_orig = data.copy()
                 data = Batch.from_data_list(data)
 
-            dijkstra_mass = 0.2 * data.edge_gt.shape[0]
-            other_mass = 0.8 * data.edge_gt.shape[0]
-
-            dijkstra_weight = dijkstra_mass / torch.sum(data.edge_gt_onehot)
-            other_weight = other_mass / (data.edge_gt.shape[0] - torch.sum(data.edge_gt_onehot)) 
-
-            edge_weight = torch.zeros_like(data.edge_gt) 
-            edge_weight = edge_weight + other_weight
-            edge_weight[data.edge_gt_onehot == 1] = dijkstra_weight
-
-            node_endpoint_weight = torch.ones_like(data.node_endpoint_gt)
-            node_endpoint_weight[data.node_endpoint_gt == 1] = 100.
-            node_endpoint_weight /= node_endpoint_weight.sum()
-
             try:
                 loss_dict = {
-                    'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_gt_onehot),
+                    'edge_loss': torch.nn.BCELoss()(edge_scores, data.edge_gt),
                     'node_loss': torch.nn.BCELoss()(node_scores, data.node_gt),
-                    'endpoint_loss': torch.nn.BCELoss(weight=node_endpoint_weight)(endpoint_scores, data.node_endpoint_gt)
                 }
             except Exception as e:
                 print(e)
@@ -315,7 +287,6 @@ class Trainer():
                 edge_scores, node_scores, endpoint_scores = self.model(data)
                 edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
                 node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
-                endpoint_scores = torch.nn.Sigmoid()(endpoint_scores).squeeze()
 
             # Convert list of Data to DataBatch for post-processing and loss calculation
             if self.params.model.dataparallel:
@@ -324,16 +295,14 @@ class Trainer():
 
             # loss and optim
             try:
-                edge_loss = self.edge_criterion(edge_scores, data.edge_gt_onehot)
+                edge_loss = self.edge_criterion(edge_scores, data.edge_gt)
                 node_loss = self.node_criterion(node_scores, data.node_gt)
-                node_endpoint_loss = self.node_criterion(endpoint_scores, data.node_endpoint_gt)
             except Exception as e:
                 print(e)
                 continue
 
             node_losses.append(node_loss.item())
             edge_losses.append(edge_loss.item())
-            node_endpoint_losses.append(node_endpoint_loss.item())
 
             ap_edge = average_precision((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1)
             recall_edge = recall((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1, multiclass=False)
@@ -468,8 +437,8 @@ def main():
     train_path = os.path.join(params.paths.dataroot)
     test_path = os.path.join(params.paths.dataroot)
 
-    dataset_train = TrajectoryDataset(path=train_path)
-    dataset_test = TrajectoryDataset(path=test_path)
+    dataset_train = TrajectoryDataset(path=train_path, params=params)
+    dataset_test = TrajectoryDataset(path=test_path, params=params)
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
@@ -500,7 +469,7 @@ def main():
             wandb.save(params.paths.home + fname)
 
         # Evaluate
-        trainer.eval(epoch, split='test')
+        # trainer.eval(epoch, split='test')
 
         process = psutil.Process(os.getpid())
         print("RAM: ", str(process.memory_info().rss / 1024 / 1024))  # in MB (bearbeitet)

@@ -15,36 +15,21 @@ paths:
 preprocessing:
     gt_pointwise: True
     sampling_method: halton
-    num_node_samples: 500
+    num_node_samples: 300
     edge_proposal_method: random  # triangular or random
-    N_interp: 3
+    N_interp: 5
     k_waypoints: 1
     visualize: False
-    angle_penalty: 1 # not utilized yet
-    context_regressor_ckpt: lanenet/centerlines-sdf-context_sweet-snowflake-44_e_024_acc_0.503.pth  # resnet152 010922-large
-    ego_regressor_ckpt: lanenet/centerlines-sdf-ego-context_radiant-dawn-46_e_011_acc_0.318.pth  # resnet152 010922-large
     ego_regressor_num_channels: 4
 model:
     dataparallel: True
     device: cuda
-    batch_size: 2
+    batch_size: 1
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
     num_epochs: 100
     gnn_depth: 6      # default: 6
-    # lane_mpnn_node
-    #map_feat_dim: 128
-    #node_dim: 48
-    #edge_dim: 32
-    #msg_dim: 32
-    #edge_geo_dim: 32 #(but not used, only um nicht confused zu werden)
-    # lane_mpnn_att
-#    map_feat_dim: 256 #(= edge_geo_dim)
-#    node_dim: 48
-#    edge_dim: 32
-#    msg_dim: 32
-#    edge_geo_dim: 256 #(=map_feat_dim)
     # lane_mpnn
     map_feat_dim: 64
     node_dim: 16
@@ -53,7 +38,7 @@ model:
     edge_geo_dim: 16
     # end_of_archs
     in_channels: 4  # number of channels of image
-    loader_workers: 4
+    loader_workers: 0
     weight_decay: 1e-4 #0.0001
     checkpoint: lanemp/lanemp_magic-leaf-210_085.pth
 driving:
