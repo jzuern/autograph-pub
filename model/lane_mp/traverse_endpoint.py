@@ -59,7 +59,7 @@ def preprocess_predictions(params, model, data, gt_available=True):
     node_pos[:, [1, 0]] = node_pos[:, [0, 1]]
 
     if gt_available:
-        edge_scores_gt_onehot = data.edge_gt.cpu().numpy()
+        edge_scores_gt_onehot = data.edge_dijkstra.cpu().numpy()
     else:
         edge_scores_gt_onehot = None
 

@@ -15,7 +15,7 @@ paths:
 preprocessing:
     gt_pointwise: True
     sampling_method: halton
-    num_node_samples: 300
+    num_node_samples: 200
     edge_proposal_method: random  # triangular or random
     N_interp: 5
     k_waypoints: 1
@@ -28,7 +28,7 @@ model:
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
-    num_epochs: 100
+    num_epochs: 10000
     gnn_depth: 6      # default: 6
     # lane_mpnn
     map_feat_dim: 64

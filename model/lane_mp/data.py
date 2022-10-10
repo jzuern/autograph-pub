@@ -18,10 +18,16 @@ from model.lane_mp.utils import is_in_mask_loop, get_gt_sdf_with_direction, \
 
 class TrajectoryDataset(torch_geometric.data.Dataset):
 
-    def __init__(self, path, params, num_node_samples: int = 500, gt_pointwise: bool = True, N_interp: int = 10):
+    def __init__(self, path, params, num_node_samples: int = 500, gt_pointwise: bool = True, N_interp: int = 10, use_preprocessed=True):
         super(TrajectoryDataset, self).__init__(path)
         self.params = params
         self.path = path
+        self.use_preprocessed = use_preprocessed
+
+        self.preprocessed_fname = os.path.join(self.path, "preprocessed/{:05d}.pth")
+
+        if self.use_preprocessed:
+            print("Loading preprocessed data...")
 
         self.bev_rgb_files = sorted(glob(path + '/bev_rgb/*.png'))
         self.bev_semantic_files = sorted(glob(path + '/bev_sem/*.png'))
@@ -46,8 +52,8 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
                 for line in lines:
                     vehicle_id, x, y, z = line.strip().split(",")
 
-                    x = float(x) * 14 + 512
-                    y = float(y) * 14 + 512
+                    x = float(x) * 30 + 512
+                    y = float(y) * 30 + 512
 
                     if vehicle_id not in self.vehicles_traj_dict:
                         self.vehicles_traj_dict[vehicle_id] = [[time_step, float(x), float(y), float(z)]]
@@ -59,7 +65,7 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
             self.vehicles_traj_dict[vehicle_id] = sorted(self.vehicles_traj_dict[vehicle_id], key=lambda x: x[0])
 
 
-        # plot image and trajectories
+        # # plot image and trajectories
         # fig, ax = plt.subplots()
         # ax.set_aspect('equal')
         # plt.imshow(np.array(Image.open(self.bev_rgb_files[0])))
@@ -72,9 +78,9 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
     def __len__(self):
         return len(self.vehicles_traj_dict)
 
-    
+
     def get_crop_mask_img(self, edge_angle, mid_x, mid_y, rgb_context):
-        
+
         # Size of quadratic destination image
         crop_size = 180
         imsize = 512
@@ -108,35 +114,12 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
 
         # directly warp the rotated rectangle to get the rectangle
         crop = cv2.warpPerspective(rgb_context, M, (crop_size, crop_size))
-        
-        """
-        # visualize cropped region
-        for i in range(len(src_pts)):
-            #print(i, i-1, (src_pts[i, 0], src_pts[i, 1]), (src_pts[i-1, 0], src_pts[i-1, 1]))
-            cv2.line(rgb_context, (src_pts[i, 0], src_pts[i, 1]), (src_pts[i-1, 0], src_pts[i-1, 1]), (255, 255, 0), 2)
-            # Query image
-            cv2.line(rgb_context, (128, 128), (128+256, 128), (255, 0, 0.0), 2)
-            cv2.line(rgb_context, (128+256, 128), (128+256, 128+256), (255, 0, 0), 2)
-            cv2.line(rgb_context, (128, 128+256), (128+256, 128+256), (255, 0, 0), 2)
-            cv2.line(rgb_context, (128, 128), (128, 128+256), (255, 0, 0), 2)
 
-        fig, axarr = plt.subplots(1, 2)
-        fig.set_figheight(16)
-        fig.set_figwidth(16)
-        axarr[0].imshow(rgb_context)
-        axarr[1].imshow(crop)
-        plt.show()
-        """
 
         return crop
 
 
     def __getitem__(self, index):
-
-        preprocessed_fname = os.path.join(self.path, "preprocessed/{:05d}.pth".format(index))
-
-        if os.path.isfile(preprocessed_fname):
-            return torch.load(preprocessed_fname)
 
         start_time = time.time()
 
@@ -148,6 +131,9 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         xs = np.array([t[1] for t in trajectory])
         ys = np.array([t[2] for t in trajectory])
 
+        if ts[0] > len(self.bev_rgb_files):
+            return "empty-trajectory"
+
         rgb_file = self.bev_rgb_files[ts[0]]
         sem_file = self.bev_semantic_files[ts[0]]
         bev_lidar_file = self.bev_lidar_files[ts[0]]
@@ -155,7 +141,6 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         rgb = np.asarray(Image.open(rgb_file))
         sem = np.asarray(Image.open(sem_file))
         lidar = np.asarray(Image.open(bev_lidar_file))
-
 
         # resize images
         resize_factor = 256 / rgb.shape[0]
@@ -165,22 +150,23 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         lidar = cv2.resize(lidar, (256, 256))
 
         context_regr_smooth = np.zeros((256, 256), dtype=np.float32)
-        drivable = (sem == 6).astype(np.float32) + (sem == 7).astype(np.float32)
+        drivable = (sem == 6).astype(np.float32) + (sem == 7).astype(np.float32) + (sem == 10).astype(np.float32)
         non_drivable_mask = drivable < 0.5
-
 
         xs = xs * resize_factor
         ys = ys * resize_factor
 
-        x_filter = np.logical_and(xs > -512, xs < 512)
-        y_filter = np.logical_and(ys > -512, ys < 512)
+
+        x_filter = np.logical_and(xs > 0, xs < 256)
+        y_filter = np.logical_and(ys > 0, ys < 256)
         filter = np.logical_and(x_filter, y_filter)
 
         xs = xs[filter]
         ys = ys[filter]
         ts = np.array(ts)[filter]
 
-
+        if len(xs) < 2:
+            return "empty-trajectory"
 
         # GT graph representation
 
@@ -200,10 +186,12 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
                 G_gt_nx.add_node(e[1], pos=waypoints[e[1]])
             G_gt_nx.add_edge(e[0], e[1])
 
+
         start_node = [x for x in G_gt_nx.nodes() if G_gt_nx.in_degree(x) == 0 and G_gt_nx.out_degree(x) > 0][0]
         start_node_pos = G_gt_nx.nodes[start_node]['pos']
         end_nodes = [x for x in G_gt_nx.nodes() if G_gt_nx.out_degree(x) == 0 and G_gt_nx.in_degree(x) > 0]
         end_node_pos_list = [G_gt_nx.nodes[x]['pos'] for x in end_nodes]
+
 
         gt_lines = []
         gt_multilines = []
@@ -292,7 +280,8 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
             node_gt_list.append(node_gt_score)
 
         if len(node_feats_list) == 0:
-            exit("No nodes found")
+            return "empty-trajectory"
+
 
         node_feats = torch.cat(node_feats_list, dim=0)
 
@@ -307,7 +296,7 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
                 edges.append((i, j))
 
         if len(edges) == 0:
-            exit("No edges found.")
+            return "empty-trajectory"
 
         # print("--normalize node gt")
 
@@ -383,10 +372,19 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
                 cum_edge_dist_gt -= cum_edge_dist_gt.min()
                 cum_edge_dist_gt /= cum_edge_dist_gt.max()
                 cum_edge_dist_gt = 1 - cum_edge_dist_gt
-                edge_gt_score = cum_edge_dist_gt * np.array(angle_penalty_list)
                 edge_gt_score = cum_edge_dist_gt ** 8
             except:
+                edge_gt_score = np.zeros(len(cum_edge_dist_list))
                 pass
+
+
+        if any(np.isnan(edge_gt_score)):
+            print("Warning: edge_gt_score contains NaNs")
+            return "empty-trajectory"
+        if any(np.isnan(node_gt_score)):
+            print("Warning: node_gt_score contains NaNs")
+            return "empty-trajectory"
+
 
         # Now we correct the edge weights according to dijsktra path
         G_proposal_nx = nx.DiGraph()
@@ -399,42 +397,34 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
 
         # Now we search for shortest path through the G_proposal_nx from start node to end nodes
         point_coords_swapped = np.array(point_coords)[:, ::-1]
-        # start_node_idx = np.argmin(np.linalg.norm(point_coords_swapped - start_node_pos, axis=1))
-        # end_node_idx_list = [np.argmin(np.linalg.norm(point_coords_swapped - end_node_pos, axis=1)) for end_node_pos in
-        #                      end_node_pos_list]
+        start_node_idx = np.argmin(np.linalg.norm(point_coords_swapped - start_node_pos, axis=1))
+        end_node_idx_list = [np.argmin(np.linalg.norm(point_coords_swapped - end_node_pos, axis=1)) for end_node_pos in
+                             end_node_pos_list]
 
-        # # Find shortest path
-        # try:
-        #     shortest_paths = [nx.shortest_path(G_proposal_nx, start_node_idx, end_node_idx, weight="weight") for
-        #                       end_node_idx in end_node_idx_list]
-        #     dijkstra_edge_list = list()
-        #     for path in shortest_paths:
-        #         dijkstra_edge_list += list(zip(path[:-1], path[1:]))
-        # except nx.NetworkXNoPath as e:
-        #     print(e)
-        #     dijkstra_edge_list = list()
-        #
-        # # Now we correct the edge weights according to dijsktra path
-        # edge_gt_score_dijkstra = edge_gt_score.copy()
-        # for idx in range(len(edge_idx_list)):
-        #     e = edge_idx_list[idx]
-        #     if (e[0], e[1]) in dijkstra_edge_list:
-        #         # print("Maximizing score for edge {}-{} because it is in dijkstra edge list".format(e[0], e[1]))
-        #         edge_gt_score_dijkstra[idx] = 1.0
-        #         edge_gt_score[idx] = 1.0
+        # Find shortest path
+        try:
+            shortest_paths = [nx.shortest_path(G_proposal_nx, start_node_idx, end_node_idx, weight="weight") for
+                              end_node_idx in end_node_idx_list]
+            dijkstra_edge_list = list()
+            for path in shortest_paths:
+                dijkstra_edge_list += list(zip(path[:-1], path[1:]))
+        except nx.NetworkXNoPath as e:
+            print(e)
+            dijkstra_edge_list = list()
+
+        # Now we correct the edge weights according to dijsktra path
+        edge_gt_score_dijkstra = np.zeros_like(edge_gt_score)
+        for idx in range(len(edge_idx_list)):
+            e = edge_idx_list[idx]
+            if (e[0], e[1]) in dijkstra_edge_list:
+                # print("Maximizing score for edge {}-{} because it is in dijkstra edge list".format(e[0], e[1]))
+                edge_gt_score_dijkstra[idx] = 1.0
+                edge_gt_score[idx] = 1.0
 
         # Maybe one-hot encoding of path is better?
-        # edge_gt_score_dijkstra[edge_gt_score_dijkstra < 0.999] = 0
+        #edge_gt_score_dijkstra[edge_gt_score_dijkstra < 0.999] = 0
 
-        node_endpoint_gt = get_node_endpoint_gt(rgb, waypoints, relation_labels, edges, node_feats)
-
-        edge_gt_score = torch.from_numpy(edge_gt_score).float()
-        # edge_gt_score_dijkstra = torch.from_numpy(edge_gt_score_dijkstra).float()
-
-        gt_graph = torch.tensor(gt_lines)  # [num_gt_graph_edges, 4]
-        edges = torch.tensor(edges)
-
-
+        # node_endpoint_gt = get_node_endpoint_gt(rgb, waypoints, relation_labels, edges, node_feats)
 
         # # And we plot it for debugging
         # fig, axarr = plt.subplots(1, 2, figsize=(10, 5), sharex=True, sharey=True)
@@ -444,7 +434,8 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         # axarr[1].title.set_text('Dijkstra scoring')
         #
         # # sort edge list based on scores
-        # edge_gt_score, edge_idx_list = zip(*sorted(zip(edge_gt_score, edge_idx_list), key=lambda x: x[0], reverse=False))
+        # edge_gt_score, edge_gt_score_dijkstra, edge_idx_list = \
+        #     zip(*sorted(zip(edge_gt_score, edge_gt_score_dijkstra, edge_idx_list), key=lambda x: x[0], reverse=False))
         #
         # for list_idx, e in enumerate(edge_idx_list):
         #     s_x, s_y = point_coords[e[0]][1], point_coords[e[0]][0]
@@ -456,14 +447,22 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         #     plt.plot(end_node[0], end_node[1], 'ro')
         # plt.show()
 
+
+        edge_gt_score = torch.from_numpy(edge_gt_score).float()
+        edge_gt_score_dijkstra = torch.from_numpy(edge_gt_score_dijkstra).float()
+
+        gt_graph = torch.tensor(gt_lines)  # [num_gt_graph_edges, 4]
+        edges = torch.tensor(edges)
+
+
+
         data = torch_geometric.data.Data(x=node_feats,
                                          edge_index=edges.t().contiguous(),
                                          edge_attr=edge_attr,
                                          edge_img_feats=edge_img_feats,
-                                         node_gt=node_gt_score.t().contiguous(),
-                                         node_endpoint_gt=node_endpoint_gt.t().contiguous(),
-                                         edge_gt=edge_gt_score.t().contiguous(),
-                                         # edge_gt_onehot=edge_gt_score_dijkstra.t().contiguous(),
+                                         node_distance=node_gt_score.t().contiguous(),
+                                         edge_distance=edge_gt_score.t().contiguous(),
+                                         edge_dijkstra=edge_gt_score_dijkstra.t().contiguous(),
                                          gt_graph=gt_graph,
                                          num_nodes=node_feats.shape[0],
                                          batch_idx=torch.tensor(len(gt_graph)),
@@ -473,6 +472,26 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
                                          data_time=torch.tensor(time.time() - start_time),
                                          )
 
-        torch.save(data, preprocessed_fname)
+        return data
+
+
+
+class PreprocessedTrajectoryDataset(torch_geometric.data.Dataset):
+
+    def __init__(self, path):
+        super(PreprocessedTrajectoryDataset, self).__init__(path)
+
+        self.path = path
+        self.pth_files = sorted(glob(path + '/*.pt'))
+
+    def __len__(self):
+        return len(self.pth_files)
+
+    def __getitem__(self, index):
+
+        fname = self.pth_files[index]
+        data = torch.load(fname)[0]
 
         return data
+
+

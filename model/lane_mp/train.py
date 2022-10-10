@@ -3,9 +3,6 @@ import logging
 import os, psutil
 import threading
 
-# Please only comment out, do not delete 
-# os.environ['CUDA_VISIBLE_DEVICES'] = "1"
-
 import networkx as nx
 import wandb
 import argparse
@@ -22,7 +19,7 @@ from torchmetrics.functional.classification.precision_recall import recall
 
 # SELECT MODEL TO BE USED
 from model.lane_mp.lane_mpnn import LaneGNN
-from model.lane_mp.data import TrajectoryDataset
+from model.lane_mp.data import PreprocessedTrajectoryDataset
 from model.lane_mp.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
 from model.lane_mp.metrics.metrics import calc_all_metrics
 from model.lane_mp.traverse_endpoint import preprocess_predictions, predict_lanegraph
@@ -82,12 +79,12 @@ class Trainer():
         # Do logging
         num_edges_in_batch = unbatch_edge_index(data.edge_index, data.batch)[0].shape[1]
         data.x = data.x[data.batch == 0]
-        data.edge_gt = data.edge_gt[:num_edges_in_batch]
-        data.edge_scores = data.edge_scores[:num_edges_in_batch]
+        data.edge_distance = data.edge_distance[:num_edges_in_batch]
+        data.edge_dijkstra = data.edge_dijkstra[:num_edges_in_batch]
         data.edge_index = data.edge_index[:, :num_edges_in_batch]
         data.edge_attr = data.edge_attr[:num_edges_in_batch]
         data.edge_img_feats = data.edge_img_feats[:num_edges_in_batch]
-        data.node_gt = data.node_gt[data.batch == 0]
+        data.node_distance = data.node_distance[data.batch == 0]
         data.node_scores = data.node_scores[data.batch == 0]
         data.num_nodes = data.node_scores.shape[0]
 
@@ -108,7 +105,7 @@ class Trainer():
         # graph_gt_nx = get_gt_graph(get_target_data(self.params, data, split=self.))
 
         edge_scores_pred = data.edge_scores.squeeze().cpu().numpy()
-        edge_gt = data.edge_gt.squeeze().cpu().numpy()
+        edge_dijkstra = data.edge_dijkstra.squeeze().cpu().numpy()
         node_scores_pred = node_scores.squeeze().cpu().numpy()
         node_scores_endpoint_pred = endpoint_scores.squeeze().cpu().numpy()
 
@@ -120,9 +117,7 @@ class Trainer():
                                                               edge_attrs=["edge_scores"])
 
         cmap = plt.get_cmap('viridis')
-        color_edge_gt = np.hstack([cmap(edge_gt)[:, 0:3], edge_gt[:, None]])
-        color_edge_gt[edge_gt < 0.4] = 0
-
+        color_edge_gt = np.hstack([cmap(edge_dijkstra)[:, 0:3], edge_dijkstra[:, None]])
         color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
         color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
         color_node_endpoint_pred = np.hstack([cmap(node_scores_endpoint_pred)[:, 0:3], node_scores_endpoint_pred[:, None]])
@@ -212,8 +207,8 @@ class Trainer():
 
             try:
                 loss_dict = {
-                    'edge_loss': torch.nn.BCELoss()(edge_scores, data.edge_gt),
-                    'node_loss': torch.nn.BCELoss()(node_scores, data.node_gt),
+                    'edge_loss': torch.nn.BCELoss()(edge_scores, data.edge_dijkstra),
+                    'node_loss': torch.nn.BCELoss()(node_scores, data.node_distance),
                 }
             except Exception as e:
                 print(e)
@@ -289,15 +284,15 @@ class Trainer():
                 data = Batch.from_data_list(data)
 
             # loss and optim
-            edge_weight = torch.ones_like(data.edge_gt)
-            node_weight = torch.ones_like(data.node_gt)
+            edge_weight = torch.ones_like(data.edge_distance)
+            node_weight = torch.ones_like(data.node_distance)
 
             edge_weight[data.edge_gt < 0.4] = 0.0
             node_weight[data.node_gt < 0.4] = 0.0
 
             try:
-                edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_gt) # todo: change to onehot
-                node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_gt) # todo: change to onehot
+                edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_dijkstra)
+                node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_distance)
             except Exception as e:
                 print(e)
                 continue
@@ -435,11 +430,11 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.3)
 
     # define own collator that skips bad samples
-    train_path = os.path.join(params.paths.dataroot)
-    test_path = os.path.join(params.paths.dataroot)
+    train_path = os.path.join(params.paths.dataroot, "preprocessed")
+    test_path = os.path.join(params.paths.dataroot, "preprocessed")
 
-    dataset_train = TrajectoryDataset(path=train_path, params=params)
-    dataset_test = TrajectoryDataset(path=test_path, params=params)
+    dataset_train = PreprocessedTrajectoryDataset(path=train_path)
+    dataset_test = PreprocessedTrajectoryDataset(path=test_path)
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
@@ -471,9 +466,6 @@ def main():
 
         # Evaluate
         # trainer.eval(epoch, split='test')
-
-        process = psutil.Process(os.getpid())
-        print("RAM: ", str(process.memory_info().rss / 1024 / 1024))  # in MB (bearbeitet)
 
 
 if __name__ == '__main__':

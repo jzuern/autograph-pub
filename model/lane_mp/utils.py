@@ -298,6 +298,7 @@ def get_nn_direction(angles, angles_mask):
     except:
         print("Error in griddata")
         dense_dir = np.zeros_like(angles)
+        print(dir_pixels)
 
     return dense_dir
 
