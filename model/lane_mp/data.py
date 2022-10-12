@@ -18,16 +18,12 @@ from model.lane_mp.utils import is_in_mask_loop, get_gt_sdf_with_direction, \
 
 class TrajectoryDataset(torch_geometric.data.Dataset):
 
-    def __init__(self, path, params, num_node_samples: int = 500, gt_pointwise: bool = True, N_interp: int = 10, use_preprocessed=True):
+    def __init__(self, path, params, num_node_samples: int = 500, gt_pointwise: bool = True, N_interp: int = 10):
         super(TrajectoryDataset, self).__init__(path)
         self.params = params
         self.path = path
-        self.use_preprocessed = use_preprocessed
 
         self.preprocessed_fname = os.path.join(self.path, "preprocessed/{:05d}.pth")
-
-        if self.use_preprocessed:
-            print("Loading preprocessed data...")
 
         self.bev_rgb_files = sorted(glob(path + '/bev_rgb/*.png'))
         self.bev_semantic_files = sorted(glob(path + '/bev_sem/*.png'))
@@ -134,7 +130,8 @@ class TrajectoryDataset(torch_geometric.data.Dataset):
         if ts[0] > len(self.bev_rgb_files):
             return "empty-trajectory"
 
-        rgb_file = self.bev_rgb_files[ts[0]]
+        # rgb_file = self.bev_rgb_files[ts[0]]
+        rgb_file = self.bev_rgb_files[0]
         sem_file = self.bev_semantic_files[ts[0]]
         bev_lidar_file = self.bev_lidar_files[ts[0]]
 

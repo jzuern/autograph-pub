@@ -59,7 +59,7 @@ class Trainer():
 
     def do_logging(self, data, step, plot_text, split=None):
         
-        print("\nLogging asynchronously...")
+        print("\nLogging synchronously...")
         figure_log, axarr_log = plt.subplots(1, 4, figsize=(20, 5))
         plt.tight_layout()
 
@@ -205,10 +205,17 @@ class Trainer():
                 data_orig = data.copy()
                 data = Batch.from_data_list(data)
 
+            # loss and optim
+            edge_weight = torch.ones_like(data.edge_distance)
+            node_weight = torch.ones_like(data.node_distance)
+
+            edge_weight[data.edge_distance < 0.4] = 0.0
+            node_weight[data.node_distance < 0.4] = 0.0
+
             try:
                 loss_dict = {
-                    'edge_loss': torch.nn.BCELoss()(edge_scores, data.edge_dijkstra),
-                    'node_loss': torch.nn.BCELoss()(node_scores, data.node_distance),
+                    'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_dijkstra),
+                    'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_distance),
                 }
             except Exception as e:
                 print(e)
@@ -224,12 +231,13 @@ class Trainer():
                 wandb.log({"train/node_loss": loss_dict['node_loss'].item()})
                 wandb.log({"train/endpoint_loss": loss_dict['endpoint_loss'].item()})
 
-            # Visualization
-            if self.total_step % 100 == 0:
+            # # Visualization
+            if self.total_step % 1000 == 0:
                 if self.params.model.dataparallel:
                     data = data_orig
-                th = threading.Thread(target=self.do_logging, args=(data, self.total_step, 'train/Images', 'train'), )
-                th.start()
+                # th = threading.Thread(target=self.do_logging, args=(data, self.total_step, 'train/Images', 'train'), )
+                # th.start()
+                self.do_logging(data, self.total_step, 'train/Images', 'train')
 
             t_end = time.time()
 
@@ -412,6 +420,7 @@ def main():
                     in_channels=params.model.in_channels,
                     )
 
+
     model = model.to(params.model.device)
 
     # Make model parallel if available
@@ -420,6 +429,12 @@ def main():
         model = DataParallel(model)
     else:
         print("Let's NOT use DataParallel with", torch.cuda.device_count(), "GPUs!")
+
+    # Load model weights
+    #model_path = '/home/zuern/self-supervised-graph/checkpoints/lanemp_local_run_0800.pth'
+    # model.load_state_dict(torch.load(model_path))
+    #print('Model loaded from {}'.format(model_path))
+
 
     weights = [w for w in model.parameters() if w.requires_grad]
 
@@ -455,14 +470,18 @@ def main():
     for epoch in range(params.model.num_epochs):
         trainer.train(epoch)
 
-        if not params.main.disable_wandb:
-            wandb_run_name = wandb.run.name
+        #if not params.main.disable_wandb:
+        if epoch % 100 == 0:
+            try:
+                wandb_run_name = wandb.run.name
+            except:
+                wandb_run_name = "local_run"
 
-            fname = 'lane_mp/lanemp_{}_{:03d}.pth'.format(wandb_run_name, epoch)
+            fname = 'lanemp_{}_{:04d}.pth'.format(wandb_run_name, epoch)
+            checkpoint_path = os.path.join(params.paths.checkpoints, fname)
+            print("Saving checkpoint to {}".format(checkpoint_path))
 
-            # save checkpoint locally and in wandb
-            torch.save(model.state_dict(), params.paths.checkpoints + fname)
-            wandb.save(params.paths.home + fname)
+            torch.save(model.state_dict(), checkpoint_path)
 
         # Evaluate
         # trainer.eval(epoch, split='test')

@@ -4,10 +4,15 @@ import numpy as np
 import queue
 import open3d as o3d
 import cv2
+import matplotlib.pyplot as plt
 
 sys.path.append('/data/carla/PythonAPI/carla/dist/carla-0.9.13-py3.8-linux-x86_64.egg')
 import carla
+attributes = dir(carla)
+for a in attributes:
+    print(a)
 
+#from global_route_planner import GlobalRoutePlanner
 
 import carla2dboundingbox.carla_vehicle_annotator as cva
 from carla2dboundingbox.carla_vehicle_annotator import get_camera_intrinsic
@@ -25,7 +30,7 @@ num_vehicles = 200
 dump_root_dir = '/data/self-supervised-graph/'
 # dump_root_dir = '/SSD/dumps/'
 
-
+#from carla.agents.navigation.global_route_planner import GlobalRoutePlanner
 
 ########################################################
 
@@ -38,8 +43,6 @@ def retrieve_data(sensor_queue, frame, timeout=10):
         if data.frame == frame:
             return data
 
-
-
 # Create client object
 client = carla.Client("0.0.0.0", 2000)
 client.set_timeout(10.0)  # seconds
@@ -47,6 +50,28 @@ client.set_timeout(10.0)  # seconds
 # Create world object
 # world = client.get_world()
 world = client.load_world('Town03')
+
+map = world.get_map()
+waypoint_tuple_list = map.get_topology()
+for waypoint_tuple in waypoint_tuple_list:
+    next_waypoints1 = waypoint_tuple[0].next_until_lane_end(5.0)
+    next_waypoints2 = waypoint_tuple[1].next_until_lane_end(5.0)
+    # start = waypoint_tuple[0].transform.location
+    # end = waypoint_tuple[1].transform.location
+
+    for i in range(len(next_waypoints1)-1):
+        start = next_waypoints1[i].transform.location
+        end = next_waypoints1[i+1].transform.location
+        plt.arrow(start.x, start.y, end.x-start.x, end.y-start.y, head_width=0.5, head_length=0.5, fc='k', ec='k')
+    for i in range(len(next_waypoints2)-1):
+        start = next_waypoints2[i].transform.location
+        end = next_waypoints2[i+1].transform.location
+        plt.arrow(start.x, start.y, end.x-start.x, end.y-start.y, head_width=0.5, head_length=0.5, fc='r', ec='r')
+
+plt.show()
+
+
+
 
 # Make fixed time step
 settings = world.get_settings()

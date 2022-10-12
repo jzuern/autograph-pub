@@ -15,7 +15,7 @@ paths:
 preprocessing:
     gt_pointwise: True
     sampling_method: halton
-    num_node_samples: 200
+    num_node_samples: 500
     edge_proposal_method: random  # triangular or random
     N_interp: 5
     k_waypoints: 1
