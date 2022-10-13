@@ -392,14 +392,13 @@ def main():
     params.main.overwrite(opt)
     params.preprocessing.overwrite(opt)
     params.model.overwrite(opt)
-    
 
     print("Batch size summed over all GPUs: ", params.model.batch_size)
     
     if not params.main.disable_wandb:
         wandb.login()
         wandb.init(
-            entity='wildbois',
+            entity='jannik-zuern',
             project=params.main.project,
             notes='v1',
             settings=wandb.Settings(start_method="fork"),

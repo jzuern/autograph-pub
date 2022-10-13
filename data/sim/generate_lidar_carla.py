@@ -5,14 +5,14 @@ import queue
 import open3d as o3d
 import cv2
 import matplotlib.pyplot as plt
+import networkx as nx
 
 sys.path.append('/data/carla/PythonAPI/carla/dist/carla-0.9.13-py3.8-linux-x86_64.egg')
-import carla
-attributes = dir(carla)
-for a in attributes:
-    print(a)
+sys.path.append('/data/carla/PythonAPI/carla/')
 
-#from global_route_planner import GlobalRoutePlanner
+import carla
+from agents.navigation.global_route_planner import GlobalRoutePlanner
+
 
 import carla2dboundingbox.carla_vehicle_annotator as cva
 from carla2dboundingbox.carla_vehicle_annotator import get_camera_intrinsic
@@ -29,8 +29,6 @@ use_static_sensors = True
 num_vehicles = 200
 dump_root_dir = '/data/self-supervised-graph/'
 # dump_root_dir = '/SSD/dumps/'
-
-#from carla.agents.navigation.global_route_planner import GlobalRoutePlanner
 
 ########################################################
 
@@ -53,21 +51,40 @@ world = client.load_world('Town03')
 
 map = world.get_map()
 waypoint_tuple_list = map.get_topology()
+
+start_waypoints = [x[0] for x in waypoint_tuple_list]
+end_waypoints = [x[1] for x in waypoint_tuple_list]
+
+fig, ax = plt.subplots()
+
+G_gt = nx.DiGraph()
+
 for waypoint_tuple in waypoint_tuple_list:
-    next_waypoints1 = waypoint_tuple[0].next_until_lane_end(5.0)
-    next_waypoints2 = waypoint_tuple[1].next_until_lane_end(5.0)
-    # start = waypoint_tuple[0].transform.location
-    # end = waypoint_tuple[1].transform.location
+    next_steps = waypoint_tuple[0].next_until_lane_end(5.0)
+    random_color = np.random.rand(3,)
 
-    for i in range(len(next_waypoints1)-1):
-        start = next_waypoints1[i].transform.location
-        end = next_waypoints1[i+1].transform.location
-        plt.arrow(start.x, start.y, end.x-start.x, end.y-start.y, head_width=0.5, head_length=0.5, fc='k', ec='k')
-    for i in range(len(next_waypoints2)-1):
-        start = next_waypoints2[i].transform.location
-        end = next_waypoints2[i+1].transform.location
-        plt.arrow(start.x, start.y, end.x-start.x, end.y-start.y, head_width=0.5, head_length=0.5, fc='r', ec='r')
+    G_gt.add_node(waypoint_tuple[0].transform.location, pos=(waypoint_tuple[0].transform.location.x, waypoint_tuple[0].transform.location.y))
+    for next_step in next_steps:
+        G_gt.add_node(next_step.transform.location, pos=(next_step.transform.location.x, next_step.transform.location.y))
 
+    # also plot initial arrow
+    plt.plot([waypoint_tuple[0].transform.location.x, next_steps[0].transform.location.x],
+             [waypoint_tuple[0].transform.location.y, next_steps[0].transform.location.y], color=random_color)
+    G_gt.add_edge(waypoint_tuple[0].transform.location, next_steps[0].transform.location)
+
+    for i in range(len(next_steps)-1):
+        start = next_steps[i].transform.location
+        end = next_steps[i+1].transform.location
+        ax.arrow(start.x, start.y, end.x-start.x, end.y-start.y, head_width=0.5, head_length=0.5,
+                 fc=random_color, ec=random_color)
+        G_gt.add_edge(start, end)
+
+plt.show()
+
+# also show G_gt
+locations = nx.get_node_attributes(G_gt, 'pos')
+pos = np.array([v for k, v in locations.items()])
+nx.draw(G_gt, pos=pos, node_size=10)
 plt.show()
 
 
