@@ -10,7 +10,7 @@ from tqdm import tqdm
 import torch_geometric.data
 
 # SELECT MODEL TO BE USED
-from model.lane_mp.data import TrajectoryDataset
+from model.lane_mp.data import TrajectoryDatasetCarla
 from model.lane_mp.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
 
 # For torch_geometric DataParallel training
@@ -62,8 +62,8 @@ def main():
     train_path = os.path.join(params.paths.dataroot)
     test_path = os.path.join(params.paths.dataroot)
 
-    dataset_train = TrajectoryDataset(path=train_path, params=params)
-    dataset_test = TrajectoryDataset(path=test_path, params=params)
+    dataset_train = TrajectoryDatasetCarla(path=train_path, params=params)
+    dataset_test = TrajectoryDatasetCarla(path=test_path, params=params)
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader

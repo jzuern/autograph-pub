@@ -16,10 +16,10 @@ from model.lane_mp.utils import is_in_mask_loop, get_gt_sdf_with_direction, \
     get_random_edges, get_crop_mask_img, get_node_endpoint_gt
 
 
-class TrajectoryDataset(torch_geometric.data.Dataset):
+class TrajectoryDatasetCarla(torch_geometric.data.Dataset):
 
     def __init__(self, path, params, num_node_samples: int = 500, gt_pointwise: bool = True, N_interp: int = 10):
-        super(TrajectoryDataset, self).__init__(path)
+        super(TrajectoryDatasetCarla, self).__init__(path)
         self.params = params
         self.path = path
 

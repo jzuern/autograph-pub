@@ -28,7 +28,6 @@ from spawner import spawn
 use_static_sensors = True
 num_vehicles = 200
 dump_root_dir = '/data/self-supervised-graph/'
-# dump_root_dir = '/SSD/dumps/'
 
 ########################################################
 
