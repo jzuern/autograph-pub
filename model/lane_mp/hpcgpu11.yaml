@@ -1,0 +1,45 @@
+main:
+    project: 'lane_mp'
+    dataset: 'paloalto'
+    version: 'none'
+    disable_wandb: True
+paths:
+    home: /home/zuern/
+    package: /home/zuern/self-supervised-graph/
+    dataroot: /home/zuern/datasets/self-supervised-graph/
+    dataroot_ssd: /data/self-supervised-graph/
+    checkpoints: /home/zuern/self-supervised-graph/checkpoints/
+    rel_dataset: all/010922-large/
+    split: train
+    config_name: n500-halton-endpoint-010922-large
+preprocessing:
+    gt_pointwise: True
+    sampling_method: halton
+    num_node_samples: 3000
+    edge_proposal_method: random  # triangular or random
+    N_interp: 5
+    k_waypoints: 1
+    visualize: False
+    ego_regressor_num_channels: 4
+model:
+    dataparallel: True
+    device: cuda
+    batch_size: 1
+    lr: 1e-3
+    beta_lo: 0.9
+    beta_hi: 0.999
+    num_epochs: 10000
+    gnn_depth: 6      # default: 6
+    # lane_mpnn
+    map_feat_dim: 64
+    node_dim: 16
+    edge_dim: 32
+    msg_dim: 32
+    edge_geo_dim: 16
+    # end_of_archs
+    in_channels: 4  # number of channels of image
+    loader_workers: 0
+    weight_decay: 1e-4 #0.0001
+    checkpoint: lanemp/lanemp_magic-leaf-210_085.pth
+driving:
+    output_dir: /data/lane-segmentation/drive_freely_output/

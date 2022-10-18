@@ -60,7 +60,7 @@ class Trainer():
     def do_logging(self, data, step, plot_text, split=None):
         
         print("\nLogging synchronously...")
-        figure_log, axarr_log = plt.subplots(1, 4, figsize=(20, 5))
+        figure_log, axarr_log = plt.subplots(1, 4, figsize=(40, 10))
         plt.tight_layout()
 
         with torch.no_grad():
@@ -139,9 +139,9 @@ class Trainer():
         axarr_log[1].axis('off')
         axarr_log[2].axis('off')
         axarr_log[3].axis('off')
-        # for i in range(len(axarr_log)):
-        #     axarr_log[i].set_xlim([0, img_rgb.shape[1]])
-        #     axarr_log[i].set_ylim([img_rgb.shape[0], 0])
+        for i in range(len(axarr_log)):
+            axarr_log[i].set_xlim([0, img_rgb.shape[1]])
+            axarr_log[i].set_ylim([img_rgb.shape[0], 0])
 
         # Draw GT graph
         nx.draw_networkx(networkx_graph_gt, ax=axarr_log[0], pos=node_pos, edge_color=color_edge_gt,
