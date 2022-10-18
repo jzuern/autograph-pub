@@ -10,7 +10,6 @@ from metrics.apls import compute_apls_metric, make_graphs
 # from apls import compute_apls_metric, make_graphs
 from metrics.geo_topo import Evaluator as GeoTopoEvaluator
 # from geo_topo import Evaluator as GeoTopoEvaluator
-from chamferdist import ChamferDistance
 
 
 def calc_all_metrics(graph_gt, graph_pred, split, imsize=[256, 256]):
@@ -51,12 +50,10 @@ def calc_all_metrics(graph_gt, graph_pred, split, imsize=[256, 256]):
         topo_precision = 0.0
         topo_recall = 0.0
 
-    chamfer_distance = calc_chamfer_distance(graph_gt, graph_pred)
 
     metrics_dict = {
         '{}/iou'.format(split): iou,
         '{}/apls'.format(split): apls,
-        '{}/chamfer_distance'.format(split): chamfer_distance,
         '{}/geo_precision'.format(split): geo_precision,
         '{}/geo_recall'.format(split): geo_recall,
         '{}/topo_precision'.format(split): topo_precision,
@@ -64,29 +61,6 @@ def calc_all_metrics(graph_gt, graph_pred, split, imsize=[256, 256]):
     }
 
     return metrics_dict
-
-
-def calc_chamfer_distance(graph_gt, graph_pred):
-    """
-    Calculate chamfer distance between two graphs.
-    :param graph_gt: ground truth graph
-    :param graph_pred: predicted graph
-    :return: chamfer distance
-    """
-
-    node_pos_gt = np.array([list(graph_gt.nodes[n]['pos']) for n in graph_gt.nodes()])
-    node_pos_pred = np.array([list(graph_pred.nodes[n]['pos']) for n in graph_pred.nodes()])
-
-    node_pos_gt = torch.from_numpy(node_pos_gt).unsqueeze(0).float().cuda()
-    node_pos_pred = torch.from_numpy(node_pos_pred).unsqueeze(0).float().cuda()
-
-    if node_pos_pred.shape[1] == 0:
-        return 0.0
-
-    chamferDist = ChamferDistance()
-    dist_forward = chamferDist(node_pos_pred, node_pos_gt)
-
-    return dist_forward.detach().cpu().item()
 
 
 def calc_apls(graph_gt, graph_pred):
