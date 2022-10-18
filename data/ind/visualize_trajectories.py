@@ -5,7 +5,7 @@ from PIL import Image
 
 
 
-ind_root_dir = '/home/zuern/Desktop/inD/data/'
+ind_root_dir = '/data/self-supervised-graph/inD/data/'
 
 scaling_factor = {
     1: 10,

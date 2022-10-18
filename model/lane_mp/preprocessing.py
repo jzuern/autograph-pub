@@ -10,7 +10,7 @@ from tqdm import tqdm
 import torch_geometric.data
 
 # SELECT MODEL TO BE USED
-from model.lane_mp.data import TrajectoryDatasetCarla
+from model.lane_mp.data import TrajectoryDatasetCarla, TrajectoryDatasetIND
 from model.lane_mp.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
 
 # For torch_geometric DataParallel training
@@ -45,9 +45,7 @@ def main():
 
     # General parameters (namespace: main)
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
-    parser.add_argument('--dataset', type=str, help="dataset path")
-    parser.add_argument('--version', type=str, help="define the dataset version that is used")
-
+    parser.add_argument('--dataset', type=str, choices=["carla", "ind"], help='Dataset to preprocess', required=True)
     parser.add_argument('--export_path', type=str, default="/data/self-supervised-graph/preprocessed")
 
     opt = parser.parse_args()
@@ -58,12 +56,22 @@ def main():
     params.model.overwrite(opt)
 
 
-    # define own collator that skips bad samples
-    train_path = os.path.join(params.paths.dataroot)
-    test_path = os.path.join(params.paths.dataroot)
+    if opt.dataset == "carla":
+        train_path = os.path.join(params.paths.dataroot)
+        test_path = os.path.join(params.paths.dataroot)
 
-    dataset_train = TrajectoryDatasetCarla(path=train_path, params=params)
-    dataset_test = TrajectoryDatasetCarla(path=test_path, params=params)
+        dataset_train = TrajectoryDatasetCarla(path=train_path, params=params)
+        dataset_test = TrajectoryDatasetCarla(path=test_path, params=params)
+    elif opt.dataset == "ind":
+
+        train_path = os.path.join(params.paths.dataroot, "inD/data")
+        test_path = os.path.join(params.paths.dataroot, "inD/data")
+
+        dataset_train = TrajectoryDatasetIND(path=train_path, params=params)
+        dataset_test = TrajectoryDatasetIND(path=test_path, params=params)
+    else:
+        raise NotImplementedError
+
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader

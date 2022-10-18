@@ -385,11 +385,15 @@ def get_node_endpoint_gt(rgb, waypoints, relation_labels, edges, node_feats):
 
 
 
-def get_gt_sdf_with_direction(gt_lines_shapely):
+def get_gt_sdf_with_direction(gt_lines_shapely, dims = (256, 256)):
 
     # Get dense Pred angles using griddata
-    angles_gt = np.zeros([256, 256])
-    angles_gt_mask = np.zeros([256, 256])
+    angles_gt = np.zeros(dims[:2])
+    angles_gt_mask = np.zeros(dims)
+
+    # for gt_line in gt_lines_shapely:
+    #     plt.plot([gt_line.coords[0][0], gt_line.coords[1][0]], [gt_line.coords[0][1], gt_line.coords[1][1]])
+    # plt.show()
 
     for gt_line in gt_lines_shapely:
         gt_x1 = int(gt_line.coords[0][0])
@@ -401,11 +405,12 @@ def get_gt_sdf_with_direction(gt_lines_shapely):
         cv2.line(angles_gt, (gt_x1, gt_y1), (gt_x2, gt_y2), color=dir_rad, thickness=2)
         cv2.line(angles_gt_mask, (gt_x1, gt_y1), (gt_x2, gt_y2), color=1, thickness=2)
 
+
     # Get dense GT angles using griddata
     angles_gt_dense = get_nn_direction(angles_gt, angles_gt_mask)
 
     # Generate GT sdf mask
-    gt_mask = np.zeros([256, 256])
+    gt_mask = np.zeros(dims[:2])
     for gt_line in gt_lines_shapely:
         cv2.line(gt_mask, (int(gt_line.coords[0][0]), int(gt_line.coords[0][1])), (int(gt_line.coords[1][0]), int(gt_line.coords[1][1])), color=1, thickness=4)
     gt_sdf = make_sdf(gt_mask)
@@ -593,8 +598,7 @@ def get_pointwise_edge_gt(s_x, s_y, e_x, e_y, N_interp, gt_multiline_shapely, an
         interp_point = Point([(x, y)])
         interp_dist.append(interp_point.distance(gt_multiline_shapely))
 
-
-        angle_gt = angles_gt_dense[x, y]
+        angle_gt = angles_gt_dense[y, x]
         angle_relative = np.abs(angle_pred - angle_gt)
 
         # force angle to be between 0 and pi

@@ -123,7 +123,7 @@ class Trainer():
         color_node_endpoint_pred = np.hstack([cmap(node_scores_endpoint_pred)[:, 0:3], node_scores_endpoint_pred[:, None]])
 
         #ego_regression_target = get_ego_regression_target(self.params, data, split)
-        img_rgb = data.rgb.cpu().numpy()[0:256, :, :]
+        img_rgb = data.rgb.cpu().numpy()[0:780, :, :]
         node_pos = data.x.cpu().numpy()
         node_pos[:, [1, 0]] = node_pos[:, [0, 1]]
 
@@ -139,9 +139,9 @@ class Trainer():
         axarr_log[1].axis('off')
         axarr_log[2].axis('off')
         axarr_log[3].axis('off')
-        for i in range(len(axarr_log)):
-            axarr_log[i].set_xlim([0, img_rgb.shape[1]])
-            axarr_log[i].set_ylim([img_rgb.shape[0], 0])
+        # for i in range(len(axarr_log)):
+        #     axarr_log[i].set_xlim([0, img_rgb.shape[1]])
+        #     axarr_log[i].set_ylim([img_rgb.shape[0], 0])
 
         # Draw GT graph
         nx.draw_networkx(networkx_graph_gt, ax=axarr_log[0], pos=node_pos, edge_color=color_edge_gt,
