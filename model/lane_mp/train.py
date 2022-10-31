@@ -157,13 +157,14 @@ class Trainer():
             axarr_log[2].plot(p[0], p[1], '.', color=c, markersize=5)
 
         for e in range(len(gt_graph[0:len_gt_graph])):
-            axarr_log[3].arrow(gt_graph[e, 0], gt_graph[e, 1], (gt_graph[e, 2]-gt_graph[e, 0]), (gt_graph[e, 3] - gt_graph[e, 1]), head_width=4, head_length=4, fc='w', ec='w')
+            axarr_log[3].arrow(gt_graph[e, 0], gt_graph[e, 1], (gt_graph[e, 2]-gt_graph[e, 0]), (gt_graph[e, 3] - gt_graph[e, 1]),
+                               head_width=4, head_length=4, fc='w', ec='w')
 
         # drawing updated values
         figure_log.canvas.draw()
         figure_log.canvas.flush_events()
 
-        imname = "/home/zuern/Desktop/figprint/{:05d}-ss-graph.png".format(step)
+        imname = "/home/zuern/Desktop/self-supervised-graph-viz/{:05d}.png".format(step)
         try:
             plt.savefig(imname)
             print("Saved logging image to {}".format(imname))
@@ -226,13 +227,12 @@ class Trainer():
             self.optimizer.step()
 
             if not self.params.main.disable_wandb:
-                wandb.log({"train/loss_total": loss.item()})
-                wandb.log({"train/edge_loss": loss_dict['edge_loss'].item()})
-                wandb.log({"train/node_loss": loss_dict['node_loss'].item()})
-                wandb.log({"train/endpoint_loss": loss_dict['endpoint_loss'].item()})
+                wandb.log({"train/loss_total": loss.item(),
+                           "train/edge_loss": loss_dict['edge_loss'].item(),
+                           "train/node_loss": loss_dict['node_loss'].item()})
 
             # # Visualization
-            if self.total_step % 1000 == 0:
+            if self.total_step % 500 == 0:
                 if self.params.model.dataparallel:
                     data = data_orig
                 # th = threading.Thread(target=self.do_logging, args=(data, self.total_step, 'train/Images', 'train'), )

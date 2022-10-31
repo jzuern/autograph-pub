@@ -681,7 +681,7 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         if self.params.preprocessing.edge_proposal_method == 'triangular':
             edge_proposal_pairs = get_delaunay_triangulation(point_coords)
         elif self.params.preprocessing.edge_proposal_method == 'random':
-            edge_proposal_pairs = get_random_edges(point_coords)
+            edge_proposal_pairs = get_random_edges(point_coords, min_point_dist=10, max_point_dist=40)
 
         edge_proposal_pairs = np.unique(edge_proposal_pairs, axis=0)
         edge_proposal_pairs = edge_proposal_pairs.tolist()

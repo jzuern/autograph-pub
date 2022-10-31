@@ -83,7 +83,6 @@ class ParamLib:
         vars(self.paths).update(config_file['paths'])
         vars(self.preprocessing).update(config_file['preprocessing'])
         vars(self.model).update(config_file['model'])
-        vars(self.driving).update(config_file['driving'])
 
         # Set some secondary paths that are important
         if self.main.dataset == "paloalto":

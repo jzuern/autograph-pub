@@ -24,7 +24,7 @@ preprocessing:
 model:
     dataparallel: True
     device: cuda
-    batch_size: 1
+    batch_size: 6
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
@@ -37,9 +37,7 @@ model:
     msg_dim: 32
     edge_geo_dim: 16
     # end_of_archs
-    in_channels: 4  # number of channels of image
+    in_channels: 3  # number of channels of image
     loader_workers: 0
     weight_decay: 1e-4 #0.0001
     checkpoint: lanemp/lanemp_magic-leaf-210_085.pth
-driving:
-    output_dir: /data/lane-segmentation/drive_freely_output/
