@@ -444,8 +444,8 @@ def main():
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.3)
 
     # define own collator that skips bad samples
-    train_path = os.path.join(params.paths.dataroot, "preprocessed")
-    test_path = os.path.join(params.paths.dataroot, "preprocessed")
+    train_path = os.path.join(params.paths.dataroot, "preprocessed/noisy")
+    test_path = os.path.join(params.paths.dataroot, "preprocessed/noisy")
 
     dataset_train = PreprocessedTrajectoryDataset(path=train_path)
     dataset_test = PreprocessedTrajectoryDataset(path=test_path)

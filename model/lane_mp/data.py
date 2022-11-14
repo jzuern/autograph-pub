@@ -11,6 +11,10 @@ from shapely.geometry import LineString, MultiLineString, Point
 import matplotlib.pyplot as plt
 import networkx as nx
 import pandas as pd
+from svgpathtools import svg2paths
+import scipy
+
+
 
 from model.lane_mp.utils import is_in_mask_loop, get_gt_sdf_with_direction, \
     get_pred_distance_sdf, get_pointwise_edge_gt, get_delaunay_triangulation, halton, \
@@ -40,7 +44,7 @@ class TrajectoryDatasetCarla(torch_geometric.data.Dataset):
         pos_files = glob(os.path.join(path, "vehicles_pos", "*.txt"))
 
         # generate trajectories from vehicle_pos_files
-        self.vehicles_traj_dict = {}
+        self.traj_dict = {}
 
         for pos_file in pos_files:
             with open(pos_file, "r") as f:
@@ -52,28 +56,19 @@ class TrajectoryDatasetCarla(torch_geometric.data.Dataset):
                     x = float(x) * 30 + 512
                     y = float(y) * 30 + 512
 
-                    if vehicle_id not in self.vehicles_traj_dict:
-                        self.vehicles_traj_dict[vehicle_id] = [[time_step, float(x), float(y), float(z)]]
+                    if vehicle_id not in self.traj_dict:
+                        self.traj_dict[vehicle_id] = [[time_step, float(x), float(y), float(z)]]
                     else:
-                        self.vehicles_traj_dict[vehicle_id].append([time_step, float(x), float(y), float(z)])
+                        self.traj_dict[vehicle_id].append([time_step, float(x), float(y), float(z)])
 
         # sort vehicle dict by time_step
-        for vehicle_id in self.vehicles_traj_dict:
-            self.vehicles_traj_dict[vehicle_id] = sorted(self.vehicles_traj_dict[vehicle_id], key=lambda x: x[0])
+        for vehicle_id in self.traj_dict:
+            self.traj_dict[vehicle_id] = sorted(self.traj_dict[vehicle_id], key=lambda x: x[0])
 
 
-        # # plot image and trajectories
-        # fig, ax = plt.subplots()
-        # ax.set_aspect('equal')
-        # plt.imshow(np.array(Image.open(self.bev_rgb_files[0])))
-        # for vehicle_id in self.vehicles_traj_dict:
-        #     vehicle_pos = np.array(self.vehicles_traj_dict[vehicle_id])
-        #     ax.plot(vehicle_pos[:, 1], vehicle_pos[:, 2], label=vehicle_id)
-        # ax.legend()
-        # plt.show()
 
     def __len__(self):
-        return len(self.vehicles_traj_dict)
+        return len(self.traj_dict)
 
 
     def get_crop_mask_img(self, edge_angle, mid_x, mid_y, rgb_context):
@@ -111,7 +106,6 @@ class TrajectoryDatasetCarla(torch_geometric.data.Dataset):
         # directly warp the rotated rectangle to get the rectangle
         crop = cv2.warpPerspective(rgb_context, M, (crop_size, crop_size))
 
-
         return crop
 
 
@@ -120,12 +114,23 @@ class TrajectoryDatasetCarla(torch_geometric.data.Dataset):
         start_time = time.time()
 
         # Source and parse input files
-        trajectory = list(self.vehicles_traj_dict)[index]
-        trajectory = self.vehicles_traj_dict[trajectory]
+        # generating more than one trajectory per sample
 
-        ts = np.array([t[0] for t in trajectory])
-        xs = np.array([t[1] for t in trajectory])
-        ys = np.array([t[2] for t in trajectory])
+        #indices = [index]  # single trajectory
+        indices = []
+        for i in range(10):
+            indices.append(np.random.randint(0, len(self.traj_dict)))
+        trajectories = []
+        for index in indices:
+            t = list(self.traj_dict)[index]
+            trajectories.append(self.traj_dict[t])
+        trajectories = np.stack(trajectories)
+        print(trajectories.shape)
+
+
+        ts = np.array([t[0] for t in trajectories])
+        xs = np.array([t[1] for t in trajectories])
+        ys = np.array([t[2] for t in trajectories])
 
         if ts[0] > len(self.bev_rgb_files):
             return "empty-trajectory"
@@ -453,13 +458,15 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         super(TrajectoryDatasetIND, self).__init__(path)
         self.params = params
         self.path = path
-        self.scenario = 4
+        self.scenario = 20
 
         self.scaling_factor = {
             1: 10,
             4: 6.55,
+            20: 10.3,
         }
 
+        print("Loading data from {}".format(path))
 
         self.preprocessed_fname = os.path.join(self.path, "preprocessed/{:05d}.pth")
 
@@ -476,21 +483,62 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
 
         # generate trajectories from vehicle_pos_files
-        self.vehicles_traj_dict = self.get_tracks_dict()
+        self.traj_dict = self.get_tracks_dict()
 
         # sort vehicle dict by time_step
-        for vehicle_id in self.vehicles_traj_dict:
-            self.vehicles_traj_dict[vehicle_id] = sorted(self.vehicles_traj_dict[vehicle_id], key=lambda x: x[0])
+        to_delete = []
+        for vehicle_id in self.traj_dict:
+            self.traj_dict[vehicle_id] = sorted(self.traj_dict[vehicle_id], key=lambda x: x[0])
+            self.traj_dict[vehicle_id] = np.array(self.traj_dict[vehicle_id])
 
-        # # # plot image and trajectories
-        # fig, ax = plt.subplots()
-        # ax.set_aspect('equal')
-        # plt.imshow(self.bev_rgb)
-        # for vehicle_id in self.vehicles_traj_dict:
-        #     vehicle_pos = np.array(self.vehicles_traj_dict[vehicle_id])
-        #     ax.plot(vehicle_pos[:, 0], vehicle_pos[:, 1], label=vehicle_id)
-        # plt.show()
+            max_step_size = np.max(np.linalg.norm(np.diff(self.traj_dict[vehicle_id][:, 1:3], axis=0), axis=1))
+            if max_step_size > 10:
+                to_delete.append(vehicle_id)
+            else:
+                self.traj_dict[vehicle_id] = self.traj_dict[vehicle_id][::20]
 
+        self.traj_dict = {k: v for k, v in self.traj_dict.items() if k not in to_delete}
+
+
+
+
+        # # get svg data
+        # paths, attributes = svg2paths('/data/self-supervised-graph/inD/tracklet-annotation.svg')
+        #
+        # # print(paths, attributes)
+        # vehicle_id = 0
+        # self.traj_dict = dict()
+        # for k, v in enumerate(attributes):
+        #     line = v['d']
+        #     coordinates_x = [float(x.split(",")[0]) for x in line.split(" ")[1:]]
+        #     coordinates_y = [float(x.split(",")[1]) for x in line.split(" ")[1:]]
+        #     coordinates_x = np.array(coordinates_x) / 309 * self.bev_rgb.shape[1]
+        #     coordinates_y = np.array(coordinates_y) / 206 * self.bev_rgb.shape[0]
+        #     coordinates_x = coordinates_x * 2
+        #     coordinates_y = coordinates_y * 2
+        #
+        #     self.traj_dict[vehicle_id] = np.array(list([float(x), float(y)] for x, y in zip(coordinates_x, coordinates_y)))
+        #     vehicle_id += 1
+
+        self.traj_dict = dict()
+        self.traj_dict[0] = np.array([[121, 384], [984, 218]])
+        self.traj_dict[1] = np.array([[419, 136], [558, 564]])
+
+
+
+        # plot image and trajectories
+        fig, ax = plt.subplots()
+        ax.set_aspect('equal')
+        plt.imshow(self.bev_rgb)
+        for vehicle_id in self.traj_dict:
+            vehicle_pos = self.traj_dict[vehicle_id]
+            random_color = np.random.rand(3, )
+            for i in range(0, len(vehicle_pos) - 1):
+                ax.arrow(vehicle_pos[i, 0], vehicle_pos[i, 1],
+                         vehicle_pos[i + 1, 0] - vehicle_pos[i, 0],
+                         vehicle_pos[i + 1, 1] - vehicle_pos[i, 1],
+                         head_width=5, head_length=5, fc=random_color, ec=random_color)
+        plt.show()
 
     def get_tracks_dict(self):
 
@@ -505,7 +553,11 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         tracks_id_unique = np.unique(tracks_id)
         tracks_dict = {}
 
-        for t in tracks_id_unique:
+        track_classes = meta['class'].values
+
+        for t, cls in zip(tracks_id_unique, track_classes) :
+            if cls != 'car':
+                continue
             track = tracks_xy[tracks_id == t]
             tracks_dict[t] = track
 
@@ -513,7 +565,8 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
 
     def __len__(self):
-        return len(self.vehicles_traj_dict)
+        #return len(self.traj_dict)
+        return len(self.traj_dict) * 10
 
 
     def get_crop_mask_img(self, edge_angle, mid_x, mid_y, rgb_context):
@@ -559,17 +612,23 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
         start_time = time.time()
 
-        # Source and parse input files
-        trajectory = list(self.vehicles_traj_dict)[index]
-        trajectory = self.vehicles_traj_dict[trajectory]
-        trajectory = np.array(trajectory)
+        indices = [index % len(self.traj_dict)]  # single trajectory
+        # indices = []
+        # for i in range(10):
+        #     indices.append(np.random.randint(0, len(self.traj_dict)))
+        trajectories = []
+        for index in indices:
+            t = list(self.traj_dict)[index]
+            trajectories.append(self.traj_dict[t])
+        trajectories = np.concatenate(trajectories, axis=0)
 
-        # interpolate trajectory?
+        xs_, ys_ = trajectories[:, 0], trajectories[:, 1]
+        interp = scipy.interpolate.interp1d(xs_, ys_)
+        xs = np.linspace(xs_[0], xs_[-1], 100)
+        ys = interp(xs)
 
-        xs, ys = trajectory[:, 0], trajectory[:, 1]
 
         # resize images
-        resize_factor = 1024 / self.bev_rgb.shape[1]
         resize_factor = 1
         rgb = cv2.resize(self.bev_rgb, fx=resize_factor, fy=resize_factor, dsize=None, interpolation=cv2.INTER_CUBIC)
         rgb_context = rgb.copy()
@@ -577,9 +636,12 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         drivable = rgb[:, :, 0] > 0
         non_drivable_mask = drivable < 0.5
 
-
         xs = xs * resize_factor
         ys = ys * resize_factor
+
+        # add noise
+        xs = xs + np.random.normal(0, 5, len(xs))
+        ys = ys + np.random.normal(0, 5, len(ys))
 
         x_filter = np.logical_and(xs > 0, xs < rgb.shape[1])
         y_filter = np.logical_and(ys > 0, ys < rgb.shape[0])
@@ -846,8 +908,6 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
         gt_graph = torch.tensor(gt_lines)  # [num_gt_graph_edges, 4]
         edges = torch.tensor(edges)
-
-
 
         data = torch_geometric.data.Data(x=node_feats,
                                          edge_index=edges.t().contiguous(),

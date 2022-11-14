@@ -15,9 +15,9 @@ paths:
 preprocessing:
     gt_pointwise: True
     sampling_method: halton
-    num_node_samples: 3000
+    num_node_samples: 2000
     edge_proposal_method: random  # triangular or random
-    N_interp: 5
+    N_interp: 3
     k_waypoints: 1
     visualize: False
     ego_regressor_num_channels: 4
@@ -29,12 +29,12 @@ model:
     beta_lo: 0.9
     beta_hi: 0.999
     num_epochs: 10000
-    gnn_depth: 6      # default: 6
+    gnn_depth: 6      # default: 3
     # lane_mpnn
-    map_feat_dim: 64
+    map_feat_dim: 32
     node_dim: 16
-    edge_dim: 32
-    msg_dim: 32
+    edge_dim: 16
+    msg_dim: 16
     edge_geo_dim: 16
     # end_of_archs
     in_channels: 4  # number of channels of image

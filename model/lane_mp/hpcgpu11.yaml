@@ -37,7 +37,7 @@ model:
     msg_dim: 32
     edge_geo_dim: 16
     # end_of_archs
-    in_channels: 3  # number of channels of image
+    in_channels: 4  # number of channels of image
     loader_workers: 4
     weight_decay: 1e-4 #0.0001
     checkpoint: lanemp/lanemp_magic-leaf-210_085.pth

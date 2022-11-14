@@ -46,7 +46,7 @@ def main():
     # General parameters (namespace: main)
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
     parser.add_argument('--dataset', type=str, choices=["carla", "ind"], help='Dataset to preprocess', required=True)
-    parser.add_argument('--export_path', type=str, default="/data/self-supervised-graph/preprocessed")
+    parser.add_argument('--export_path', type=str, default="/data/self-supervised-graph/preprocessed/noisy/")
 
     opt = parser.parse_args()
 
