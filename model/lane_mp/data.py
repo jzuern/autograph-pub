@@ -521,8 +521,9 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         #     vehicle_id += 1
 
         self.traj_dict = dict()
-        self.traj_dict[0] = np.array([[121, 384], [984, 218]])
-        self.traj_dict[1] = np.array([[419, 136], [558, 564]])
+        self.traj_dict[0] = np.array([[120, 400], [400, 330], [960, 240]])
+        self.traj_dict[1] = np.array([[400, 150], [460, 380], [545, 568]])
+        self.traj_dict[2] = np.array([[400, 150], [450, 220], [560, 290], [960, 240]])
 
 
 
@@ -624,7 +625,7 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
         xs_, ys_ = trajectories[:, 0], trajectories[:, 1]
         interp = scipy.interpolate.interp1d(xs_, ys_)
-        xs = np.linspace(xs_[0], xs_[-1], 100)
+        xs = np.linspace(xs_[0], xs_[-1], 5)
         ys = interp(xs)
 
 
@@ -640,8 +641,8 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         ys = ys * resize_factor
 
         # add noise
-        xs = xs + np.random.normal(0, 5, len(xs))
-        ys = ys + np.random.normal(0, 5, len(ys))
+        xs = xs + np.random.normal(0, 2, len(xs))
+        ys = ys + np.random.normal(0, 2, len(ys))
 
         x_filter = np.logical_and(xs > 0, xs < rgb.shape[1])
         y_filter = np.logical_and(ys > 0, ys < rgb.shape[0])
@@ -743,7 +744,7 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         if self.params.preprocessing.edge_proposal_method == 'triangular':
             edge_proposal_pairs = get_delaunay_triangulation(point_coords)
         elif self.params.preprocessing.edge_proposal_method == 'random':
-            edge_proposal_pairs = get_random_edges(point_coords, min_point_dist=10, max_point_dist=40)
+            edge_proposal_pairs = get_random_edges(point_coords, min_point_dist=10, max_point_dist=60)
 
         edge_proposal_pairs = np.unique(edge_proposal_pairs, axis=0)
         edge_proposal_pairs = edge_proposal_pairs.tolist()

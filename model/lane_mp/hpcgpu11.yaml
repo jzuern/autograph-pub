@@ -24,8 +24,8 @@ preprocessing:
 model:
     dataparallel: True
     device: cuda
-    batch_size: 8
-    lr: 2e-4
+    batch_size: 4
+    lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
     num_epochs: 10000
