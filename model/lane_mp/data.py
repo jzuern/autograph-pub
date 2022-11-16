@@ -18,7 +18,7 @@ import scipy
 
 from model.lane_mp.utils import is_in_mask_loop, get_gt_sdf_with_direction, \
     get_pred_distance_sdf, get_pointwise_edge_gt, get_delaunay_triangulation, halton, \
-    get_random_edges, get_crop_mask_img, get_node_endpoint_gt
+    get_random_edges, get_crop_mask_img, get_node_endpoint_gt, poisson_disk_sampling
 
 
 class TrajectoryDatasetCarla(torch_geometric.data.Dataset):
@@ -38,7 +38,7 @@ class TrajectoryDatasetCarla(torch_geometric.data.Dataset):
         self.gt_pointwise = gt_pointwise
         self.N_interp = N_interp
 
-        self.point_samping_method = "halton"  # Either uniform or halton
+        self.point_samping_method = "poisson"  # Either uniform or halton or poisson
 
         # get vehicle_pos_files
         pos_files = glob(os.path.join(path, "vehicles_pos", "*.txt"))
@@ -479,7 +479,7 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         self.gt_pointwise = gt_pointwise
         self.N_interp = N_interp
 
-        self.point_samping_method = "halton"  # Either uniform or halton
+        self.point_samping_method = "poisson"  # Either uniform or halton
 
 
         # generate trajectories from vehicle_pos_files
@@ -567,7 +567,7 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
     def __len__(self):
         #return len(self.traj_dict)
-        return len(self.traj_dict) * 10
+        return len(self.traj_dict) * 20
 
 
     def get_crop_mask_img(self, edge_angle, mid_x, mid_y, rgb_context):
@@ -613,10 +613,12 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
         start_time = time.time()
 
-        indices = [index % len(self.traj_dict)]  # single trajectory
-        # indices = []
-        # for i in range(10):
-        #     indices.append(np.random.randint(0, len(self.traj_dict)))
+        #indices = [index % len(self.traj_dict)]  # single trajectory
+        indices = []
+        for i in range(10):
+            indices.append(i % len(self.traj_dict))  # multiple trajectories
+
+
         trajectories = []
         for index in indices:
             t = list(self.traj_dict)[index]
@@ -726,6 +728,19 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
                 # filter all points where non_drivable_mask is True
                 point_coords = halton_points[np.logical_not(non_drivable_mask[halton_points[:, 0], halton_points[:, 1]])]
 
+
+            elif self.params.preprocessing.sampling_method == "poisson":
+
+                # Single-level halton sampling
+
+                poisson_points = poisson_disk_sampling(r_min=20,
+                                                       width=non_drivable_mask.shape[0],
+                                                       height=non_drivable_mask.shape[1])
+                poisson_points = np.array(poisson_points).astype(np.int32)
+
+                # filter all points where non_drivable_mask is True
+                point_coords = poisson_points[np.logical_not(non_drivable_mask[poisson_points[:, 0], poisson_points[:, 1]])]
+
         else:
             print("SDF-wise edge GT not implemented")
 
@@ -744,7 +759,7 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         if self.params.preprocessing.edge_proposal_method == 'triangular':
             edge_proposal_pairs = get_delaunay_triangulation(point_coords)
         elif self.params.preprocessing.edge_proposal_method == 'random':
-            edge_proposal_pairs = get_random_edges(point_coords, min_point_dist=10, max_point_dist=60)
+            edge_proposal_pairs = get_random_edges(point_coords, min_point_dist=13, max_point_dist=15)
 
         edge_proposal_pairs = np.unique(edge_proposal_pairs, axis=0)
         edge_proposal_pairs = edge_proposal_pairs.tolist()
@@ -884,6 +899,13 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         end_node_idx_list = [np.argmin(np.linalg.norm(point_coords_swapped - end_node_pos, axis=1)) for end_node_pos in
                              end_node_pos_list]
 
+        # # plot the graph
+        # fig, ax = plt.subplots(figsize=(10, 10))
+        # ax.imshow(rgb)
+        # p = np.array([point_coords[i] for i in range(len(point_coords))])
+        # nx.draw_networkx(G_proposal_nx, pos=p, ax=ax, with_labels=False, node_size=1)
+        # plt.show()
+
         # Find shortest path
         try:
             shortest_paths = [nx.shortest_path(G_proposal_nx, start_node_idx, end_node_idx, weight="weight") for
@@ -891,9 +913,10 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
             dijkstra_edge_list = list()
             for path in shortest_paths:
                 dijkstra_edge_list += list(zip(path[:-1], path[1:]))
-        except nx.NetworkXNoPath as e:
+        except Exception as e:
             print(e)
-            dijkstra_edge_list = list()
+            return "empty-trajectory"
+            #dijkstra_edge_list = list()
 
         # Now we correct the edge weights according to dijsktra path
         edge_gt_score_dijkstra = np.zeros_like(edge_gt_score)

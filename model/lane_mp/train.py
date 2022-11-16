@@ -438,14 +438,13 @@ def main():
     weights = [w for w in model.parameters() if w.requires_grad]
 
     optimizer = torch.optim.Adam(weights,
-                                    lr=float(params.model.lr),
-                                    weight_decay=float(params.model.weight_decay),
-                                    betas=(params.model.beta_lo, params.model.beta_hi))
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.3)
+                                 lr=float(params.model.lr),
+                                 weight_decay=float(params.model.weight_decay),
+                                 betas=(params.model.beta_lo, params.model.beta_hi))
 
     # define own collator that skips bad samples
-    train_path = os.path.join(params.paths.dataroot, "preprocessed/noisy")
-    test_path = os.path.join(params.paths.dataroot, "preprocessed/noisy")
+    train_path = os.path.join(params.paths.dataroot, "preprocessed", params.paths.config_name)
+    test_path = os.path.join(params.paths.dataroot, "preprocessed", params.paths.config_name)
 
     dataset_train = PreprocessedTrajectoryDataset(path=train_path)
     dataset_test = PreprocessedTrajectoryDataset(path=test_path)

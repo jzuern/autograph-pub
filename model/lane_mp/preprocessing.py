@@ -27,6 +27,8 @@ class Preprocessor():
         self.export_path = export_path
         self.params = params
 
+        print("Exporting to {}".format(export_path))
+
     def preprocess(self, dataloader):
 
         for i, data in tqdm(enumerate(dataloader), total=len(dataloader)):
@@ -46,7 +48,7 @@ def main():
     # General parameters (namespace: main)
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
     parser.add_argument('--dataset', type=str, choices=["carla", "ind"], help='Dataset to preprocess', required=True)
-    parser.add_argument('--export_path', type=str, default="/data/self-supervised-graph/preprocessed/noisy/")
+    parser.add_argument('--export_path', type=str, default="/data/self-supervised-graph/preprocessed/")
 
     opt = parser.parse_args()
 
@@ -55,20 +57,22 @@ def main():
     params.preprocessing.overwrite(opt)
     params.model.overwrite(opt)
 
+    export_path = os.path.join(params.paths.dataroot, "preprocessed", params.paths.config_name)
+
 
     if opt.dataset == "carla":
-        train_path = os.path.join(params.paths.dataroot)
-        test_path = os.path.join(params.paths.dataroot)
+        train_path = os.path.join(params.paths.dataroot, params.paths.config_name)
+        test_path = os.path.join(params.paths.dataroot, params.paths.config_name)
 
         dataset_train = TrajectoryDatasetCarla(path=train_path, params=params)
-        dataset_test = TrajectoryDatasetCarla(path=test_path, params=params)
+        #dataset_test = TrajectoryDatasetCarla(path=test_path, params=params)
     elif opt.dataset == "ind":
 
         train_path = os.path.join(params.paths.dataroot, "inD/data")
         test_path = os.path.join(params.paths.dataroot, "inD/data")
 
         dataset_train = TrajectoryDatasetIND(path=train_path, params=params)
-        dataset_test = TrajectoryDatasetIND(path=test_path, params=params)
+        #dataset_test = TrajectoryDatasetIND(path=test_path, params=params)
     else:
         raise NotImplementedError
 
@@ -82,12 +86,12 @@ def main():
                                       batch_size=params.model.batch_size,
                                       num_workers=params.model.loader_workers,
                                       shuffle=True)
-    dataloader_test = dataloader_obj(dataset_test,
-                                     batch_size=1,
-                                     num_workers=1,
-                                     shuffle=False)
+    # dataloader_test = dataloader_obj(dataset_test,
+    #                                  batch_size=1,
+    #                                  num_workers=1,
+    #                                  shuffle=False)
 
-    preprocessor = Preprocessor(opt.export_path, params)
+    preprocessor = Preprocessor(export_path, params)
     preprocessor.preprocess(dataloader_train)
     # preprocessor.preprocess(dataloader_test)
 

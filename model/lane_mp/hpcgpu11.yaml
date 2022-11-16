@@ -1,5 +1,5 @@
 main:
-    project: 'lane_mp'
+    project: 'self_supervised_graph'
     dataset: 'paloalto'
     version: 'none'
     disable_wandb: False
@@ -7,15 +7,13 @@ paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
     dataroot: /home/zuern/datasets/self-supervised-graph/
-    dataroot_ssd: /data/self-supervised-graph/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    rel_dataset: all/010922-large/
     split: train
-    config_name: n500-halton-endpoint-010922-large
+    config_name: noisy-joint
 preprocessing:
     gt_pointwise: True
-    sampling_method: halton
-    num_node_samples: 3000
+    sampling_method: poisson
+    num_node_samples: 2000
     edge_proposal_method: random  # triangular or random
     N_interp: 5
     k_waypoints: 1
