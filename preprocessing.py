@@ -8,15 +8,16 @@ import time
 import argparse
 from tqdm import tqdm
 import torch_geometric.data
+import matplotlib.pyplot as plt
+import networkx as nx
 
 # SELECT MODEL TO BE USED
-from model.lane_mp.data import TrajectoryDatasetCarla, TrajectoryDatasetIND
-from model.lane_mp.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
+from data_old import TrajectoryDatasetCarla, TrajectoryDatasetIND
+from data_av2 import TrajectoryDatasetAV2
+from lanegnn.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
 
 # For torch_geometric DataParallel training
 from torch_geometric.loader import DataListLoader
-
-import matplotlib.pyplot as plt
 
 
 class Preprocessor():
@@ -37,6 +38,18 @@ class Preprocessor():
                 continue
             else:
                 fname = self.export_path + "/{:05d}.pt".format(i)
+
+                # Plot graph
+                fig, ax = plt.figure(figsize=(10, 10))
+                plt.tight_layout()
+                plt.axis('off')
+                G_tracklet = data["tracklet_graph"]
+                ax.imshow(data["rgb"])
+                nx.draw_networkx(G_tracklet, ax=ax, pos=nx.get_node_attributes(G_tracklet, 'pos'), with_labels=False,
+                                 node_size=2, width=0.5, node_color="b")
+                plt.savefig(fname.replace(".pt", ".png"))
+
+
                 torch.save(data, fname)
 
 
@@ -47,7 +60,7 @@ def main():
 
     # General parameters (namespace: main)
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
-    parser.add_argument('--dataset', type=str, choices=["carla", "ind"], help='Dataset to preprocess', required=True)
+    parser.add_argument('--dataset', type=str, choices=["carla", "ind", "av2"], help='Dataset to preprocess', required=True)
     parser.add_argument('--export_path', type=str, default="/data/self-supervised-graph/preprocessed/")
 
     opt = parser.parse_args()
@@ -66,6 +79,7 @@ def main():
 
         dataset_train = TrajectoryDatasetCarla(path=train_path, params=params)
         #dataset_test = TrajectoryDatasetCarla(path=test_path, params=params)
+
     elif opt.dataset == "ind":
 
         train_path = os.path.join(params.paths.dataroot, "inD/data")
@@ -73,6 +87,11 @@ def main():
 
         dataset_train = TrajectoryDatasetIND(path=train_path, params=params)
         #dataset_test = TrajectoryDatasetIND(path=test_path, params=params)
+
+    elif opt.dataset == "av2":
+
+        train_path = os.path.join(params.paths.dataroot_av2, "train")
+        dataset_train = TrajectoryDatasetAV2(path=train_path, params=params)
     else:
         raise NotImplementedError
 

@@ -18,11 +18,11 @@ from torchmetrics.functional.classification.average_precision import average_pre
 from torchmetrics.functional.classification.precision_recall import recall
 
 # SELECT MODEL TO BE USED
-from model.lane_mp.lane_mpnn import LaneGNN
-from model.lane_mp.data import PreprocessedTrajectoryDataset
-from model.lane_mp.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
-from model.lane_mp.metrics.metrics import calc_all_metrics
-from model.lane_mp.traverse_endpoint import preprocess_predictions, predict_lanegraph
+from model.lanegnn.lane_mpnn import LaneGNN
+from model.lanegnn.data import PreprocessedTrajectoryDataset
+from model.lanegnn.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
+from model.lanegnn.metrics.metrics import calc_all_metrics
+from model.lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
 
 # For torch_geometric DataParallel training
 from torch_geometric.nn import DataParallel

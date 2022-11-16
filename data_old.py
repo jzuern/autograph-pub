@@ -16,8 +16,8 @@ import scipy
 
 
 
-from model.lane_mp.utils import is_in_mask_loop, get_gt_sdf_with_direction, \
-    get_pred_distance_sdf, get_pointwise_edge_gt, get_delaunay_triangulation, halton, \
+from lanegnn.utils import is_in_mask_loop, get_gt_sdf_with_direction, \
+    get_pointwise_edge_gt, get_delaunay_triangulation, halton, \
     get_random_edges, get_crop_mask_img, get_node_endpoint_gt, poisson_disk_sampling
 
 
@@ -615,13 +615,15 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
 
         #indices = [index % len(self.traj_dict)]  # single trajectory
         indices = []
-        for i in range(10):
-            indices.append(i % len(self.traj_dict))  # multiple trajectories
+        for i in range(len(self.traj_dict)):
+            indices.append(i)  # all trajectories
 
 
         trajectories = []
+        traj_indices = []
         for index in indices:
             t = list(self.traj_dict)[index]
+            traj_indices += [t] * (len(self.traj_dict[t]) - 1)
             trajectories.append(self.traj_dict[t])
         trajectories = np.concatenate(trajectories, axis=0)
 

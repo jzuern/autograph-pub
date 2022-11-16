@@ -7,9 +7,10 @@ paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
     dataroot: /data/self-supervised-graph/
+    dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
     split: train
-    config_name: noisy-joint
+    config_name: av2
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
