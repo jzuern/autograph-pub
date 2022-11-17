@@ -7,9 +7,7 @@ from shapely.geometry import LineString
 
 
 from metrics.apls import compute_apls_metric, make_graphs
-# from apls import compute_apls_metric, make_graphs
 from metrics.geo_topo import Evaluator as GeoTopoEvaluator
-# from geo_topo import Evaluator as GeoTopoEvaluator
 
 
 def calc_all_metrics(graph_gt, graph_pred, split, imsize=[256, 256]):

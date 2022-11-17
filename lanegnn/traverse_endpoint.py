@@ -1,34 +1,18 @@
-import networkx as nx
 import numpy as np
-import cv2
 import os
-
-# Please only comment out, do not delete
-# os.environ['CUDA_VISIBLE_DEVICES'] = "4"
 from torch_geometric.data import Batch
-
 import networkx as nx
 import argparse
 from collections import defaultdict
-from tqdm import tqdm
-import time
 import torch
 import torch.utils.data
 import torch_geometric.data
-from PIL import Image
-from shapely.geometry import LineString, MultiLineString, Point
-
+from shapely.geometry import MultiLineString, Point
 
 from lane_mp.lane_mpnn import LaneGNN
 from lane_mp.data import GraphDataset, PreGraphDataset
 from lane_mp.utils import ParamLib, unbatch_edge_index
-
-#  Please only commment out, do not delete
-import matplotlib
-#matplotlib.use('Agg')
-
 from queue import PriorityQueue
-
 import matplotlib.pyplot as plt
 
 

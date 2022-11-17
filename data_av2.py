@@ -33,14 +33,10 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
         self.city_name = "austin"
 
         self.sat_image = np.asarray(Image.open("/data/lane-segmentation/woven-data/original/Austin_extended.png"))
-        self.roi_xxyy = np.array([15000, 20000, 35000, 40000])
-        # self.roi_xxyy = np.array([0, 40000, 0, 40000])
-        self.sat_image = self.sat_image[self.roi_xxyy[2]:self.roi_xxyy[3],
-                                        self.roi_xxyy[0]:self.roi_xxyy[1], :]
 
-        if os.path.exists(os.path.join(self.path, "scenario_files.txt")):
-            print("Loading scenario files from file", os.path.join(self.path, "scenario_files.txt"))
-            with open(os.path.join(self.path, "scenario_files.txt"), "r") as f:
+        if os.path.exists("scenario_files.txt"):
+            print("Loading scenario files from file scenario_files.txt")
+            with open("scenario_files.txt", "r") as f:
                 self.all_scenario_files = f.readlines()
         else:
             self.all_scenario_files = sorted(glob("/data/argoverse2/motion-forecasting/val/00*/*.parquet"))
@@ -50,18 +46,15 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
                 scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
                 if scenario.city_name != self.city_name:
                     self.all_scenario_files.remove(sf)
-            self.all_scenario_files = self.all_scenario_files[:10000]
 
             # serialize all scenario files
-            with open(os.path.join(self.path, "scenario_files.txt"), "w") as f:
+            with open("scenario_files.txt", "w") as f:
                 for sf in self.all_scenario_files:
                     f.write(sf + "\n")
 
         print("Loading tracklets for {} scenarios.".format(len(self.all_scenario_files)))
 
-
         [self.R, self.c, self.t] = get_transform_params(self.city_name)
-
 
         self.num_node_samples = num_node_samples
         self.gt_pointwise = gt_pointwise
@@ -127,6 +120,7 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
             "tracklets": [],
             "timestamps": [],
             "types": [],
+            "city_name": scenario.city_name,
         }
 
         for track in scenario.tracks:
@@ -139,20 +133,21 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
             actor_headings = actor_headings[::5]
             actor_timesteps = actor_timesteps[::5]
 
+
             if track.object_type != "vehicle":
+                continue
+
+            # skip parked vehicles
+            if np.max(actor_trajectory[:, 0]) - np.min(actor_trajectory[:, 0]) < 10:
+                continue
+            if np.max(actor_trajectory[:, 1]) - np.min(actor_trajectory[:, 1]) < 10:
                 continue
 
             # Coordinate transformation
             for i in range(len(actor_trajectory)):
                 bb = np.array([actor_trajectory[i, 0], actor_trajectory[i, 1], 0])
                 tmp = self.t + self.c * self.R @ bb
-                actor_trajectory[i] = tmp[0:2] - self.roi_xxyy[::2]
-
-            if np.min(actor_trajectory[:, 0]) < margin or \
-                    np.min(actor_trajectory[:, 1]) < margin or \
-                    np.max(actor_trajectory[:, 0]) > (self.roi_xxyy[1]-self.roi_xxyy[0]-margin) or \
-                    np.max(actor_trajectory[:, 1]) > (self.roi_xxyy[3]-self.roi_xxyy[2]-margin):
-                continue
+                actor_trajectory[i] = tmp[0:2]
 
             tracklet_min_x = min(tracklet_min_x, np.min(actor_trajectory[:, 0]))
             tracklet_min_y = min(tracklet_min_y, np.min(actor_trajectory[:, 1]))
@@ -169,16 +164,22 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
             scenario_data["tracklets"][i][:, 0] -= tracklet_min_x
             scenario_data["tracklets"][i][:, 1] -= tracklet_min_y
 
-        print(tracklet_min_x, tracklet_min_y, tracklet_max_x, tracklet_max_y)
-
         rgb_crop = self.sat_image[int(tracklet_min_y):int(tracklet_max_y),
                                   int(tracklet_min_x):int(tracklet_max_x), :].copy()
-        scenario_data["rgb"] = rgb_crop
 
-        plt.imshow(rgb_crop)
-        for t in scenario_data["tracklets"]:
-            plt.plot(t[:, 0], t[:, 1], "b")
-        plt.show()
+        print(tracklet_min_x, tracklet_max_x, tracklet_min_y, tracklet_max_y)
+        print(rgb_crop.shape)
+        print(scenario_data["city_name"])
+
+        if np.min(rgb_crop.shape[0:2]) < 100:
+            print("Empty crop!")
+            return None
+
+        if len(scenario_data["types"]) == 0:
+            print("No tracklets in scenario!")
+            return None
+
+        scenario_data["rgb"] = rgb_crop
 
         return scenario_data
 
@@ -186,6 +187,8 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
     def __getitem__(self, index):
 
         scenario_data = self.get_scenario_data(self.all_scenario_files[index])
+        if scenario_data is None:
+            return "empty-trajectory"
 
         # Images
         rgb = scenario_data["rgb"]
@@ -225,7 +228,7 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
             gt_lines_shapely.append(LineString([(x1, y1), (x2, y2)]))
 
         # Normalize drivable surface to create a uniform distribution
-        drivable = np.ones([rgb.shape[0:2]], dtype=np.float32)
+        drivable = np.ones(rgb.shape[0:2], dtype=np.float32)
         non_drivable_mask = drivable < 0.5
 
         if self.params.preprocessing.sampling_method == "halton":
@@ -261,19 +264,19 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
         edges = list()
         edges_locs = list()
         node_gt_list = list()
-        node_feats_list = list()
+        node_pos_list = list()
 
         for i, anchor in enumerate(point_coords):
             node_tensor = torch.tensor([anchor[0], anchor[1]]).reshape(1, -1)
-            node_feats_list.append(node_tensor)
+            node_pos_list.append(node_tensor)
             shapely_point = Point([(anchor[1], anchor[0])])
             node_gt_score = shapely_point.distance(gt_multiline_shapely)
             node_gt_list.append(node_gt_score)
 
-        if len(node_feats_list) == 0:
+        if len(node_pos_list) == 0:
             return "empty-trajectory"
 
-        node_feats = torch.cat(node_feats_list, dim=0)
+        node_pos = torch.cat(node_pos_list, dim=0)
 
         for [i, j] in edge_proposal_pairs:
             anchor = point_coords[i]
@@ -321,9 +324,6 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
             i, j = edge
             s_x, s_y = point_coords[i][1], point_coords[i][0]
             e_x, e_y = point_coords[j][1], point_coords[j][0]
-
-            if self.params.preprocessing.visualize:
-                plt.arrow(s_x, s_y, e_x - s_x, e_y - s_y, color="red", width=0.5, head_width=5)
 
             delta_x, delta_y = e_x - s_x, e_y - s_y
             mid_x, mid_y = s_x + delta_x / 2, s_y + delta_y / 2
@@ -376,29 +376,47 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
             return "empty-trajectory"
 
 
-        # Now we correct the edge weights according to dijsktra path
-        G_proposal_nx = nx.DiGraph()
-        for edge_idx, e in enumerate(edge_idx_list):
-            if not G_proposal_nx.has_node(e[0]):
-                G_proposal_nx.add_node(e[0], pos=point_coords[e[0]])
-            if not G_proposal_nx.has_node(e[1]):
-                G_proposal_nx.add_node(e[1], pos=point_coords[e[1]])
-            G_proposal_nx.add_edge(e[0], e[1], weight=1 - edge_gt_score[edge_idx])
-
-
         edge_gt_score = torch.from_numpy(edge_gt_score).float()
         gt_graph = torch.tensor(gt_lines)  # [num_gt_graph_edges, 4]
         edges = torch.tensor(edges)
 
-        data = torch_geometric.data.Data(x=node_feats,
+        g = nx.DiGraph()
+
+        print(edges.shape)
+        print(edge_gt_score.shape)
+        print(node_pos.shape)
+
+        node_pos_ = node_pos.detach().numpy()
+
+        for edge_idx, edge in enumerate(edges):
+            i, j = edge
+            i, j = i.item(), j.item()
+            if edge_gt_score[edge_idx] > 0.1:
+                g.add_edge(i, j)
+                g.add_node(j, pos=node_pos_[j])
+                g.add_node(i, pos=node_pos_[i])
+
+        print(g.number_of_nodes())
+        print(g.number_of_edges())
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.imshow(rgb)
+        nx.draw_networkx(g,
+                         ax=ax,
+                         pos=nx.get_node_attributes(g, 'pos'),
+                         with_labels=False,
+                         node_size=5)
+        plt.show()
+
+        data = torch_geometric.data.Data(node_pos=node_pos,
                                          edge_index=edges.t().contiguous(),
                                          edge_attr=edge_attr,
                                          edge_img_feats=edge_img_feats,
-                                         node_distance=node_gt_score.t().contiguous(),
-                                         edge_distance=edge_gt_score.t().contiguous(),
+                                         node_scores=node_gt_score.t().contiguous(),
+                                         edge_scores=edge_gt_score.t().contiguous(),
                                          #edge_dijkstra=edge_gt_score_dijkstra.t().contiguous(),
                                          gt_graph=gt_graph,
-                                         num_nodes=node_feats.shape[0],
+                                         num_nodes=node_pos.shape[0],
                                          batch_idx=torch.tensor(len(gt_graph)),
                                          rgb=torch.FloatTensor(rgb / 255.), # [0.0, 1.0]
                                          rgb_context=torch.FloatTensor(rgb_context / 255.), # [0.0, 1.0]
@@ -406,19 +424,21 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
                                          G_tracklet=G_tracklet,
                                          )
 
+
+
         return data
-
-
-
 
 
 class PreprocessedAV2Dataset(torch_geometric.data.Dataset):
 
     def __init__(self, path):
         super(PreprocessedAV2Dataset, self).__init__(path)
+        print("Loading preprocessed dataset from {}".format(path))
 
         self.path = path
         self.pth_files = sorted(glob(path + '/*.pt'))
+
+        print("Found {} files".format(len(self.pth_files)))
 
     def __len__(self):
         return len(self.pth_files)
@@ -426,7 +446,7 @@ class PreprocessedAV2Dataset(torch_geometric.data.Dataset):
     def __getitem__(self, index):
 
         fname = self.pth_files[index]
-        data = torch.load(fname)[0]
+        data = torch.load(fname)
 
         return data
 

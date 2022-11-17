@@ -14,9 +14,7 @@ import networkx as nx
 # SELECT MODEL TO BE USED
 from data_old import TrajectoryDatasetCarla, TrajectoryDatasetIND
 from data_av2 import TrajectoryDatasetAV2
-from lanegnn.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
-
-# For torch_geometric DataParallel training
+from lanegnn.utils import ParamLib
 from torch_geometric.loader import DataListLoader
 
 
@@ -38,19 +36,22 @@ class Preprocessor():
                 continue
             else:
                 fname = self.export_path + "/{:05d}.pt".format(i)
+                print(fname)
+                data = data[0]
+                torch.save(data, fname)
 
                 # Plot graph
-                fig, ax = plt.figure(figsize=(10, 10))
+                fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
                 plt.tight_layout()
                 plt.axis('off')
-                G_tracklet = data["tracklet_graph"]
+                G_tracklet = data["G_tracklet"]
                 ax.imshow(data["rgb"])
-                nx.draw_networkx(G_tracklet, ax=ax, pos=nx.get_node_attributes(G_tracklet, 'pos'), with_labels=False,
-                                 node_size=2, width=0.5, node_color="b")
+                nx.draw_networkx(G_tracklet, ax=ax, pos=nx.get_node_attributes(G_tracklet, "pos"),
+                                 edge_color=np.array([255, 0, 142]) / 255.,
+                                 with_labels=False,
+                                 node_size=0,
+                                 arrowsize=5.0, )
                 plt.savefig(fname.replace(".pt", ".png"))
-
-
-                torch.save(data, fname)
 
 
 def main():
@@ -71,7 +72,6 @@ def main():
     params.model.overwrite(opt)
 
     export_path = os.path.join(params.paths.dataroot, "preprocessed", params.paths.config_name)
-
 
     if opt.dataset == "carla":
         train_path = os.path.join(params.paths.dataroot, params.paths.config_name)
