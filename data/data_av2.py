@@ -37,22 +37,23 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
         if os.path.exists("scenario_files.txt"):
             print("Loading scenario files from file scenario_files.txt")
             with open("scenario_files.txt", "r") as f:
-                self.all_scenario_files = f.readlines()
+                self.scenario_files = f.readlines()
+                self.scenario_files = [x.strip() for x in self.scenario_files]
         else:
-            self.all_scenario_files = sorted(glob("/data/argoverse2/motion-forecasting/val/00*/*.parquet"))
+            all_scenario_files = sorted(glob("/data/argoverse2/motion-forecasting/val/00*/*.parquet"))
+            self.scenario_files = []
 
-            for sf in self.all_scenario_files:
-                scenario_path = Path(sf.strip())
-                scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
-                if scenario.city_name != self.city_name:
-                    self.all_scenario_files.remove(sf)
+            for sf in all_scenario_files:
+                scenario = scenario_serialization.load_argoverse_scenario_parquet(Path(sf))
+                if scenario.city_name == self.city_name:
+                    self.scenario_files.append(sf)
 
             # serialize all scenario files
             with open("scenario_files.txt", "w") as f:
-                for sf in self.all_scenario_files:
+                for sf in self.scenario_files:
                     f.write(sf + "\n")
 
-        print("Loading tracklets for {} scenarios.".format(len(self.all_scenario_files)))
+        print("Loading tracklets for {} scenarios.".format(len(self.scenario_files)))
 
         [self.R, self.c, self.t] = get_transform_params(self.city_name)
 
@@ -63,7 +64,7 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
 
 
     def __len__(self):
-        return len(self.all_scenario_files)
+        return len(self.scenario_files)
 
 
     def get_crop_mask_img(self, edge_angle, mid_x, mid_y, rgb_context):
@@ -104,13 +105,26 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
         return crop
 
 
+    def bayes_update_gridmap(self, map, x, y, p):
+        """
+        Update the probability of a grid cell given the current probability and the new measurement
+        :param map: The grid map
+        :param x: The x coordinate of the cell
+        :param y: The y coordinate of the cell
+        :param p: The probability of the measurement
+        :return: The updated probability of the cell
+        """
+        return map[y, x] * p / (map[y, x] * p + (1 - map[y, x]) * (1 - p))
+
+
+
+
     def get_scenario_data(self, scenario_file):
 
         tracklet_min_x = 1e10
         tracklet_min_y = 1e10
         tracklet_max_x = -1e10
         tracklet_max_y = -1e10
-        margin = 500
 
         scenario_path = Path(scenario_file.strip())
         scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
@@ -186,7 +200,7 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
 
     def __getitem__(self, index):
 
-        scenario_data = self.get_scenario_data(self.all_scenario_files[index])
+        scenario_data = self.get_scenario_data(self.scenario_files[index])
         if scenario_data is None:
             return "empty-trajectory"
 
@@ -240,7 +254,7 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
                 np.logical_not(non_drivable_mask[halton_points[:, 0], halton_points[:, 1]])]
 
         elif self.params.preprocessing.sampling_method == "poisson":
-            poisson_points = poisson_disk_sampling(r_min=20,
+            poisson_points = poisson_disk_sampling(r_min=25,
                                                    width=non_drivable_mask.shape[0],
                                                    height=non_drivable_mask.shape[1])
             poisson_points = np.array(poisson_points).astype(np.int32)
@@ -257,8 +271,7 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
         elif self.params.preprocessing.edge_proposal_method == 'random':
             edge_proposal_pairs = get_random_edges(point_coords)
 
-        edge_proposal_pairs = np.unique(edge_proposal_pairs, axis=0)
-        edge_proposal_pairs = edge_proposal_pairs.tolist()
+        edge_proposal_pairs = np.unique(edge_proposal_pairs, axis=0).tolist()
 
         # Triangulation based edge proposal generation
         edges = list()
@@ -382,27 +395,25 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
 
         g = nx.DiGraph()
 
-        print(edges.shape)
-        print(edge_gt_score.shape)
-        print(node_pos.shape)
-
         node_pos_ = node_pos.detach().numpy()
+        node_pos_[:, [1, 0]] = node_pos_[:, [0, 1]]
 
         for edge_idx, edge in enumerate(edges):
             i, j = edge
             i, j = i.item(), j.item()
-            if edge_gt_score[edge_idx] > 0.1:
-                g.add_edge(i, j)
-                g.add_node(j, pos=node_pos_[j])
-                g.add_node(i, pos=node_pos_[i])
+            #if edge_gt_score[edge_idx] > 0.1:
+            g.add_edge(i, j)
+            g.add_node(j, pos=node_pos_[j])
+            g.add_node(i, pos=node_pos_[i])
 
-        print(g.number_of_nodes())
-        print(g.number_of_edges())
+        cmap = plt.get_cmap('viridis')
+        cedge = np.hstack([cmap(edge_gt_score)[:, 0:3], edge_gt_score[:, None]])
 
-        fig, ax = plt.subplots(figsize=(10, 10))
+        fig, ax = plt.subplots(figsize=(6, 6))
         ax.imshow(rgb)
         nx.draw_networkx(g,
                          ax=ax,
+                         edge_color=cedge,
                          pos=nx.get_node_attributes(g, 'pos'),
                          with_labels=False,
                          node_size=5)
@@ -414,7 +425,6 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
                                          edge_img_feats=edge_img_feats,
                                          node_scores=node_gt_score.t().contiguous(),
                                          edge_scores=edge_gt_score.t().contiguous(),
-                                         #edge_dijkstra=edge_gt_score_dijkstra.t().contiguous(),
                                          gt_graph=gt_graph,
                                          num_nodes=node_pos.shape[0],
                                          batch_idx=torch.tensor(len(gt_graph)),
@@ -423,8 +433,6 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
                                          context_regr_smooth=torch.FloatTensor(context_regr_smooth), # [0.0, 1.0]
                                          G_tracklet=G_tracklet,
                                          )
-
-
 
         return data
 

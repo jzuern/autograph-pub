@@ -40,18 +40,18 @@ class Preprocessor():
                 data = data[0]
                 torch.save(data, fname)
 
-                # Plot graph
-                fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
-                plt.tight_layout()
-                plt.axis('off')
-                G_tracklet = data["G_tracklet"]
-                ax.imshow(data["rgb"])
-                nx.draw_networkx(G_tracklet, ax=ax, pos=nx.get_node_attributes(G_tracklet, "pos"),
-                                 edge_color=np.array([255, 0, 142]) / 255.,
-                                 with_labels=False,
-                                 node_size=0,
-                                 arrowsize=5.0, )
-                plt.savefig(fname.replace(".pt", ".png"))
+                # # Plot graph
+                # fig, ax = plt.subplots(figsize=(10, 10), dpi=200)
+                # plt.tight_layout()
+                # plt.axis('off')
+                # G_tracklet = data["G_tracklet"]
+                # ax.imshow(data["rgb"])
+                # nx.draw_networkx(G_tracklet, ax=ax, pos=nx.get_node_attributes(G_tracklet, "pos"),
+                #                  edge_color=np.array([255, 0, 142]) / 255.,
+                #                  with_labels=False,
+                #                  node_size=0,
+                #                  arrowsize=5.0, )
+                # plt.savefig(fname.replace(".pt", ".png"))
 
 
 def main():
