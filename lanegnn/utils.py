@@ -825,7 +825,7 @@ def poisson_disk_sampling(r_min=10, width=256, height=256):
 
     # Choose up to k points around each reference point as candidates for a new
     # sample point
-    k = 30
+    k = 50
 
     # Minimum distance between samples
     r = r_min

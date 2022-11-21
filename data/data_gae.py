@@ -43,12 +43,13 @@ def get_func_graphs(n_graphs):
 
 def get_random_circles(n_graphs):
     graphs = []
+
     for _ in range(n_graphs):
         center = np.random.normal(loc=0, scale=0.2, size=2)
         radius = np.random.uniform(0.5, 0.55)
         graph = nx.Graph()
-        for i in range(0, 10):
-            angle = i * np.random.uniform(0.4, 0.42)
+        for i in range(0, 200):
+            angle = i * np.random.uniform(0.1, 0.12)
             graph.add_node(i, pos=center + radius * np.array([np.cos(angle), np.sin(angle)]))
             if i > 0:
                 graph.add_edge(i, i - 1)
