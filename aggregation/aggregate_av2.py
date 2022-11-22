@@ -54,6 +54,8 @@ def initialize_graph(roi_xxyy):
 
 def bayes_update_graph(G, angle, x, y, p):
 
+    closest_angle = np.argmin(np.abs(angle - np.linspace(-np.pi, np.pi, 8)))
+
     pos = np.array([G.nodes[i]["pos"] for i in G.nodes])
     distances = cdist(pos, np.array([[x, y]]))
 
@@ -71,7 +73,8 @@ def bayes_update_graph(G, angle, x, y, p):
         p_node = G.nodes[node]["p"]
         p_node = p_node * p_scaled / (p_node * p_scaled + (1 - p_node) * (1 - p_scaled))
 
-        nx.set_node_attributes(G, {node: {"p": p_node}})
+        nx.set_node_attributes(G, {node: {"p": p_node,
+                                          "closest_angle": closest_angle}})
 
     return G
 

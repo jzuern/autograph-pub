@@ -1,22 +1,46 @@
 import numpy as np
-import torch
-import os
 from glob import glob
-from PIL import Image
-import cv2
-import time
 import torch_geometric.data.dataset
-import torchvision.transforms as T
-from shapely.geometry import LineString, MultiLineString, Point
-import matplotlib.pyplot as plt
 import networkx as nx
-import pandas as pd
-from svgpathtools import svg2paths
-import scipy
+import json
+import codecs
+import matplotlib.pyplot as plt
 
 
 def random_func(x):
     return np.random.choice([np.sin, np.cos])(x)
+
+
+def get_successor_graphs(n_graphs):
+    json_files = sorted(glob("/data/lanegraph/data_sep/all/010922-large/pao/test/*.json"))
+    graphs = []
+
+    for json_file in json_files:
+        graph = json.loads(codecs.open(json_file, 'r', encoding='utf-8').read())
+
+        # GT graph representation
+        waypoints = np.array(graph["bboxes"])
+        relation_labels = np.array(graph["relation_labels"])
+
+        waypoints /= waypoints.max()
+        waypoints -= waypoints.mean()
+
+        # Get 1 graph start node and N graph end nodes
+        G_gt_nx = nx.DiGraph()
+        for e in relation_labels:
+            if not G_gt_nx.has_node(e[0]):
+                G_gt_nx.add_node(e[0], pos=waypoints[e[0]])
+            if not G_gt_nx.has_node(e[1]):
+                G_gt_nx.add_node(e[1], pos=waypoints[e[1]])
+            G_gt_nx.add_edge(e[0], e[1])
+
+        if max(list([G_gt_nx.out_degree(node) for node in G_gt_nx.nodes])) >= 2:
+            graphs.append(G_gt_nx)
+
+        if len(graphs) >= n_graphs:
+            break
+
+    return graphs
 
 
 
@@ -26,7 +50,7 @@ def get_func_graphs(n_graphs):
     graphs = []
     for _ in range(n_graphs):
         # semicircle graph
-        x_coords = np.linspace(-2, 2, 10)
+        x_coords = np.linspace(-1, 1, 10)
         y_coords = random_func(x_coords)
         coordinates = np.array(list(zip(x_coords, y_coords)))
         # coordinates += np.random.uniform(-0.1, 0.1, size=coordinates.shape)
@@ -37,19 +61,29 @@ def get_func_graphs(n_graphs):
         for i in range(len(coordinates) - 1):
             graph.add_edge(i, i + 1)
 
+        # randomly rotate nodes around origin
+        theta = np.random.uniform(0, 2 * np.pi)
+        R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+        for i in range(len(coordinates)):
+            graph.nodes[i]["pos"] = np.matmul(R, graph.nodes[i]["pos"])
+
+
         graphs.append(graph)
 
     return graphs
 
+
 def get_random_circles(n_graphs):
+    n_nodes = 100
+
     graphs = []
 
     for _ in range(n_graphs):
-        center = np.random.normal(loc=0, scale=0.2, size=2)
-        radius = np.random.uniform(0.5, 0.55)
+        center = np.random.normal(loc=0, scale=0.01, size=2)
+        radius = np.random.normal(loc=0.5, scale=0.1)
         graph = nx.Graph()
-        for i in range(0, 200):
-            angle = i * np.random.uniform(0.1, 0.12)
+        for i in range(0, n_nodes):
+            angle = i * 0.6
             graph.add_node(i, pos=center + radius * np.array([np.cos(angle), np.sin(angle)]))
             if i > 0:
                 graph.add_edge(i, i - 1)
@@ -64,7 +98,10 @@ class ToyDataset(torch_geometric.data.dataset.Dataset):
         n_graphs = 10
         circle_interp = 10
 
-        self.graphs = get_random_circles(n_graphs)
+        #self.graphs = get_random_circles(n_graphs)
+        #self.graphs = get_func_graphs(n_graphs)
+        self.graphs = get_successor_graphs(100)
+
 
     def shuffle_samples(self):
         np.random.shuffle(self.graphs)
