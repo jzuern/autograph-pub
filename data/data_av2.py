@@ -444,8 +444,7 @@ class PreprocessedAV2Dataset(torch_geometric.data.Dataset):
         print("Loading preprocessed dataset from {}".format(path))
 
         self.path = path
-        self.pth_files = sorted(glob(path + '/*.pt'))
-
+        self.pth_files = sorted(glob(path + '/*.pth'))
         print("Found {} files".format(len(self.pth_files)))
 
     def __len__(self):
@@ -453,8 +452,29 @@ class PreprocessedAV2Dataset(torch_geometric.data.Dataset):
 
     def __getitem__(self, index):
 
-        fname = self.pth_files[index]
-        data = torch.load(fname)
+        data = torch.load(self.pth_files[index])
+
+        rgb = data['rgb']
+        edge_feats = data['edge_feats'].float()
+        edge_scores = data['edge_scores'].float()
+        edge_indices = data['edge_indices']
+        graph = data['graph']
+        node_feats = data['node_feats'].float()
+        node_scores = data['node_scores'].float()
+
+
+
+        data = torch_geometric.data.Data(node_feats=node_feats,
+                                         edge_indices=edge_indices.contiguous(),
+                                         edge_feats=edge_feats,
+                                         node_scores=node_scores.contiguous(),
+                                         edge_scores=edge_scores.contiguous(),
+                                         edge_len=torch.tensor(len(edge_scores)),
+                                         gt_graph=graph,
+                                         num_nodes=node_feats.shape[0],
+                                         batch_idx=torch.tensor(index),
+                                         rgb=torch.FloatTensor(rgb / 255.),
+                                         )
 
         return data
 

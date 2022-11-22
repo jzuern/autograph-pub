@@ -56,14 +56,6 @@ class LaneGNN(torch.nn.Module):
             nn.Linear(int(node_dim/4), 1),
         )
 
-        self.endpoint_classifier = nn.Sequential(
-            nn.Linear(node_dim, int(node_dim/2)),
-            nn.ReLU(),
-            nn.Linear(int(node_dim/2), int(node_dim/4)),
-            nn.ReLU(),
-            nn.Linear(int(node_dim/4), 1),
-        )
-
         self.edge_classifier = nn.Sequential(
             nn.Linear(edge_dim, int(edge_dim/2)),
             nn.ReLU(),
@@ -76,29 +68,25 @@ class LaneGNN(torch.nn.Module):
  
     def forward(self, data):
 
-        node_feats, edge_img_feats, edge_attr, edge_index, batch = (
-            data.x,
-            data.edge_img_feats,
-            data.edge_attr,
-            data.edge_index,
+        node_feats, edge_attr, edge_index, batch = (
+            data.node_feats,
+            #data.edge_img_feats,
+            data.edge_feats,
+            data.edge_indices,
             data.batch_idx
         )
+
+        edge_index = edge_index.t().contiguous()
 
         x = self.pose_encoder(node_feats.float()) # N x D
         initial_x = x
 
         edge_attr = self.edge_encoder(edge_attr.float()) # E x D_E1
-        map_attr = self.map_encoder(edge_img_feats) # E x D_E2
 
-        # Combine encoded edge data and oriented BEV feature
-        fused_edge_attr = torch.cat([edge_attr, map_attr], dim=1) # E x (D_E1+D_E2)
-
-        edge_attr = self.fuse_edge(fused_edge_attr) # E x (D_E)
- 
         for i in range(self.depth):
             x, edge_attr = self.message_passing.forward(x=x, edge_index=edge_index, edge_attr=edge_attr, initial_x=initial_x)
             
-        return self.edge_classifier(edge_attr), self.node_classifier(x), self.endpoint_classifier(x)
+        return self.edge_classifier(edge_attr), self.node_classifier(x)
 
         
 class CausalMessagePassing(torch_geometric.nn.MessagePassing):

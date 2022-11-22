@@ -19,8 +19,8 @@ from torchmetrics.functional.classification.precision_recall import recall
 
 # SELECT MODEL TO BE USED
 from lanegnn.lane_mpnn import LaneGNN
-from data_av2 import PreprocessedAV2Dataset
-from data_old import PreprocessedTrajectoryDataset
+from data.data_av2 import PreprocessedAV2Dataset
+from data.data_old import PreprocessedTrajectoryDataset
 from lanegnn.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
 from metrics.metrics import calc_all_metrics
 from lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
@@ -67,7 +67,7 @@ class Trainer():
         plt.tight_layout()
 
         with torch.no_grad():
-            edge_scores_pred, node_scores_pred, _ = self.model(data)
+            edge_scores_pred, node_scores_pred = self.model(data)
             edge_scores_pred = torch.nn.Sigmoid()(edge_scores_pred).squeeze().cpu().numpy()
             node_scores_pred = torch.nn.Sigmoid()(node_scores_pred).squeeze().cpu().numpy()
 
@@ -76,18 +76,18 @@ class Trainer():
             data = Batch.from_data_list(data)
 
         # Do logging
-        num_edges_in_batch = unbatch_edge_index(data.edge_index, data.batch)[0].shape[1]
+        num_edges_in_batch = unbatch_edge_index(data.edge_indices.T, data.batch)[0].shape[1]
 
-        data.node_pos = data.node_pos[data.batch == 0]
+        data.node_feats = data.node_feats[data.batch == 0]
         data.node_scores_target = data.node_scores[data.batch == 0]
         data.edge_scores_target = data.edge_scores[:num_edges_in_batch]
-        data.edge_index = data.edge_index[:, :num_edges_in_batch]
-        data.edge_attr = data.edge_attr[:num_edges_in_batch]
-        data.edge_img_feats = data.edge_img_feats[:num_edges_in_batch]
+        data.edge_indices = data.edge_indices[:, :num_edges_in_batch]
+        data.edge_feats = data.edge_feats[:num_edges_in_batch]
         data.num_nodes = data.node_scores.shape[0]
 
-        node_pos = data.node_pos.cpu().numpy()
-        node_pos[:, [1, 0]] = node_pos[:, [0, 1]]
+
+        node_pos = data.node_feats.cpu().numpy()
+        #node_pos[:, [1, 0]] = node_pos[:, [0, 1]]
 
         node_scores_target = data.node_scores_target.cpu().numpy()
         edge_scores_target = data.edge_scores_target.cpu().numpy()
@@ -95,19 +95,19 @@ class Trainer():
         graph_target = nx.DiGraph()
         graph_pred = nx.DiGraph()
 
-        for edge_idx, edge in enumerate(data.edge_index.T):
+        for edge_idx, edge in enumerate(data.edge_indices):
             i, j = edge
             i, j = i.item(), j.item()
-            if edge_scores_pred[edge_idx] > 0.03:
-                graph_target.add_edge(i, j, weight=1 - edge_scores_pred[edge_idx])
+            if edge_scores_target[edge_idx] > 0.03:
+                graph_target.add_edge(i, j, weight=1 - edge_scores_target[edge_idx])
                 graph_target.add_node(j, pos=node_pos[j])
                 graph_target.add_node(i, pos=node_pos[i])
 
-        for edge_idx, edge in enumerate(data.edge_index.T):
+        for edge_idx, edge in enumerate(data.edge_indices):
             i, j = edge
             i, j = i.item(), j.item()
             if edge_scores_pred[edge_idx] > 0.03:
-                graph_pred.add_edge(i, j, weight=1 - edge_scores_target[edge_idx])
+                graph_pred.add_edge(i, j, weight=1-edge_scores_target[edge_idx])
                 graph_pred.add_node(j, pos=node_pos[j])
                 graph_pred.add_node(i, pos=node_pos[i])
 
@@ -118,8 +118,6 @@ class Trainer():
         color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
 
         img_rgb = data.rgb.cpu().numpy()[0:, :, :]
-        node_pos = data.node_pos.cpu().numpy()
-        node_pos[:, [1, 0]] = node_pos[:, [0, 1]]
 
         axarr_log[0].cla()
         axarr_log[1].cla()
@@ -145,7 +143,7 @@ class Trainer():
         figure_log.canvas.draw()
         figure_log.canvas.flush_events()
 
-        imname = "/home/zuern/Desktop/self-supervised-graph-viz/{:05d}.png".format(step)
+        imname = "/home/zuern/Desktop/self-supervised-graph-viz/av2/{:05d}.png".format(step)
         try:
             plt.savefig(imname)
             print("Saved logging image to {}".format(imname))
@@ -178,7 +176,7 @@ class Trainer():
                 data = data.to(self.device)
 
             # loss and optim
-            edge_scores, node_scores, endpoint_scores = self.model(data)
+            edge_scores, node_scores = self.model(data)
             edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
             node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
 
@@ -194,15 +192,10 @@ class Trainer():
             edge_weight[data.edge_scores < 0.4] = 0.0
             node_weight[data.node_scores < 0.4] = 0.0
 
-            try:
-                loss_dict = {
-                    #'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_dijkstra),
-                    'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
-                    'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
-                }
-            except Exception as e:
-                print(e)
-                continue
+            loss_dict = {
+                'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
+                'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
+            }
 
             loss = sum(loss_dict.values())
             loss.backward()
@@ -425,8 +418,8 @@ def main():
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
     # define own collator that skips bad samples
-    train_path = os.path.join(params.paths.dataroot, "preprocessed", params.paths.config_name)
-    test_path = os.path.join(params.paths.dataroot, "preprocessed", params.paths.config_name)
+    train_path = os.path.join(params.paths.dataroot, params.paths.config_name)
+    test_path = os.path.join(params.paths.dataroot, params.paths.config_name)
 
     dataset_train = PreprocessedAV2Dataset(path=train_path)
     dataset_test = PreprocessedAV2Dataset(path=test_path)

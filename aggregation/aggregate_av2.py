@@ -12,7 +12,80 @@ import os
 from lanegnn.utils import poisson_disk_sampling, get_random_edges
 import networkx as nx
 from scipy.spatial.distance import cdist
+import torch
 
+
+def preprocess_sample(G_gt_nx, rgb, sample_no):
+
+    """
+    We need the following data:
+    - RGB image
+    - edge gt score
+    - node gt score
+
+    """
+
+    node_gt_score = []
+    node_pos_feats = []
+
+    for node in G_gt_nx.nodes:
+        node_gt_score.append(G_gt_nx.nodes[node]["p"])
+        node_pos_feats.append(G_gt_nx.nodes[node]["pos"])
+
+    node_gt_score = torch.tensor(node_gt_score)
+    node_pos_feats = torch.tensor(node_pos_feats)
+
+
+    edge_pos_feats = []
+    edge_indices = []
+    edge_gt_score = []
+
+    for edge_idx, edge in enumerate(G_gt_nx.edges):
+        i, j = edge
+        s_x, s_y = G_gt_nx.nodes[i]["pos"]
+        e_x, e_y = G_gt_nx.nodes[j]["pos"]
+
+        delta_x, delta_y = e_x - s_x, e_y - s_y
+        mid_x, mid_y = s_x + delta_x / 2, s_y + delta_y / 2
+
+        edge_len = np.sqrt(delta_x ** 2 + delta_y ** 2)
+        edge_angle = np.arctan(delta_y / (delta_x + 1e-6))
+
+        edge_tensor = torch.tensor([edge_angle, edge_len, mid_x, mid_y]).reshape(1, -1)
+        edge_pos_feats.append(edge_tensor)
+        edge_indices.append((i, j))
+
+
+        #edge_gt_score.append(G_gt_nx.edges[i, j]["p"])
+        edge_gt_score.append(0.5)
+
+    edge_indices = torch.tensor(edge_indices)
+    edge_pos_feats = torch.cat(edge_pos_feats, dim=0)
+    edge_gt_score = torch.tensor(edge_gt_score)
+
+    output_dir = "/data/self-supervised-graph/av2"
+
+    print("saving to {}/*.pth".format(output_dir))
+
+    print(node_pos_feats.shape, edge_pos_feats.shape, edge_indices.shape, edge_gt_score.shape, node_gt_score.shape)
+
+    torch.save({
+        "rgb": torch.FloatTensor(rgb),
+        "node_feats": node_pos_feats,
+        "edge_feats": edge_pos_feats,
+        "edge_indices": edge_indices,
+        "edge_scores": edge_gt_score,
+        "node_scores": node_gt_score,
+        "graph": G_gt_nx,
+    }, os.path.join(output_dir, "{}.pth".format(sample_no)))
+
+    # torch.save(node_pos_feats, '{}/{}-node-feats.pth'.format(output_dir, sample_no))
+    # torch.save(edge_pos_feats,  '{}/{}-edge-attr.pth'.format(output_dir, sample_no))
+    # torch.save(node_gt_score, '{}/{}-node-gt.pth'.format(output_dir, sample_no))
+    # torch.save(edge_gt_score, '{}/{}-edge-gt.pth'.format(output_dir, sample_no))
+    # torch.save(edge_indices, '{}/{}-edges.pth'.format(output_dir, sample_no))
+    # torch.save(G_gt_nx, '{}/{}-gt-graph.pth'.format(output_dir, sample_no))
+    # torch.save(torch.FloatTensor(rgb), '{}/{}-rgb.pth'.format(output_dir, sample_no))  # [0.0,255.0]
 
 
 def bayes_update_gridmap(map, x, y, p):
@@ -38,17 +111,17 @@ def gaussian(x, mu, sig):
 def initialize_graph(roi_xxyy):
 
     s = roi_xxyy[3] - roi_xxyy[2], roi_xxyy[1] - roi_xxyy[0]
-    r_min = 5
+    r_min = 7  # 5
 
     points = poisson_disk_sampling(r_min=r_min, width=s[1], height=s[0])
-    # edges = get_random_edges(points, min_point_dist=r_min, max_point_dist=2*r_min)
+    edges = get_random_edges(points, min_point_dist=r_min, max_point_dist=2*r_min)
 
     G = nx.Graph()
 
     for i in range(len(points)):
         G.add_node(i, pos=points[i], p=0.5)
-    # for i in range(len(edges)):
-    #     G.add_edge(edges[i][0], edges[i][1])
+    for i in range(len(edges)):
+        G.add_edge(edges[i][0], edges[i][1])
 
     return G
 
@@ -83,9 +156,9 @@ if __name__ == "__main__":
 
     city_name = "austin"
 
-    #sat_image = np.asarray(Image.open("/data/lanegraph/woven-data/Austin.png"))
+    sat_image = np.asarray(Image.open("/data/lanegraph/woven-data/Austin.png"))
     roi_xxyy = np.array([16800, 17300, 35200, 35600])
-    #sat_image = sat_image[roi_xxyy[2]:roi_xxyy[3], roi_xxyy[0]:roi_xxyy[1], :]
+    sat_image = sat_image[roi_xxyy[2]:roi_xxyy[3], roi_xxyy[0]:roi_xxyy[1], :]
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
@@ -216,7 +289,7 @@ if __name__ == "__main__":
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
 
-        # ax.imshow(grid_map_occ, alpha=0.5)
+        ax.imshow(grid_map_occ, alpha=0.5)
 
         nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
                          edge_color="k",
@@ -227,3 +300,5 @@ if __name__ == "__main__":
                          width=0,
                          )
         plt.show()
+
+        sample = preprocess_sample(G, rgb=sat_image, sample_no=0)
