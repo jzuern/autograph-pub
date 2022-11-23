@@ -7,12 +7,13 @@ from tqdm import tqdm
 from data.av2.settings import get_transform_params
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
-import open3d as o3d
 import os
 from lanegnn.utils import poisson_disk_sampling, get_random_edges
 import networkx as nx
 from scipy.spatial.distance import cdist
 import torch
+from sklearn.neighbors import KernelDensity
+from scipy.signal import find_peaks
 
 
 def preprocess_sample(G_gt_nx, rgb, sample_no):
@@ -108,32 +109,36 @@ def gaussian(x, mu, sig):
 
 
 
-def initialize_graph(roi_xxyy):
+def initialize_graph(roi_xxyy, r_min):
 
     s = roi_xxyy[3] - roi_xxyy[2], roi_xxyy[1] - roi_xxyy[0]
-    r_min = 7  # 5
 
-    points = poisson_disk_sampling(r_min=r_min, width=s[1], height=s[0])
-    edges = get_random_edges(points, min_point_dist=r_min, max_point_dist=2*r_min)
+    points = poisson_disk_sampling(r_min=r_min,
+                                   width=s[1],
+                                   height=s[0])
+    edges = get_random_edges(points,
+                             min_point_dist=r_min,
+                             max_point_dist=2*r_min)
 
     G = nx.Graph()
 
     for i in range(len(points)):
-        G.add_node(i, pos=points[i], p=0.5)
+        G.add_node(i, pos=points[i],
+                   p=0.5,
+                   angle_observations=[])
+
     for i in range(len(edges)):
         G.add_edge(edges[i][0], edges[i][1])
 
     return G
 
-def bayes_update_graph(G, angle, x, y, p):
-
-    closest_angle = np.argmin(np.abs(angle - np.linspace(-np.pi, np.pi, 8)))
+def bayes_update_graph(G, angle, x, y, p, r_min):
 
     pos = np.array([G.nodes[i]["pos"] for i in G.nodes])
     distances = cdist(pos, np.array([[x, y]]))
 
     # get closest nodes
-    closest_nodes = np.argwhere(distances < 10).flatten()
+    closest_nodes = np.argwhere(distances < r_min).flatten()
 
     for node in closest_nodes:
 
@@ -146,10 +151,42 @@ def bayes_update_graph(G, angle, x, y, p):
         p_node = G.nodes[node]["p"]
         p_node = p_node * p_scaled / (p_node * p_scaled + (1 - p_node) * (1 - p_scaled))
 
-        nx.set_node_attributes(G, {node: {"p": p_node,
-                                          "closest_angle": closest_angle}})
+        G.nodes[node]["angle_observations"].append(angle)
+        G.nodes[node]["p"] = p_node
 
     return G
+
+
+def angle_kde(G):
+
+    for n in G.nodes:
+        angle_observations = np.array(G.nodes[n]["angle_observations"])
+        if len(angle_observations) > 0:
+
+            kde = KernelDensity(kernel="gaussian", bandwidth=0.25).fit(angle_observations.reshape(-1, 1))
+            angles_dense = np.linspace(-np.pi, np.pi, 100)
+            log_dens = kde.score_samples(angles_dense.reshape(-1, 1))
+
+            peaks, _ = find_peaks(np.exp(log_dens), height=0.2)
+            G.nodes[n]["angle_peaks"] = angles_dense[peaks]
+        else:
+            G.nodes[n]["angle_peaks"] = []
+
+
+        # if len(angle_observations > 50):
+        #
+        #     fig, ax = plt.subplots(1, 1, figsize=(8, 4))
+        #     ax.scatter(angle_observations, np.zeros_like(angle_observations), c="k", s=20, zorder=10)
+        #     ax.plot(angles_dense, np.exp(log_dens))
+        #     ax.scatter(angles_dense[peaks], np.exp(log_dens)[peaks], c="r", s=20, zorder=10)
+        #     plt.show()
+
+
+
+    return G
+
+
+
 
 
 if __name__ == "__main__":
@@ -265,8 +302,8 @@ if __name__ == "__main__":
         #
         # plt.imshow(entropy)
         # plt.show()
-
-        G = initialize_graph(roi_xxyy)
+        r_min = 10  # minimum radius of the circle for poisson disc sampling
+        G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in tqdm(trajectories):
 
@@ -279,17 +316,25 @@ if __name__ == "__main__":
                 pos = trajectory[i]
                 next_pos = trajectory[i + 1]
                 angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
-                G = bayes_update_graph(G, angle, x=pos[0], y=pos[1], p=0.9)
+                G = bayes_update_graph(G, angle, x=pos[0], y=pos[1], p=0.9, r_min=r_min)
 
         node_colors = np.array([G.nodes[n]["p"] for n in G.nodes])
         cmap = plt.get_cmap('jet')
         norm = plt.Normalize(vmin=0.5, vmax=1)
         node_colors = cmap(norm(node_colors))
 
+
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
 
         ax.imshow(grid_map_occ, alpha=0.5)
+
+        G = angle_kde(G)
+        for n in G.nodes:
+            angle_peaks = G.nodes[n]["angle_peaks"]
+            pos = G.nodes[n]["pos"]
+            for peak in angle_peaks:
+                ax.arrow(pos[0], pos[1], np.cos(peak) * 5, np.sin(peak) * 5, color='r', width=0.5)
 
         nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
                          edge_color="k",
