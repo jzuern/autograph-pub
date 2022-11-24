@@ -197,9 +197,9 @@ class Trainer():
 
             # OR treat all regions equally
             loss_dict = {
-                # 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
+                 # 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
                 # 'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
-                #'edge_loss': torch.nn.MSELoss()(edge_scores, data.edge_scores),
+                'edge_loss': torch.nn.BCELoss()(edge_scores, data.edge_scores),
                 'node_loss': torch.nn.BCELoss()(node_scores, data.node_scores),
             }
 
@@ -210,7 +210,7 @@ class Trainer():
 
             if not self.params.main.disable_wandb:
                 wandb.log({"train/loss_total": loss.item(),
-                           # "train/edge_loss": loss_dict['edge_loss'].item(),
+                           "train/edge_loss": loss_dict['edge_loss'].item(),
                            "train/node_loss": loss_dict['node_loss'].item()}
                           )
 
