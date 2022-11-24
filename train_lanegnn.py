@@ -71,6 +71,7 @@ class Trainer():
         # Do logging
         num_edges_in_batch = unbatch_edge_index(data.edge_indices.T, data.batch)[0].shape[1]
 
+
         data.node_feats = data.node_feats[data.batch == 0]
         data.node_scores_target = data.node_scores[data.batch == 0]
         data.edge_scores_target = data.edge_scores[:num_edges_in_batch]
@@ -79,10 +80,19 @@ class Trainer():
         data.edge_pos_feats = data.edge_pos_feats[:num_edges_in_batch]
         data.num_nodes = data.node_scores.shape[0]
 
+        node_scores_pred = node_scores_pred[data.batch.cpu() == 0]
+        edge_scores_pred = edge_scores_pred[:num_edges_in_batch]
+
         node_pos = data.node_feats.cpu().numpy()
 
         node_scores_target = data.node_scores_target.cpu().numpy()
         edge_scores_target = data.edge_scores_target.cpu().numpy()
+
+        print(node_scores_target.shape)
+        print(edge_scores_target.shape)
+        print(node_scores_pred.shape)
+        print(edge_scores_pred.shape)
+
 
         graph_target = nx.DiGraph()
         graph_pred = nx.DiGraph()
@@ -94,12 +104,14 @@ class Trainer():
         for edge_idx, edge in enumerate(data.edge_indices):
             i, j = edge
             i, j = i.item(), j.item()
-            graph_target.add_edge(i, j, weight=1 - edge_scores_target[edge_idx])
+            if graph_target.has_node(i) and graph_target.has_node(j):
+                graph_target.add_edge(i, j, weight=1 - edge_scores_target[edge_idx])
 
         for edge_idx, edge in enumerate(data.edge_indices):
             i, j = edge
             i, j = i.item(), j.item()
-            graph_pred.add_edge(i, j, weight=1-edge_scores_target[edge_idx])
+            if graph_pred.has_node(i) and graph_pred.has_node(j):
+                graph_pred.add_edge(i, j, weight=1 - edge_scores_pred[edge_idx])
 
 
         cmap = plt.get_cmap('jet')
@@ -128,7 +140,7 @@ class Trainer():
                          node_color=color_node_target,
                          with_labels=False,
                          width=2, arrowsize=4,
-                         node_size=8)
+                         node_size=20)
 
         nx.draw_networkx(graph_pred,
                          ax=axarr_log[1],
@@ -137,7 +149,7 @@ class Trainer():
                          node_color=color_node_pred,
                          with_labels=False,
                          width=2, arrowsize=4,
-                         node_size=8)
+                         node_size=20)
 
         # drawing updated values
         figure_log.canvas.draw()

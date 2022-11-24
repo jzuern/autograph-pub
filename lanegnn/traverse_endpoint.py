@@ -10,7 +10,7 @@ import torch_geometric.data
 from shapely.geometry import MultiLineString, Point
 
 from lanegnn.lanegnn import LaneGNN
-from lanegnn.data import GraphDataset, PreGraphDataset
+# from lanegnn.data import GraphDataset, PreGraphDataset
 from lanegnn.utils import ParamLib, unbatch_edge_index
 from queue import PriorityQueue
 import matplotlib.pyplot as plt

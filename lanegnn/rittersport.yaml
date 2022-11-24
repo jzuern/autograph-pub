@@ -2,7 +2,7 @@ main:
     project: 'self_supervised_graph'
     dataset: 'paloalto'
     version: 'none'
-    disable_wandb: False
+    disable_wandb: True
 paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/

@@ -232,8 +232,8 @@ if __name__ == "__main__":
 
     # generate roi_xxyy list over full satellite image in sliding window fashion
     roi_xxyy_list = []
-    for i in range(17000, 20000, 200):
-        for j in range(35300, 37000, 200):
+    for i in range(15000, 25000, 200):
+        for j in range(30000, 40000, 200):
             roi_xxyy_list.append(np.array([j, j + 200, i, i + 200]))
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
@@ -334,7 +334,7 @@ if __name__ == "__main__":
         # plt.show()
 
 
-        r_min = 10  # minimum radius of the circle for poisson disc sampling
+        r_min = 20  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in tqdm(trajectories):
