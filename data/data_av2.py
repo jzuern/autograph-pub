@@ -437,10 +437,10 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
         return data
 
 
-class PreprocessedAV2Dataset(torch_geometric.data.Dataset):
+class PreprocessedDataset(torch_geometric.data.Dataset):
 
     def __init__(self, path):
-        super(PreprocessedAV2Dataset, self).__init__(path)
+        super(PreprocessedDataset, self).__init__(path)
         print("Loading preprocessed dataset from {}".format(path))
 
         self.path = path
@@ -455,18 +455,18 @@ class PreprocessedAV2Dataset(torch_geometric.data.Dataset):
         data = torch.load(self.pth_files[index])
 
         rgb = data['rgb']
-        edge_feats = data['edge_feats'].float()
+        edge_pos_feats = data['edge_pos_feats'].float()
+        edge_img_feats = data['edge_img_feats'].float()
         edge_scores = data['edge_scores'].float()
         edge_indices = data['edge_indices']
         graph = data['graph']
         node_feats = data['node_feats'].float()
         node_scores = data['node_scores'].float()
 
-
-
         data = torch_geometric.data.Data(node_feats=node_feats,
                                          edge_indices=edge_indices.contiguous(),
-                                         edge_feats=edge_feats,
+                                         edge_pos_feats=edge_pos_feats,
+                                         edge_img_feats=edge_img_feats,
                                          node_scores=node_scores.contiguous(),
                                          edge_scores=edge_scores.contiguous(),
                                          edge_len=torch.tensor(len(edge_scores)),

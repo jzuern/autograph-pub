@@ -34,7 +34,7 @@ class LaneGNN(torch.nn.Module):
             nn.Linear(int(edge_geo_dim/2), edge_geo_dim),
         )
         
-        self.map_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=in_channels) # default: 64
+        self.map_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=in_channels)
 
         self.fuse_edge = nn.Sequential(
             nn.Linear(edge_geo_dim+map_feat_dim, edge_dim*2),
@@ -68,25 +68,35 @@ class LaneGNN(torch.nn.Module):
  
     def forward(self, data):
 
-        node_feats, edge_attr, edge_index, batch = (
+        node_feats, edge_img_feats, edge_attr, edge_index = (
             data.node_feats,
-            #data.edge_img_feats,
-            data.edge_feats,
-            data.edge_indices,
-            data.batch_idx
+            data.edge_img_feats,
+            data.edge_pos_feats,
+            data.edge_indices
         )
 
-        edge_index = edge_index.t().contiguous()
 
-        x = self.pose_encoder(node_feats.float()) # N x D
+        x = self.pose_encoder(node_feats.float())  # N x D
         initial_x = x
 
-        edge_attr = self.edge_encoder(edge_attr.float()) # E x D_E1
+        edge_attr = self.edge_encoder(edge_attr.float())  # E x D_E1
+        map_attr = self.map_encoder(edge_img_feats)  # E x D_E2
+
+        # Combine encoded edge data and oriented BEV feature
+        fused_edge_attr = torch.cat([edge_attr, map_attr], dim=1)  # E x (D_E1+D_E2)
+
+        edge_attr = self.fuse_edge(fused_edge_attr)  # E x (D_E)
+
+        if edge_index.shape[0] != 2:
+            edge_index = edge_index.t().contiguous()
 
         for i in range(self.depth):
-            x, edge_attr = self.message_passing.forward(x=x, edge_index=edge_index, edge_attr=edge_attr, initial_x=initial_x)
+            node_feats, edge_attr = self.message_passing.forward(node_feats=x,
+                                                                  edge_indices=edge_index,
+                                                                  edge_feats=edge_attr,
+                                                                  initial_node_feats=initial_x)
             
-        return self.edge_classifier(edge_attr), self.node_classifier(x)
+        return self.edge_classifier(edge_attr), self.node_classifier(node_feats)
 
         
 class CausalMessagePassing(torch_geometric.nn.MessagePassing):
@@ -123,14 +133,14 @@ class CausalMessagePassing(torch_geometric.nn.MessagePassing):
     def message_and_aggregate(self, adj_t: SparseTensor) -> Tensor:
         pass
 
-    def forward(self, x, edge_index, edge_attr, initial_x):
+    def forward(self, node_feats, edge_indices, edge_feats, initial_node_feats):
         # x has shape [N, in_channels]
         # edge_index has shape [2, E]
-        return self.propagate(edge_index,
-                              size=(x.size(0), x.size(0)),
-                              x=x,
-                              edge_attr=edge_attr,
-                              initial_x=initial_x)
+        return self.propagate(edge_indices,
+                              size=(node_feats.size(0), node_feats.size(0)),
+                              x=node_feats,
+                              edge_attr=edge_feats,
+                              initial_x=initial_node_feats)
 
     def propagate(self, edge_index: Adj, size: Size = None, **kwargs):
         r"""The initial call to start propagating messages.
@@ -220,7 +230,7 @@ class CausalMessagePassing(torch_geometric.nn.MessagePassing):
         #print("edge_attr shape: " +  str(edge_attr.shape))
 
         edge_update_features = torch.cat([x_i, x_j, edge_attr], dim=1)
-        # print(edge_update_features.shape)
+
         updated_edge_attr = self.my_edge_update(edge_update_features)
 
         # To construct messages that are in the future we look at

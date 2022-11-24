@@ -11,9 +11,9 @@ import torch_geometric.data
 import matplotlib.pyplot as plt
 import networkx as nx
 
-# SELECT MODEL TO BE USED
-from data_old import TrajectoryDatasetCarla, TrajectoryDatasetIND
-from data_av2 import TrajectoryDatasetAV2
+from data.data_old import TrajectoryDatasetCarla, TrajectoryDatasetIND
+from data.data_av2 import TrajectoryDatasetAV2
+
 from lanegnn.utils import ParamLib
 from torch_geometric.loader import DataListLoader
 
@@ -35,7 +35,7 @@ class Preprocessor():
                 print("Empty trajectory. Skipping sample")
                 continue
             else:
-                fname = self.export_path + "/{:05d}.pt".format(i)
+                fname = self.export_path + "/{:05d}.pth".format(i)
                 print(fname)
                 data = data[0]
                 torch.save(data, fname)

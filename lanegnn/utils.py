@@ -20,6 +20,9 @@ from torch_geometric.utils import degree
 import torch
 import torchvision
 from collections import defaultdict
+import torchvision.transforms as T
+
+
 
 # set random seed
 np.random.seed(0)
@@ -1088,3 +1091,69 @@ def get_ego_regression_target(params, data, split):
 
     return im
 
+
+
+
+
+def get_oriented_crop(edge_angle, mid_x, mid_y, rgb_context):
+    # Size of quadratic destination image
+    crop_size = 100
+    imsize = 512
+
+    crop_rad = edge_angle
+    crop_x = mid_x + rgb_context.shape[1] // 4
+    crop_y = mid_y + rgb_context.shape[1] // 4
+    center = np.array([crop_x, crop_y])
+
+    # Source point coordinates already in coordinate system around center point of future crop
+    src_pts = np.array([[-crop_size // 2, crop_size // 2 - 1],
+                        [-crop_size // 2, -crop_size // 2],
+                        [crop_size // 2 - 1, -crop_size // 2],
+                        [crop_size // 2 - 1, crop_size // 2 - 1]])
+
+    # Rotate source points
+    R = np.array([[np.cos(crop_rad), -np.sin(crop_rad)],
+                  [np.sin(crop_rad), np.cos(crop_rad)]])
+    src_pts = np.matmul(R, src_pts.T).T + center
+    src_pts = src_pts.astype(np.float32)
+
+    # Destination points are simply the corner points in the new image
+    dst_pts = np.array([[0, crop_size - 1],
+                        [0, 0],
+                        [crop_size - 1, 0],
+                        [crop_size - 1, crop_size - 1]],
+                       dtype="float32")
+
+    # the perspective transformation matrix
+    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+
+    # directly warp the rotated rectangle to get the rectangle
+    crop = cv2.warpPerspective(rgb_context, M, (crop_size, crop_size))
+
+    """
+    # visualize cropped region
+    for i in range(len(src_pts)):
+        #print(i, i-1, (src_pts[i, 0], src_pts[i, 1]), (src_pts[i-1, 0], src_pts[i-1, 1]))
+        cv2.line(rgb_context, (src_pts[i, 0], src_pts[i, 1]), (src_pts[i-1, 0], src_pts[i-1, 1]), (255, 255, 0), 2)
+        # Query image
+        cv2.line(rgb_context, (128, 128), (128+256, 128), (255, 0, 0.0), 2)
+        cv2.line(rgb_context, (128+256, 128), (128+256, 128+256), (255, 0, 0), 2)
+        cv2.line(rgb_context, (128, 128+256), (128+256, 128+256), (255, 0, 0), 2)
+        cv2.line(rgb_context, (128, 128), (128, 128+256), (255, 0, 0), 2)
+
+    fig, axarr = plt.subplots(1, 2)
+    fig.set_figheight(16)
+    fig.set_figwidth(16)
+    axarr[0].imshow(rgb_context)
+    axarr[1].imshow(crop)
+    plt.show()
+    """
+
+    return crop
+
+
+# Scales edge img feature to VGG16 input size
+transform2vgg = T.Compose([
+    T.ToPILImage(),
+    T.Resize(64),
+    T.ToTensor()])

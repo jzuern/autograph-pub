@@ -9,9 +9,9 @@ import torch.utils.data
 import torch_geometric.data
 from shapely.geometry import MultiLineString, Point
 
-from lane_mp.lane_mpnn import LaneGNN
-from lane_mp.data import GraphDataset, PreGraphDataset
-from lane_mp.utils import ParamLib, unbatch_edge_index
+from lanegnn.lanegnn import LaneGNN
+from lanegnn.data import GraphDataset, PreGraphDataset
+from lanegnn.utils import ParamLib, unbatch_edge_index
 from queue import PriorityQueue
 import matplotlib.pyplot as plt
 

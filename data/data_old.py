@@ -935,14 +935,14 @@ class TrajectoryDatasetIND(torch_geometric.data.Dataset):
         gt_graph = torch.tensor(gt_lines)  # [num_gt_graph_edges, 4]
         edges = torch.tensor(edges)
 
-        data = torch_geometric.data.Data(x=node_feats,
-                                         edge_index=edges.t().contiguous(),
-                                         edge_attr=edge_attr,
+        data = torch_geometric.data.Data(node_feats=node_feats,
+                                         edge_indices=edges.t().contiguous(),
+                                         edge_pos_feats=edge_attr,
                                          edge_img_feats=edge_img_feats,
-                                         node_distance=node_gt_score.t().contiguous(),
-                                         edge_distance=edge_gt_score.t().contiguous(),
-                                         edge_dijkstra=edge_gt_score_dijkstra.t().contiguous(),
-                                         gt_graph=gt_graph,
+                                         node_scores=node_gt_score.t().contiguous(),
+                                         #edge_distance=edge_gt_score.t().contiguous(),
+                                         edge_scores=edge_gt_score_dijkstra.t().contiguous(),
+                                         graph=gt_graph,
                                          num_nodes=node_feats.shape[0],
                                          batch_idx=torch.tensor(len(gt_graph)),
                                          rgb=torch.FloatTensor(rgb / 255.), # [0.0, 1.0]

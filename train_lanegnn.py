@@ -6,32 +6,29 @@ import threading
 import networkx as nx
 import wandb
 import argparse
-from collections import defaultdict
 from tqdm import tqdm
 import numpy as np
 import time
 import torch
 import torch.utils.data
 import torch_geometric.data
-import torch.nn.functional as F
 from torchmetrics.functional.classification.average_precision import average_precision
 from torchmetrics.functional.classification.precision_recall import recall
+import matplotlib.pyplot as plt
 
-# SELECT MODEL TO BE USED
-from lanegnn.lane_mpnn import LaneGNN
-from data.data_av2 import PreprocessedAV2Dataset
-from data.data_old import PreprocessedTrajectoryDataset
-from lanegnn.utils import ParamLib, unbatch_edge_index, assign_edge_lengths, get_ego_regression_target
-from metrics.metrics import calc_all_metrics
-from lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
-
-# For torch_geometric DataParallel training
 from torch_geometric.nn import DataParallel
 from torch_geometric.loader import DataListLoader
 from torch_geometric.data import Batch
 
 
-import matplotlib.pyplot as plt
+from lanegnn.lanegnn import LaneGNN
+from data.data_av2 import PreprocessedDataset
+from lanegnn.utils import ParamLib, unbatch_edge_index, assign_edge_lengths
+from metrics.metrics import calc_all_metrics
+from lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
+
+
+
 
 
 class Trainer():
@@ -43,12 +40,9 @@ class Trainer():
         self.dataloader_test = dataloader_test
         self.params = params
         self.optimizer = optimizer
-        self.edge_criterion = torch.nn.BCELoss()
-        self.node_criterion = torch.nn.BCELoss()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.total_step = 0
 
-        # plt.ion()  # turns on interactive mode
         self.figure, self.axarr = plt.subplots(1, 2)
 
         print(len(self.dataloader_train))
@@ -63,7 +57,7 @@ class Trainer():
     def do_logging(self, data, step, plot_text, split=None):
         
         print("\nLogging synchronously...")
-        figure_log, axarr_log = plt.subplots(1, 4, figsize=(40, 10))
+        figure_log, axarr_log = plt.subplots(1, 2, figsize=(15, 8))
         plt.tight_layout()
 
         with torch.no_grad():
@@ -72,7 +66,6 @@ class Trainer():
             node_scores_pred = torch.nn.Sigmoid()(node_scores_pred).squeeze().cpu().numpy()
 
         if self.params.model.dataparallel:
-            data_orig = data.copy()
             data = Batch.from_data_list(data)
 
         # Do logging
@@ -82,12 +75,11 @@ class Trainer():
         data.node_scores_target = data.node_scores[data.batch == 0]
         data.edge_scores_target = data.edge_scores[:num_edges_in_batch]
         data.edge_indices = data.edge_indices[:, :num_edges_in_batch]
-        data.edge_feats = data.edge_feats[:num_edges_in_batch]
+        data.edge_img_feats = data.edge_img_feats[:num_edges_in_batch]
+        data.edge_pos_feats = data.edge_pos_feats[:num_edges_in_batch]
         data.num_nodes = data.node_scores.shape[0]
 
-
         node_pos = data.node_feats.cpu().numpy()
-        #node_pos[:, [1, 0]] = node_pos[:, [0, 1]]
 
         node_scores_target = data.node_scores_target.cpu().numpy()
         edge_scores_target = data.edge_scores_target.cpu().numpy()
@@ -95,23 +87,22 @@ class Trainer():
         graph_target = nx.DiGraph()
         graph_pred = nx.DiGraph()
 
-        for edge_idx, edge in enumerate(data.edge_indices):
-            i, j = edge
-            i, j = i.item(), j.item()
-            if edge_scores_target[edge_idx] > 0.03:
-                graph_target.add_edge(i, j, weight=1 - edge_scores_target[edge_idx])
-                graph_target.add_node(j, pos=node_pos[j])
-                graph_target.add_node(i, pos=node_pos[i])
+        for i in range(node_pos.shape[0]):
+            graph_target.add_node(i, pos=node_pos[i])
+            graph_pred.add_node(i, pos=node_pos[i])
 
         for edge_idx, edge in enumerate(data.edge_indices):
             i, j = edge
             i, j = i.item(), j.item()
-            if edge_scores_pred[edge_idx] > 0.03:
-                graph_pred.add_edge(i, j, weight=1-edge_scores_target[edge_idx])
-                graph_pred.add_node(j, pos=node_pos[j])
-                graph_pred.add_node(i, pos=node_pos[i])
+            graph_target.add_edge(i, j, weight=1 - edge_scores_target[edge_idx])
 
-        cmap = plt.get_cmap('viridis')
+        for edge_idx, edge in enumerate(data.edge_indices):
+            i, j = edge
+            i, j = i.item(), j.item()
+            graph_pred.add_edge(i, j, weight=1-edge_scores_target[edge_idx])
+
+
+        cmap = plt.get_cmap('jet')
         color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
         color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
         color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
@@ -121,23 +112,32 @@ class Trainer():
 
         axarr_log[0].cla()
         axarr_log[1].cla()
-        axarr_log[2].cla()
         axarr_log[0].imshow(img_rgb)
         axarr_log[1].imshow(img_rgb)
-        axarr_log[2].imshow(img_rgb)
         axarr_log[0].axis('off')
         axarr_log[1].axis('off')
-        axarr_log[2].axis('off')
         for i in range(len(axarr_log)):
             axarr_log[i].set_xlim([0, img_rgb.shape[1]])
             axarr_log[i].set_ylim([img_rgb.shape[0], 0])
 
         # Draw GT graph
-        nx.draw_networkx(graph_target, ax=axarr_log[1], pos=node_pos, edge_color=color_edge_pred,
-                            node_color=color_node_pred, with_labels=False, node_size=5)
+        nx.draw_networkx(graph_target,
+                         ax=axarr_log[0],
+                         pos=node_pos,
+                         edge_color=color_edge_target,
+                         node_color=color_node_target,
+                         with_labels=False,
+                         width=2, arrowsize=4,
+                         node_size=8)
 
-        nx.draw_networkx(graph_pred, ax=axarr_log[2], pos=node_pos, edge_color=color_edge_target,
-                            node_color=color_node_target, with_labels=False, node_size=5)
+        nx.draw_networkx(graph_pred,
+                         ax=axarr_log[1],
+                         pos=node_pos,
+                         edge_color=color_edge_pred,
+                         node_color=color_node_pred,
+                         with_labels=False,
+                         width=2, arrowsize=4,
+                         node_size=8)
 
         # drawing updated values
         figure_log.canvas.draw()
@@ -185,33 +185,39 @@ class Trainer():
                 data_orig = data.copy()
                 data = Batch.from_data_list(data)
 
-            # loss and optim
-            edge_weight = torch.ones_like(data.edge_scores)
-            node_weight = torch.ones_like(data.node_scores)
+            # # loss and optim
+            # edge_weight = torch.ones_like(data.edge_scores)
+            # node_weight = torch.ones_like(data.node_scores)
 
-            edge_weight[data.edge_scores < 0.4] = 0.0
-            node_weight[data.node_scores < 0.4] = 0.0
+            # Specify ignore regions
+            # if self.params.model.ignore_low_scores:
+            #     edge_weight[data.edge_scores < 0.4] = 0.0
+            #     node_weight[data.node_scores < 0.4] = 0.0
 
+
+            # OR treat all regions equally
             loss_dict = {
-                'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
-                'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
+                # 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
+                # 'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
+                #'edge_loss': torch.nn.MSELoss()(edge_scores, data.edge_scores),
+                'node_loss': torch.nn.BCELoss()(node_scores, data.node_scores),
             }
 
             loss = sum(loss_dict.values())
             loss.backward()
+
             self.optimizer.step()
 
             if not self.params.main.disable_wandb:
                 wandb.log({"train/loss_total": loss.item(),
-                           "train/edge_loss": loss_dict['edge_loss'].item(),
-                           "train/node_loss": loss_dict['node_loss'].item()})
+                           # "train/edge_loss": loss_dict['edge_loss'].item(),
+                           "train/node_loss": loss_dict['node_loss'].item()}
+                          )
 
             # # Visualization
             if self.total_step % 500 == 0:
                 if self.params.model.dataparallel:
                     data = data_orig
-                # th = threading.Thread(target=self.do_logging, args=(data, self.total_step, 'train/Images', 'train'), )
-                # th.start()
                 self.do_logging(data, self.total_step, 'train/Images', 'train')
 
             t_end = time.time()
@@ -334,14 +340,13 @@ class Trainer():
         print('Edge loss: {:.3f}, Node loss: {:.3f}, Node endpoint loss: {:.3f}'.format(np.mean(edge_losses), np.mean(node_losses), np.mean(node_endpoint_losses)))
         print('Total loss: {:.3f}'.format(np.mean(edge_losses) + np.mean(node_losses)))
 
-        # if not self.params.main.disable_wandb:
-        #     wandb.log({"{}/Edge AP".format(split): ap_edge_mean,
-        #                "{}/Edge Recall".format(split): recall_edge_mean,
-        #                "{}/Node AP".format(split): ap_node_mean,
-        #                "{}/Node Recall".format(split): recall_node_mean,
-        #                "{}/Edge Loss".format(split): np.mean(edge_losses),
-        #                "{}/Node Loss".format(split): np.mean(node_losses),})
-        #     wandb.log(metrics_dict_mean)
+        if not self.params.main.disable_wandb:
+            wandb.log({"{}/Edge AP".format(split): ap_edge_mean,
+                       "{}/Edge Recall".format(split): recall_edge_mean,
+                       "{}/Node AP".format(split): ap_node_mean,
+                       "{}/Node Recall".format(split): recall_node_mean,
+                       "{}/Edge Loss".format(split): np.mean(edge_losses),
+                       "{}/Node Loss".format(split): np.mean(node_losses),})
 
 
 def main():
@@ -374,8 +379,8 @@ def main():
         wandb.login()
         wandb.init(
             entity='jannik-zuern',
-            project=params.main.project,
-            notes='v1',
+            project='self_supervised_graph',
+            notes='v0.1',
             settings=wandb.Settings(start_method="fork"),
         )
         wandb.config.update(params.paths)
@@ -418,11 +423,11 @@ def main():
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
     # define own collator that skips bad samples
-    train_path = os.path.join(params.paths.dataroot, params.paths.config_name)
-    test_path = os.path.join(params.paths.dataroot, params.paths.config_name)
+    train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
+    test_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
 
-    dataset_train = PreprocessedAV2Dataset(path=train_path)
-    dataset_test = PreprocessedAV2Dataset(path=test_path)
+    dataset_train = PreprocessedDataset(path=train_path)
+    dataset_test = PreprocessedDataset(path=test_path)
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
