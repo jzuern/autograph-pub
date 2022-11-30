@@ -1,8 +1,5 @@
 from builtins import Exception
-import logging
-import os, psutil
-import threading
-
+import os
 import networkx as nx
 import wandb
 import argparse
@@ -23,11 +20,11 @@ from torch_geometric.data import Batch
 
 from lanegnn.lanegnn import LaneGNN
 from data.data_av2 import PreprocessedDataset
-from lanegnn.utils import ParamLib, unbatch_edge_index, assign_edge_lengths
+from lanegnn.utils import ParamLib, assign_edge_lengths
 from metrics.metrics import calc_all_metrics
 from lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
 
-
+print(torch.__version__)
 
 
 
@@ -79,7 +76,11 @@ class Trainer():
         # Do logging
         #num_edges_in_batch = unbatch_edge_index(data.edge_indices.T, data.batch)[0].shape[1]
         num_edges_in_batch = self.crappy_edge_batch_detection(data.edge_indices)
-        num_edges_in_batch = num_edges_in_batch[0]
+        if len(num_edges_in_batch) > 0:
+            num_edges_in_batch = num_edges_in_batch[0]
+        else:
+            num_edges_in_batch = data.edge_indices.shape[0]
+        print("num_edges_in_batch", num_edges_in_batch)
 
         node_pos = data.node_feats[data.batch == 0].cpu().numpy()
         node_scores_target = data.node_scores[data.batch == 0].cpu().numpy()
@@ -112,14 +113,14 @@ class Trainer():
 
 
         cmap = plt.get_cmap('jet')
-        # color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
-        # color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
-        # color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
-        # color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
-        color_edge_target = cmap(edge_scores_target)[:, 0:3]
-        color_node_target = cmap(node_scores_target)[:, 0:3]
-        color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
-        color_node_pred = cmap(node_scores_pred)[:, 0:3]
+        color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
+        color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
+        color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
+        color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
+        #color_edge_target = cmap(edge_scores_target)[:, 0:3]
+        #color_node_target = cmap(node_scores_target)[:, 0:3]
+        #color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
+        #color_node_pred = cmap(node_scores_pred)[:, 0:3]
 
 
         axarr_log[0].cla()
@@ -244,6 +245,8 @@ class Trainer():
 
             self.total_step += 1
 
+        if not self.params.main.disable_wandb:
+            wandb.log({"train/epoch": epoch})
 
     def eval(self, epoch, split='test'):
 
@@ -375,12 +378,6 @@ def main():
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
-
-    # Namespace-specific arguments (namespace: training)
-    parser.add_argument('--lr', type=str, help='model path')
-    parser.add_argument('--epochs', type=str, help='model path')
-    parser.add_argument('--city_train', type=str, help='city to train on or concatentation of cities', default=None)
-    parser.add_argument('--city_test', type=str, help='city to test on or concatentation of cities', default=None)
 
     opt = parser.parse_args()
 

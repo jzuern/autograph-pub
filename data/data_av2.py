@@ -446,9 +446,20 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         self.path = path
         self.pth_files = sorted(glob(path + '/*.pth'))
         print("Found {} files".format(len(self.pth_files)))
+        self.check_files()
 
     def __len__(self):
         return len(self.pth_files)
+
+
+    def check_files(self):
+        for i, pth_file in enumerate(self.pth_files):
+            try:
+                data = torch.load(pth_file)
+            except:
+                print("Error loading file {}".format(pth_file))
+                continue
+
 
     def __getitem__(self, index):
 

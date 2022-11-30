@@ -158,16 +158,17 @@ def bayes_update_graph(G, angle, x, y, p, r_min):
     distances = cdist(pos, np.array([[x, y]]))
 
     # get closest nodes
-    closest_nodes = np.argwhere(distances < r_min/2.).flatten()
+    closest_nodes = np.argwhere(distances < r_min).flatten()
 
     for node in closest_nodes:
         node_id = list(G.nodes)[node]
         d = distances[node][0]
 
-        p = gaussian(d, 0, r_min/2.)
+        p = gaussian(d, 0, r_min)
 
         G.nodes[node]["angle_observations"].append(angle)
-        G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + np.log(p / (1 - p))
+        #G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + np.log(p / (1 - p))
+        G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + p
 
     return G
 
@@ -210,7 +211,6 @@ def get_scenario_centerlines(static_map_path):
 
     avm = ArgoverseStaticMap.from_json(Path(static_map_path))
 
-
     centerlines = []
 
     for lane_id, lane_obj in avm.vector_lane_segments.items():
@@ -231,6 +231,8 @@ if __name__ == "__main__":
 
     city_name = "austin"
     sample_no = 0
+    imsize = 0
+
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
     rgb_encoder = edge_feature_encoder(in_channels=3, out_features=32)
@@ -240,17 +242,17 @@ if __name__ == "__main__":
 
     # generate roi_xxyy list over full satellite image in sliding window fashion
     roi_xxyy_list = []
-    for i in range(15000, 25000, 512):
-        for j in range(30000, 40000, 512):
-            roi_xxyy_list.append(np.array([j, j + 512, i, i + 512]))
+    for i in range(15000, 25000, 256):
+        for j in range(30000, 40000, 256):
+            roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
 
     [R, c, t] = get_transform_params(city_name)
 
 
-    if not os.path.exists("trajectories.npy"):
-        #all_scenario_files = all_scenario_files[0:1000]
+    if not os.path.exists("lanes.npy"):
+        all_scenario_files = all_scenario_files[0:1000]
 
         trajectories_ = []
         lanes_ = []
@@ -261,10 +263,8 @@ if __name__ == "__main__":
             static_map_path = scenario_path.parents[0] / f"log_map_archive_{scenario_id}.json"
             scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
 
-
             if scenario.city_name != city_name:
                 continue
-
 
             scenario_lanes = get_scenario_centerlines(static_map_path)
 
@@ -273,7 +273,6 @@ if __name__ == "__main__":
                     bb = np.array([lane[i, 0], lane[i, 1], 0])
                     tmp = t + c * R @ bb
                     lane[i] = tmp[0:2]
-
 
             for track in scenario.tracks:
                 # Get actor trajectory and heading history
@@ -295,8 +294,8 @@ if __name__ == "__main__":
 
                 trajectories_.append(actor_trajectory)
 
-            lanes_.append(scenario_lanes)
-
+            for lane in scenario_lanes:
+                lanes_.append(lane)
 
         trajectories_ = np.array(trajectories_)
         lanes_ = np.array(lanes_)
@@ -309,22 +308,16 @@ if __name__ == "__main__":
         trajectories_ = np.load("lanes.npy", allow_pickle=True)
 
 
-    # visualize trajectories transparent grey
-
-    # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    # for trajectory in tqdm(trajectories_):
-    #     ax.plot(trajectory[:, 0], trajectory[:, 1], color="grey", alpha=0.3)
-    # plt.show()
-
     for roi_xxyy in roi_xxyy_list:
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
 
         trajectories = []
         for t in range(len(trajectories_)):
             trajectory = trajectories_[t]
-            trajectory = trajectory - np.array([roi_xxyy[2], roi_xxyy[0]])
-            # filter trajectories according to current roi_xxyy
 
+            trajectory = trajectory - np.array([roi_xxyy[2], roi_xxyy[0]])
+
+            # filter trajectories according to current roi_xxyy
             is_in_roi = np.logical_and(trajectory[:, 0] > 0, trajectory[:, 0] < sat_image.shape[1])
             is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] > 0)
             is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] < sat_image.shape[0])
@@ -368,7 +361,7 @@ if __name__ == "__main__":
         # plt.imshow(am)
         # plt.show()
 
-        r_min = 20  # minimum radius of the circle for poisson disc sampling
+        r_min = 15  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in tqdm(trajectories):
@@ -386,25 +379,25 @@ if __name__ == "__main__":
 
         node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
         node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
-        #node_probabilities[node_probabilities < 0.501] = 0
-
 
         # perform angle kernel density estimation and peak detection
         G = angle_kde(G)
 
         edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
         edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
-        #edge_probabilities[edge_probabilities < 0.501] = 0
 
         if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 2:
             print("no edge with high probability. skipping")
             continue
 
 
-        cmap = plt.get_cmap('jet')
-        norm = plt.Normalize(vmin=0.0, vmax=1)
-        node_colors = cmap(norm(node_probabilities))
+        # rescale probabilities
+        node_probabilities = (node_probabilities - np.min(node_probabilities)) / (np.max(node_probabilities) - np.min(node_probabilities))
+        edge_probabilities = (edge_probabilities - np.min(edge_probabilities)) / (np.max(edge_probabilities) - np.min(edge_probabilities))
 
+        cmap = plt.get_cmap('jet')
+        norm = plt.Normalize(vmin=0.0, vmax=1.0)
+        node_colors = cmap(norm(node_probabilities))
 
         # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
         # ax.hist(edge_log_odds, bins=20, range=(0,1))
@@ -427,6 +420,10 @@ if __name__ == "__main__":
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
         ax.imshow(sat_image)
+
+        # draw edges
+        for t in trajectories:
+            ax.plot(t[:, 0], t[:, 1], color="black", alpha=0.4, linewidth=0.5)
 
         for n in G.nodes:
             angle_peaks = G.nodes[n]["angle_peaks"]
