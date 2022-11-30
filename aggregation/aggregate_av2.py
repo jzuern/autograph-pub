@@ -16,7 +16,8 @@ from sklearn.neighbors import KernelDensity
 from scipy.signal import find_peaks
 from torchvision.models import resnet18
 import torch.nn as nn
-
+from av2.geometry.interpolate import compute_midpoint_line
+from av2.map.map_api import ArgoverseStaticMap
 
 
 def edge_feature_encoder(out_features=64, in_channels=3):
@@ -26,11 +27,13 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     return model
 
 
-def preprocess_sample(G_gt_nx, rgb, sample_no, rgb_encoder):
+def preprocess_sample(G_gt_nx, sat_image_, roi_xxyy, sample_no, out_path):
 
+    margin = 200
 
     node_gt_score = []
     node_pos_feats = []
+
 
     for node in G_gt_nx.nodes:
         node_gt_score.append(G_gt_nx.nodes[node]["p"])
@@ -45,6 +48,12 @@ def preprocess_sample(G_gt_nx, rgb, sample_no, rgb_encoder):
     edge_gt_score = []
     edge_img_feats = []
 
+    rgb_context = sat_image_[roi_xxyy[0] - margin:roi_xxyy[1] + margin,
+                             roi_xxyy[2] - margin:roi_xxyy[3] + margin].copy()
+
+    rgb = sat_image_[roi_xxyy[0] : roi_xxyy[1],
+                     roi_xxyy[2] : roi_xxyy[3]]
+
     for edge_idx, edge in enumerate(G_gt_nx.edges):
         i, j = edge
         s_x, s_y = G_gt_nx.nodes[i]["pos"]
@@ -56,7 +65,18 @@ def preprocess_sample(G_gt_nx, rgb, sample_no, rgb_encoder):
         edge_len = np.sqrt(delta_x ** 2 + delta_y ** 2)
         edge_angle = np.arctan(delta_y / (delta_x + 1e-6))
 
-        crop_img_rgb = get_oriented_crop(edge_angle, mid_x, mid_y, rgb)
+        center = np.array([mid_x + margin, mid_y + margin])
+
+        crop_img_rgb = get_oriented_crop(edge_angle, center[0], center[1], rgb_context)
+
+        # print(center)
+        # print(sat_image_context.shape)
+        # print(crop_img_rgb.shape)
+        # fig, ax = plt.subplots(1, 2)
+        # ax[0].imshow(sat_image_context)
+        # ax[1].imshow(crop_img_rgb)
+        # plt.show()
+
         crop_img_rgb = transform2vgg(crop_img_rgb).unsqueeze(0)
 
         #crop_img_feat = rgb_encoder(crop_img_rgb).detach()
@@ -74,9 +94,6 @@ def preprocess_sample(G_gt_nx, rgb, sample_no, rgb_encoder):
     edge_img_feats = torch.cat(edge_img_feats, dim=0)
     edge_gt_score = torch.tensor(edge_gt_score)
 
-    output_dir = "/data/self-supervised-graph/av2"
-
-    print("saving to {}/*.pth".format(output_dir))
 
     torch.save({
         "rgb": torch.FloatTensor(rgb),
@@ -87,7 +104,7 @@ def preprocess_sample(G_gt_nx, rgb, sample_no, rgb_encoder):
         "edge_scores": edge_gt_score,
         "node_scores": node_gt_score,
         "graph": G_gt_nx,
-    }, os.path.join(output_dir, "{:04d}.pth".format(sample_no)))
+    }, os.path.join(out_path, "{:04d}.pth".format(sample_no)))
 
 
 
@@ -149,10 +166,8 @@ def bayes_update_graph(G, angle, x, y, p, r_min):
 
         p = gaussian(d, 0, r_min/2.)
 
-
         G.nodes[node]["angle_observations"].append(angle)
         G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + np.log(p / (1 - p))
-
 
     return G
 
@@ -191,6 +206,25 @@ def angle_kde(G):
 
 
 
+def get_scenario_centerlines(static_map_path):
+
+    avm = ArgoverseStaticMap.from_json(Path(static_map_path))
+
+
+    centerlines = []
+
+    for lane_id, lane_obj in avm.vector_lane_segments.items():
+
+        right_lane_boundary = lane_obj.right_lane_boundary.xyz
+        left_lane_boundary = lane_obj.left_lane_boundary.xyz
+        centerline, length = compute_midpoint_line(left_lane_boundary, right_lane_boundary)
+        centerline = np.array(centerline)
+        centerline = centerline[:, :2]
+
+        centerlines.append(centerline)
+
+    return np.array(centerlines)
+
 
 
 if __name__ == "__main__":
@@ -204,24 +238,22 @@ if __name__ == "__main__":
 
     sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/Austin.png"))
 
-    roi_xxyy_list = [
-        np.array([17000, 17200, 35300, 35500])
-    ]
-
     # generate roi_xxyy list over full satellite image in sliding window fashion
     roi_xxyy_list = []
-    for i in range(15000, 25000, 200):
-        for j in range(30000, 40000, 200):
-            roi_xxyy_list.append(np.array([j, j + 200, i, i + 200]))
+    for i in range(15000, 25000, 512):
+        for j in range(30000, 40000, 512):
+            roi_xxyy_list.append(np.array([j, j + 512, i, i + 512]))
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
 
     [R, c, t] = get_transform_params(city_name)
 
+
     if not os.path.exists("trajectories.npy"):
-        # all_scenario_files = all_scenario_files[0:1000]
+        #all_scenario_files = all_scenario_files[0:1000]
 
         trajectories_ = []
+        lanes_ = []
 
         for scenario_path in tqdm(all_scenario_files):
             scenario_path = Path(scenario_path)
@@ -229,8 +261,19 @@ if __name__ == "__main__":
             static_map_path = scenario_path.parents[0] / f"log_map_archive_{scenario_id}.json"
             scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
 
+
             if scenario.city_name != city_name:
                 continue
+
+
+            scenario_lanes = get_scenario_centerlines(static_map_path)
+
+            for lane in scenario_lanes:
+                for i in range(len(lane)):
+                    bb = np.array([lane[i, 0], lane[i, 1], 0])
+                    tmp = t + c * R @ bb
+                    lane[i] = tmp[0:2]
+
 
             for track in scenario.tracks:
                 # Get actor trajectory and heading history
@@ -252,12 +295,19 @@ if __name__ == "__main__":
 
                 trajectories_.append(actor_trajectory)
 
+            lanes_.append(scenario_lanes)
+
+
         trajectories_ = np.array(trajectories_)
+        lanes_ = np.array(lanes_)
 
         # save trajectories
         np.save("trajectories.npy", trajectories_)
+        np.save("lanes.npy", lanes_)
     else:
-        trajectories_ = np.load("trajectories.npy", allow_pickle=True)
+        #trajectories_ = np.load("trajectories.npy", allow_pickle=True)
+        trajectories_ = np.load("lanes.npy", allow_pickle=True)
+
 
     # visualize trajectories transparent grey
 
@@ -283,7 +333,7 @@ if __name__ == "__main__":
             if len(trajectory) > 2:
                 trajectories.append(trajectory)
 
-        if len(trajectories) < 2:
+        if len(trajectories) < 1:
             print("no trajectories in roi. skipping")
             continue
 
@@ -318,7 +368,7 @@ if __name__ == "__main__":
         # plt.imshow(am)
         # plt.show()
 
-        r_min = 10  # minimum radius of the circle for poisson disc sampling
+        r_min = 20  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in tqdm(trajectories):
@@ -336,7 +386,7 @@ if __name__ == "__main__":
 
         node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
         node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
-        node_probabilities[node_probabilities < 0.501] = 0
+        #node_probabilities[node_probabilities < 0.501] = 0
 
 
         # perform angle kernel density estimation and peak detection
@@ -344,7 +394,11 @@ if __name__ == "__main__":
 
         edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
         edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
-        edge_probabilities[edge_probabilities < 0.501] = 0
+        #edge_probabilities[edge_probabilities < 0.501] = 0
+
+        if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 2:
+            print("no edge with high probability. skipping")
+            continue
 
 
         cmap = plt.get_cmap('jet')
@@ -369,10 +423,6 @@ if __name__ == "__main__":
         for i, n in enumerate(G.nodes):
             G.nodes[n]["p"] = node_probabilities[i]
 
-        #if len(edge_probabilities[edge_probabilities > 0.5]) == 0:
-        #    continue
-
-
 
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
@@ -394,8 +444,10 @@ if __name__ == "__main__":
                          arrowsize=3.0,
                          width=1,
                          )
-        plt.savefig("/data/self-supervised-graph/av2/{:04d}.png".format(sample_no))
+
+        out_path = '/data/self-supervised-graph/preprocessed/av2'
+        plt.savefig("{}/{:04d}.png".format(out_path, sample_no))
 
         # preprocess sample into pth file
-        sample = preprocess_sample(G, rgb=sat_image, sample_no=sample_no, rgb_encoder=rgb_encoder)
+        sample = preprocess_sample(G, sat_image_=sat_image_, roi_xxyy=roi_xxyy, sample_no=sample_no, out_path=out_path)
         sample_no += 1
