@@ -53,6 +53,14 @@ class Trainer():
             i += 1
             self.one_sample_data = next(it)
 
+    def crappy_edge_batch_detection(self, edge_indices):
+        edge_indices = edge_indices.cpu().numpy()
+        # detect jumps in edge_batch
+        edge_batch_diff = np.diff(edge_indices[:, 0])
+        jumps = np.where(edge_batch_diff < -10)[0]
+
+        return jumps
+
 
     def do_logging(self, data, step, plot_text, split=None):
         
@@ -69,30 +77,19 @@ class Trainer():
             data = Batch.from_data_list(data)
 
         # Do logging
-        num_edges_in_batch = unbatch_edge_index(data.edge_indices.T, data.batch)[0].shape[1]
+        #num_edges_in_batch = unbatch_edge_index(data.edge_indices.T, data.batch)[0].shape[1]
+        num_edges_in_batch = self.crappy_edge_batch_detection(data.edge_indices)
+        num_edges_in_batch = num_edges_in_batch[0]
 
-
-        data.node_feats = data.node_feats[data.batch == 0]
-        data.node_scores_target = data.node_scores[data.batch == 0]
-        data.edge_scores_target = data.edge_scores[:num_edges_in_batch]
-        data.edge_indices = data.edge_indices[:, :num_edges_in_batch]
-        data.edge_img_feats = data.edge_img_feats[:num_edges_in_batch]
-        data.edge_pos_feats = data.edge_pos_feats[:num_edges_in_batch]
-        data.num_nodes = data.node_scores.shape[0]
-
+        node_pos = data.node_feats[data.batch == 0].cpu().numpy()
+        node_scores_target = data.node_scores[data.batch == 0].cpu().numpy()
+        edge_scores_target = data.edge_scores[:num_edges_in_batch].cpu().numpy()
+        edge_indices = data.edge_indices[:num_edges_in_batch].cpu().numpy()
         node_scores_pred = node_scores_pred[data.batch.cpu() == 0]
         edge_scores_pred = edge_scores_pred[:num_edges_in_batch]
 
-        node_pos = data.node_feats.cpu().numpy()
-
-        node_scores_target = data.node_scores_target.cpu().numpy()
-        edge_scores_target = data.edge_scores_target.cpu().numpy()
-
-        print(node_scores_target.shape)
-        print(edge_scores_target.shape)
-        print(node_scores_pred.shape)
-        print(edge_scores_pred.shape)
-
+        num_rgb_rows = data.rgb.shape[0] // np.unique(data.batch.cpu().numpy()).shape[0]
+        rgb = data.rgb[:num_rgb_rows].cpu().numpy()
 
         graph_target = nx.DiGraph()
         graph_pred = nx.DiGraph()
@@ -101,36 +98,39 @@ class Trainer():
             graph_target.add_node(i, pos=node_pos[i])
             graph_pred.add_node(i, pos=node_pos[i])
 
-        for edge_idx, edge in enumerate(data.edge_indices):
+        for edge_idx, edge in enumerate(edge_indices):
             i, j = edge
             i, j = i.item(), j.item()
             if graph_target.has_node(i) and graph_target.has_node(j):
-                graph_target.add_edge(i, j, weight=1 - edge_scores_target[edge_idx])
+                graph_target.add_edge(i, j, weight=1-edge_scores_target[edge_idx])
 
-        for edge_idx, edge in enumerate(data.edge_indices):
+        for edge_idx, edge in enumerate(edge_indices):
             i, j = edge
             i, j = i.item(), j.item()
             if graph_pred.has_node(i) and graph_pred.has_node(j):
-                graph_pred.add_edge(i, j, weight=1 - edge_scores_pred[edge_idx])
+                graph_pred.add_edge(i, j, weight=1-edge_scores_pred[edge_idx])
 
 
         cmap = plt.get_cmap('jet')
-        color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
-        color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
-        color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
-        color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
+        # color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
+        # color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
+        # color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
+        # color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
+        color_edge_target = cmap(edge_scores_target)[:, 0:3]
+        color_node_target = cmap(node_scores_target)[:, 0:3]
+        color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
+        color_node_pred = cmap(node_scores_pred)[:, 0:3]
 
-        img_rgb = data.rgb.cpu().numpy()[0:, :, :]
 
         axarr_log[0].cla()
         axarr_log[1].cla()
-        axarr_log[0].imshow(img_rgb)
-        axarr_log[1].imshow(img_rgb)
+        axarr_log[0].imshow(rgb)
+        axarr_log[1].imshow(rgb)
         axarr_log[0].axis('off')
         axarr_log[1].axis('off')
         for i in range(len(axarr_log)):
-            axarr_log[i].set_xlim([0, img_rgb.shape[1]])
-            axarr_log[i].set_ylim([img_rgb.shape[0], 0])
+            axarr_log[i].set_xlim([0, rgb.shape[1]])
+            axarr_log[i].set_ylim([rgb.shape[0], 0])
 
         # Draw GT graph
         nx.draw_networkx(graph_target,
@@ -206,13 +206,17 @@ class Trainer():
                 edge_weight[data.edge_scores < 0.4] = 0.0
                 node_weight[data.node_scores < 0.4] = 0.0
 
+            data.edge_scores[data.edge_scores > 0.5] = 1.0
+            data.node_scores[data.node_scores > 0.5] = 1.0
+            data.edge_scores[data.edge_scores <= 0.5] = 0.0
+            data.node_scores[data.node_scores <= 0.5] = 0.0
 
-            # OR treat all regions equally
+
             loss_dict = {
-                #'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
-                #'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
-                'edge_loss': torch.nn.MSELoss()(edge_scores, data.edge_scores),
-                'node_loss': torch.nn.MSELoss()(node_scores, data.node_scores),
+                'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
+                'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
+                #'edge_loss': torch.nn.MSELoss()(edge_scores, data.edge_scores),
+                #'node_loss': torch.nn.MSELoss()(node_scores, data.node_scores),
             }
 
             loss = sum(loss_dict.values())

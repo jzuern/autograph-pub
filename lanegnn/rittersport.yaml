@@ -2,7 +2,7 @@ main:
     project: 'self_supervised_graph'
     dataset: 'paloalto'
     version: 'none'
-    disable_wandb: False
+    disable_wandb: True
 paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
@@ -21,9 +21,9 @@ preprocessing:
     visualize: False
     ego_regressor_num_channels: 4
 model:
-    dataparallel: True
+    dataparallel: False
     device: cuda
-    batch_size: 1
+    batch_size: 2
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
@@ -39,6 +39,6 @@ model:
     in_channels: 3  # number of channels of image
     loader_workers: 0
     weight_decay: 1e-4 #0.0001
-    ignore_low_scores: True
+    ignore_low_scores: False
     checkpoint:
 
