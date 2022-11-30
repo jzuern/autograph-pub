@@ -2,7 +2,7 @@ main:
     project: 'self_supervised_graph'
     dataset: 'paloalto'
     version: 'none'
-    disable_wandb: True
+    disable_wandb: False
 paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
@@ -39,6 +39,6 @@ model:
     in_channels: 3  # number of channels of image
     loader_workers: 0
     weight_decay: 1e-4 #0.0001
-    ignore_low_scores: False
+    ignore_low_scores: True
     checkpoint:
 

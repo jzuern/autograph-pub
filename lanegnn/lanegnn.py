@@ -1,12 +1,8 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import Tensor
-from torch.distributions import Normal
-from torchvision.models import resnext50_32x4d
 from torchvision.models import resnet18
-from typing import List, Optional, Set
-
+from typing import Optional
 import torch_geometric.nn
 from torch_geometric.typing import Adj, Size
 from torch_sparse import SparseTensor

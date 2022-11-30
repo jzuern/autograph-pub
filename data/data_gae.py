@@ -92,15 +92,61 @@ def get_random_circles(n_graphs):
     return graphs
 
 
+def get_t_intersections(n_graphs):
+    graphs = []
+
+    for _ in range(n_graphs):
+        # T intersection graph
+        n_interp = 5
+
+        lane_0 = np.linspace((0.1, 0.5), (0.4, 0.5), n_interp)
+        lane_1 = np.linspace((0.5, 0.9), (0.5, 0.1), n_interp)
+
+        # add some noise
+        lane_0 += np.random.normal(loc=0, scale=0.01, size=lane_0.shape)
+        lane_1 += np.random.normal(loc=0, scale=0.01, size=lane_1.shape)
+
+        graph = nx.Graph()
+        for i, c in enumerate(lane_0):
+            graph.add_node(i, pos=c)
+        for i, c in enumerate(lane_1):
+            graph.add_node(i+n_interp, pos=c)
+
+        for i in range(len(lane_0) - 1):
+            graph.add_edge(i, i + 1)
+        for i in range(len(lane_1) - 1):
+            graph.add_edge(i+n_interp, i + 1+n_interp)
+
+        # connect two lanes
+        graph.add_edge(n_interp-1, n_interp + n_interp//2)
+
+
+
+        # randomly rename nodes
+        node_mapping = np.random.permutation(list(graph.nodes))
+        graph = nx.relabel_nodes(graph, dict(zip(graph.nodes, node_mapping)))
+
+
+        # rotate graph around origin
+        theta = np.random.uniform(0, 0.0 * np.pi)
+        R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+        for i in range(len(lane_0) + len(lane_1)):
+            graph.nodes[i]["pos"] = np.matmul(R, graph.nodes[i]["pos"])
+
+        graphs.append(graph)
+
+    return graphs
+
+
 class ToyDataset(torch_geometric.data.dataset.Dataset):
     def __init__(self):
         super(ToyDataset, self).__init__()
-        n_graphs = 10
-        circle_interp = 10
+        n_graphs = 10000
 
         #self.graphs = get_random_circles(n_graphs)
         #self.graphs = get_func_graphs(n_graphs)
-        self.graphs = get_successor_graphs(100)
+        self.graphs = get_t_intersections(n_graphs)
+        #self.graphs = get_successor_graphs(100)
 
 
     def shuffle_samples(self):
@@ -119,7 +165,6 @@ class ToyDataset(torch_geometric.data.dataset.Dataset):
 
         # get adjacency matrix
         adj = nx.adjacency_matrix(graph)
-        #adj = adj.todense()
 
         return adj, features
 

@@ -155,7 +155,7 @@ class Trainer():
         figure_log.canvas.draw()
         figure_log.canvas.flush_events()
 
-        imname = "/home/zuern/Desktop/self-supervised-graph-viz/av2/{:05d}.png".format(step)
+        imname = "/home/zuern/Desktop/self-supervised-graph-viz/{:05d}.png".format(step)
         try:
             plt.savefig(imname)
             print("Saved logging image to {}".format(imname))
@@ -198,21 +198,21 @@ class Trainer():
                 data = Batch.from_data_list(data)
 
             # # loss and optim
-            # edge_weight = torch.ones_like(data.edge_scores)
-            # node_weight = torch.ones_like(data.node_scores)
+            edge_weight = torch.ones_like(data.edge_scores)
+            node_weight = torch.ones_like(data.node_scores)
 
             # Specify ignore regions
-            # if self.params.model.ignore_low_scores:
-            #     edge_weight[data.edge_scores < 0.4] = 0.0
-            #     node_weight[data.node_scores < 0.4] = 0.0
+            if self.params.model.ignore_low_scores:
+                edge_weight[data.edge_scores < 0.4] = 0.0
+                node_weight[data.node_scores < 0.4] = 0.0
 
 
             # OR treat all regions equally
             loss_dict = {
-                 # 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
-                # 'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
-                'edge_loss': torch.nn.BCELoss()(edge_scores, data.edge_scores),
-                'node_loss': torch.nn.BCELoss()(node_scores, data.node_scores),
+                #'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
+                #'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
+                'edge_loss': torch.nn.MSELoss()(edge_scores, data.edge_scores),
+                'node_loss': torch.nn.MSELoss()(node_scores, data.node_scores),
             }
 
             loss = sum(loss_dict.values())

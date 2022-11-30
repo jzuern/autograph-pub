@@ -113,11 +113,11 @@ def gaussian(x, mu, sig):
 
 def initialize_graph(roi_xxyy, r_min):
 
-    s = roi_xxyy[3] - roi_xxyy[2], roi_xxyy[1] - roi_xxyy[0]
+    roi_shape = roi_xxyy[3] - roi_xxyy[2], roi_xxyy[1] - roi_xxyy[0]
 
     points = poisson_disk_sampling(r_min=r_min,
-                                   width=s[1],
-                                   height=s[0])
+                                   width=roi_shape[1],
+                                   height=roi_shape[0])
     points = np.array(points)
     edges = get_random_edges(points,
                              min_point_dist=r_min,
@@ -127,36 +127,31 @@ def initialize_graph(roi_xxyy, r_min):
 
     for i in range(len(points)):
         G.add_node(i, pos=points[i],
-                   p=0.5,
+                   log_odds=0.0,
                    angle_observations=[])
     for i in range(len(edges)):
-        G.add_edge(edges[i][0], edges[i][1], p=0.5)
-
+        G.add_edge(edges[i][0], edges[i][1])
 
     return G
 
-def bayes_update_graph(G, angle, x, y, p, r_min):
 
+def bayes_update_graph(G, angle, x, y, p, r_min):
 
     pos = np.array([G.nodes[i]["pos"] for i in G.nodes])
     distances = cdist(pos, np.array([[x, y]]))
 
     # get closest nodes
-    closest_nodes = np.argwhere(distances < r_min).flatten()
+    closest_nodes = np.argwhere(distances < r_min/2.).flatten()
 
     for node in closest_nodes:
-
+        node_id = list(G.nodes)[node]
         d = distances[node][0]
 
-        p_scaled = 0.5 + 0.5 * gaussian(d, 0, 1)
+        p = gaussian(d, 0, r_min/2.)
 
-        node = list(G.nodes)[node]
-
-        p_node = G.nodes[node]["p"]
-        p_node = p_node * p_scaled / (p_node * p_scaled + (1 - p_node) * (1 - p_scaled))
 
         G.nodes[node]["angle_observations"].append(angle)
-        G.nodes[node]["p"] = p_node
+        G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + np.log(p / (1 - p))
 
 
     return G
@@ -165,7 +160,7 @@ def bayes_update_graph(G, angle, x, y, p, r_min):
 def angle_kde(G):
 
     for e in G.edges:
-        G.edges[e]["p"] = 0.5
+        G.edges[e]["log_odds"] = 0.0
 
     for n in G.nodes:
         angle_observations = np.array(G.nodes[n]["angle_observations"])
@@ -180,34 +175,17 @@ def angle_kde(G):
         else:
             G.nodes[n]["angle_peaks"] = []
 
-
-
     # edge scores
     for n in G.nodes:
         for neighbor in G.neighbors(n):
-            p_edge = G.edges[n, neighbor]["p"]
-
-
             angle_peaks = G.nodes[n]["angle_peaks"]
             neighbor_edge_vec = G.nodes[neighbor]["pos"] - G.nodes[n]["pos"]
             neighbor_edge_angle = np.arctan2(neighbor_edge_vec[1], neighbor_edge_vec[0])
 
             for angle_peak in angle_peaks:
-                if np.abs(neighbor_edge_angle - angle_peak) < np.pi / 4:
-                    p_edge = p_edge * 0.8 / (p_edge * 0.8 + (1 - p_edge) * 0.2)
-                    G.edges[n, neighbor]["p"] = p_edge
-
-
-
-        # if len(angle_observations > 50):
-        #
-        #     fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-        #     ax.scatter(angle_observations, np.zeros_like(angle_observations), c="k", s=20, zorder=10)
-        #     ax.plot(angles_dense, np.exp(log_dens))
-        #     ax.scatter(angles_dense[peaks], np.exp(log_dens)[peaks], c="r", s=20, zorder=10)
-        #     plt.show()
-
-
+                rel_angle = np.abs(angle_peak - neighbor_edge_angle)
+                if rel_angle < np.pi / 4:
+                    G.edges[n, neighbor]["log_odds"] += np.pi / 4 - rel_angle
 
     return G
 
@@ -281,6 +259,13 @@ if __name__ == "__main__":
     else:
         trajectories_ = np.load("trajectories.npy", allow_pickle=True)
 
+    # visualize trajectories transparent grey
+
+    # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    # for trajectory in tqdm(trajectories_):
+    #     ax.plot(trajectory[:, 0], trajectory[:, 1], color="grey", alpha=0.3)
+    # plt.show()
+
     for roi_xxyy in roi_xxyy_list:
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
 
@@ -333,8 +318,7 @@ if __name__ == "__main__":
         # plt.imshow(am)
         # plt.show()
 
-
-        r_min = 20  # minimum radius of the circle for poisson disc sampling
+        r_min = 10  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in tqdm(trajectories):
@@ -350,13 +334,45 @@ if __name__ == "__main__":
                 angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
                 G = bayes_update_graph(G, angle, x=pos[0], y=pos[1], p=0.9, r_min=r_min)
 
-        node_colors = np.array([G.nodes[n]["p"] for n in G.nodes])
-        cmap = plt.get_cmap('jet')
-        norm = plt.Normalize(vmin=0.5, vmax=1)
-        node_colors = cmap(norm(node_colors))
+        node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
+        node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
+        node_probabilities[node_probabilities < 0.501] = 0
+
 
         # perform angle kernel density estimation and peak detection
         G = angle_kde(G)
+
+        edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
+        edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
+        edge_probabilities[edge_probabilities < 0.501] = 0
+
+
+        cmap = plt.get_cmap('jet')
+        norm = plt.Normalize(vmin=0.0, vmax=1)
+        node_colors = cmap(norm(node_probabilities))
+
+
+        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        # ax.hist(edge_log_odds, bins=20, range=(0,1))
+        # ax.hist(edge_probabilities, bins=20, range=(0,1), alpha=0.5, color="red")
+        # plt.show()
+
+        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        # ax.hist(node_probabilities, bins=20, range=(0,1), color="red")
+        # plt.show()
+
+
+        # assign probabilities to edges
+        for i, e in enumerate(G.edges):
+            G.edges[e]["p"] = edge_probabilities[i]
+        # assign probabilities to nodes
+        for i, n in enumerate(G.nodes):
+            G.nodes[n]["p"] = node_probabilities[i]
+
+        #if len(edge_probabilities[edge_probabilities > 0.5]) == 0:
+        #    continue
+
+
 
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
@@ -368,8 +384,7 @@ if __name__ == "__main__":
             for peak in angle_peaks:
                 ax.arrow(pos[0], pos[1], np.cos(peak) * 3, np.sin(peak) * 3, color='r', width=0.3)
 
-        edge_colors = np.array([G.edges[e]["p"] for e in G.edges])
-        edge_colors = cmap(norm(edge_colors))
+        edge_colors = cmap(norm(edge_probabilities))
 
         nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
                          edge_color=edge_colors,
@@ -381,5 +396,6 @@ if __name__ == "__main__":
                          )
         plt.savefig("/data/self-supervised-graph/av2/{:04d}.png".format(sample_no))
 
+        # preprocess sample into pth file
         sample = preprocess_sample(G, rgb=sat_image, sample_no=sample_no, rgb_encoder=rgb_encoder)
         sample_no += 1

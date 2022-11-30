@@ -12,28 +12,15 @@ import cv2
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import networkx as nx
-
+from torchmetrics import AUROC, AUC
+from torchmetrics.classification import Precision, Recall, BinaryAccuracy, Accuracy
 from data.data_gae import ToyDataset
-
+import wandb
+from tqdm import tqdm
 
 from model import GCNModelVAE, GCNModelVAE_large
 from optimizer import loss_function
-from utils import mask_test_edges, preprocess_graph, get_roc_score, sigmoid
-
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--model', type=str, default='gcn_vae', help="models used")
-parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--epochs', type=int, default=100000, help='Number of epochs to train.')
-parser.add_argument('--hidden1', type=int, default=32, help='Number of units in hidden layer 1.')
-parser.add_argument('--hidden2', type=int, default=64, help='Number of units in hidden layer 2.')
-parser.add_argument('--hidden3', type=int, default=128, help='Number of units in hidden layer 3.')
-parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
-parser.add_argument('--dropout', type=float, default=0., help='Dropout rate (1 - keep probability).')
-parser.add_argument('--dataset-str', type=str, default='cora', help='type of dataset.')
-
-args = parser.parse_args()
-
+from utils import preprocess_graph
 
 
 
@@ -43,17 +30,20 @@ class Trainer(object):
         self.dataloader = dataloader
 
         self.feat_dim = 2
-
         #self.model = GCNModelVAE(self.feat_dim, args.hidden1, args.hidden2, args.dropout).cuda()
-        self.model = GCNModelVAE_large(self.feat_dim, args.hidden1, args.hidden2, args.hidden3, args.dropout).cuda()
+        self.model = GCNModelVAE_large(self.feat_dim,
+                                       args.hidden1,
+                                       args.hidden2,
+                                       args.hidden3,
+                                       args.dropout).cuda()
         self.train_losses = []
         self.train_accs = []
         self.optimizer = optim.Adam(self.model.parameters(), lr=args.lr)
-        self.epoch = 0
 
+        self.epoch = 0
+        self.global_step = 0
         self.fig, self.ax = plt.subplots(1, 4, figsize=(20, 5))
 
-        print("Using {} dataset".format(args.dataset_str))
 
     def get_scores(self, adj_orig, edges_pos, edges_neg, adj_rec):
 
@@ -83,18 +73,21 @@ class Trainer(object):
         return roc_score, ap_score
 
     def get_acc(self, adj_rec, adj_label):
-        labels_all = adj_label.to_dense().view(-1).long()
-        preds_all = (adj_rec > 0.5).view(-1).long()
-        accuracy = (preds_all == labels_all).sum().float() / labels_all.size(0)
-        return accuracy
+        labels_all = adj_label.view(-1).float().cpu()
+        preds_all = (adj_rec > 0.5).view(-1).float().cpu()
+
+        return BinaryAccuracy()(preds_all, labels_all)
 
 
     def train(self):
 
         self.model.train()
 
+        train_progress = tqdm(self.dataloader, desc="Training", total=len(self.dataloader))
 
-        for data in self.dataloader:
+
+
+        for data in train_progress:
 
             self.optimizer.zero_grad()
 
@@ -107,15 +100,11 @@ class Trainer(object):
             adj_orig = adj_orig - sp.dia_matrix((adj_orig.diagonal()[np.newaxis, :], [0]), shape=adj_orig.shape)
             adj_orig.eliminate_zeros()
 
-            #adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj)
-            #adj = adj_train
-            self.adj = np.array(adj.todense())  # for debugging
-
-            adj_train = adj
+            self.adj = np.array(adj_orig.todense())  # for debugging
 
             # Some preprocessing
             adj_norm = preprocess_graph(adj)
-            adj_label = adj_train + sp.eye(adj_train.shape[0])
+            adj_label = adj + sp.eye(adj.shape[0])
             adj_label = torch.FloatTensor(adj_label.toarray())
 
             pos_weight = float(adj.shape[0] * adj.shape[0] - adj.sum()) / adj.sum()
@@ -128,6 +117,14 @@ class Trainer(object):
             adj_label = adj_label.cuda()
 
             self.adj_recovered, mu, logvar = self.model(features, adj_norm)
+
+            # adj_norm: normalized adjacency matrix
+            # adj_label: binary adjacency matrix with diagonal elements
+            # adj_recovered: reconstructed adjacency matrix
+            # mu: mean of the latent variable
+            # logvar: log variance of the latent variable
+
+
             loss = loss_function(preds=self.adj_recovered,
                                  labels=adj_label,
                                  mu=mu,
@@ -139,19 +136,26 @@ class Trainer(object):
             cur_loss = loss.item()
             self.optimizer.step()
 
-            hidden_emb = mu.data.cpu().numpy()
-            #roc_curr, ap_curr = get_roc_score(hidden_emb, adj_orig, val_edges, val_edges_false)
+            #hidden_emb = mu.data.cpu().numpy()
 
             self.train_losses.append(cur_loss)
 
-            print("Epoch:", '%04d' % (self.epoch + 1), "train_loss=", "{:.5f}".format(cur_loss),
-                  #"val_ap=", "{:.5f}".format(ap_curr),
-                  )
+
+            text = "Epoch: {}, Loss: {:.4f}".format(self.epoch, cur_loss)
+            train_progress.set_description(text)
 
             # get accuracy
-
-            acc = self.get_acc(self.adj_recovered, adj_norm).item()
+            acc = self.get_acc(self.adj_recovered, adj_label).item()
             self.train_accs.append(acc)
+
+            if not args.disable_wandb:
+                wandb.log({"train_loss": cur_loss,
+                           "train_acc": acc, })
+
+            if self.global_step % 100 == 0:
+                self.visualize()
+
+            self.global_step += 1
 
         self.epoch += 1
 
@@ -175,7 +179,7 @@ class Trainer(object):
         # concatenate
         adj_viz = np.concatenate((adj_target_viz, adj_pred_viz), axis=1)
         cv2.imshow("adj_viz", adj_viz)
-        cv2.waitKey(10)
+        cv2.waitKey(1)
 
         if self.epoch % 10 == 0:
             cmap = plt.get_cmap('viridis')
@@ -185,10 +189,12 @@ class Trainer(object):
             self.ax[3].clear()
             self.ax[0].set_title("Target")
             self.ax[1].set_title("Prediction")
-            self.ax[2].set_title("loss")
-            self.ax[2].set_xlabel("epoch")
+            self.ax[2].set_title("Loss")
+            self.ax[2].set_xlabel("Step")
             self.ax[2].set_yscale("log")
             self.ax[3].set_title("accuracy")
+            self.ax[0].set_aspect('equal')
+            self.ax[1].set_aspect('equal')
 
             G_pred = nx.Graph()
             G_pred.add_nodes_from(range(len(adj_pred)))
@@ -196,8 +202,9 @@ class Trainer(object):
             G_target.add_nodes_from(range(len(adj_target)))
             for i in range(len(adj_target)):
                 for j in range(i, len(adj_target)):
-                    G_pred.add_edge(i, j, weight=adj_pred[i, j])
-                    G_target.add_edge(i, j, weight=adj_target[i, j])
+                    if i != j:
+                        G_pred.add_edge(i, j, weight=adj_pred[i, j])
+                        G_target.add_edge(i, j, weight=adj_target[i, j])
 
             edge_scores = nx.get_edge_attributes(G_pred, 'weight')
             edge_scores = np.array([edge_scores[e] for e in G_pred.edges()])
@@ -230,14 +237,39 @@ class Trainer(object):
             plt.pause(0.01)
 
     def save_model(self):
-        torch.save(self.model.state_dict(), "model.pth")
+        self.save_path = 'model-{epoch:04d}.ckpt'.format(epoch=self.epoch)
+        print("Saving model as " + self.save_path)
+        torch.save(self.model.state_dict(), self.save_path)
 
 
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, default='gcn_vae', help="models used")
+    parser.add_argument('--seed', type=int, default=42, help='Random seed.')
+    parser.add_argument('--disable-wandb', '-d', action='store_true', help='Disable wandb logging')
+    parser.add_argument('--epochs', type=int, default=100000, help='Number of epochs to train.')
+    parser.add_argument('--hidden1', type=int, default=32, help='Number of units in hidden layer 1.')
+    parser.add_argument('--hidden2', type=int, default=64, help='Number of units in hidden layer 2.')
+    parser.add_argument('--hidden3', type=int, default=128, help='Number of units in hidden layer 3.')
+    parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
+    parser.add_argument('--dropout', type=float, default=0., help='Dropout rate (1 - keep probability).')
+
     args = parser.parse_args()
     print(args)
+
+
+    if not args.disable_wandb:
+        wandb.init(
+            entity='jannik-zuern',
+            project='self_supervised_graph',
+            notes='gvae',
+            settings=wandb.Settings(start_method="fork"),
+        )
+        wandb.config.update(args)
+
+
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
@@ -249,7 +281,6 @@ if __name__ == '__main__':
 
     for epoch in range(args.epochs):
         trainer.train()
-        trainer.visualize()
         trainer.save_model()
 
         dataset.shuffle_samples()

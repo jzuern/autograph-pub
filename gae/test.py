@@ -21,20 +21,6 @@ from optimizer import loss_function
 from utils import mask_test_edges, preprocess_graph, get_roc_score, sigmoid
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--model', type=str, default='gcn_vae', help="models used")
-parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-parser.add_argument('--epochs', type=int, default=100000, help='Number of epochs to train.')
-parser.add_argument('--hidden1', type=int, default=32, help='Number of units in hidden layer 1.')
-parser.add_argument('--hidden2', type=int, default=64, help='Number of units in hidden layer 2.')
-parser.add_argument('--hidden3', type=int, default=128, help='Number of units in hidden layer 3.')
-parser.add_argument('--lr', type=float, default=0.01, help='Initial learning rate.')
-parser.add_argument('--dropout', type=float, default=0., help='Dropout rate (1 - keep probability).')
-parser.add_argument('--dataset-str', type=str, default='cora', help='type of dataset.')
-
-args = parser.parse_args()
-
-
 
 
 class Trainer(object):
@@ -45,10 +31,10 @@ class Trainer(object):
         self.feat_dim = 2
 
         self.model = GCNModelVAE_large(self.feat_dim, args.hidden1, args.hidden2, args.hidden3, args.dropout).cuda()
-        self.model.load_state_dict(torch.load("model.pth"))
 
+        print("Loading model from {}".format(args.model_path))
+        self.model.load_state_dict(torch.load(args.model_path))
 
-        print("Using {} dataset".format(args.dataset_str))
 
     def get_scores(self, adj_orig, edges_pos, edges_neg, adj_rec):
 
@@ -84,45 +70,39 @@ class Trainer(object):
         return accuracy
 
 
+    def test_decode(self):
+        self.model.eval()
+
     def test(self):
 
         self.model.eval()
 
-
         for data in self.dataloader:
-
 
             adj, features = data
             self.features = features
             features = torch.FloatTensor(features)
+
+            # get random nonzero elemnts of adjancecy matrix and set them to zero
+            nonzeros = np.nonzero(adj)
+            nonzeros = np.stack([nonzeros[0], nonzeros[1]]).T
+            test_percent = 0.2
+            test_size = int(len(nonzeros) * test_percent)
+            test_idx = np.random.choice(len(nonzeros), test_size, replace=False)
+            nonzeros_test = nonzeros[test_idx]
+            adj[nonzeros_test[:, 0], nonzeros_test[:, 1]] = 0
+            adj[nonzeros_test[:, 1], nonzeros_test[:, 0]] = 0
 
             # Store original adjacency matrix (without diagonal entries) for later
             adj_orig = adj
             adj_orig = adj_orig - sp.dia_matrix((adj_orig.diagonal()[np.newaxis, :], [0]), shape=adj_orig.shape)
             adj_orig.eliminate_zeros()
 
-            #adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj)
-            #adj = adj_train
             self.adj = np.array(adj.todense())  # for debugging
 
-            adj_train = adj
-
             # Some preprocessing
-            adj_norm = preprocess_graph(adj)
-            adj_label = adj_train + sp.eye(adj_train.shape[0])
-            adj_label = torch.FloatTensor(adj_label.toarray())
-
-            pos_weight = float(adj.shape[0] * adj.shape[0] - adj.sum()) / adj.sum()
-            pos_weight = torch.tensor(pos_weight)
-
-            norm = adj.shape[0] * adj.shape[0] / float((adj.shape[0] * adj.shape[0] - adj.sum()) * 2)
-
+            adj_norm = preprocess_graph(adj).cuda()
             features = features.cuda()
-            adj_norm = adj_norm.cuda()
-
-            # delete random entries in the adjacency matrix
-            adj_norm[0:5, 0:5] = 0
-
 
             self.adj_recovered, mu, logvar = self.model(features, adj_norm)
 
@@ -132,6 +112,8 @@ class Trainer(object):
 
     def visualize(self):
         self.fig, self.ax = plt.subplots(1, 2, figsize=(10, 5))
+        self.ax[0].set_aspect('equal')
+        self.ax[1].set_aspect('equal')
 
         # visualize adjacency matrix
         adj_pred = torch.sigmoid(self.adj_recovered).cpu().detach().numpy()
@@ -161,12 +143,16 @@ class Trainer(object):
         G_target.add_nodes_from(range(len(adj_target)))
         for i in range(len(adj_target)):
             for j in range(i, len(adj_target)):
-                G_pred.add_edge(i, j, weight=adj_pred[i, j])
-                G_target.add_edge(i, j, weight=adj_target[i, j])
+                if i != j:
+                    G_pred.add_edge(i, j, weight=adj_pred[i, j])
+                    G_target.add_edge(i, j, weight=adj_target[i, j])
 
-        edge_scores = nx.get_edge_attributes(G_pred, 'weight')
-        edge_scores = np.array([edge_scores[e] for e in G_pred.edges()])
-        color_edge_pred = np.hstack([cmap(edge_scores)[:, 0:3], edge_scores[:, None]**5])
+        edge_scores_pred = nx.get_edge_attributes(G_pred, 'weight')
+        edge_scores_pred = np.array([edge_scores_pred[e] for e in G_pred.edges()])
+        edge_scores_pred[edge_scores_pred < 0.5] = 0
+
+        color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]**5])
+
 
         nx.draw(G_pred, pos=self.features,
                 with_labels=False,
@@ -176,9 +162,12 @@ class Trainer(object):
                 width=2,
                 node_color='b')
 
-        edge_scores = nx.get_edge_attributes(G_target, 'weight')
-        edge_scores = np.array([edge_scores[e] for e in G_target.edges()])
-        color_edge_target = np.hstack([cmap(edge_scores)[:, 0:3], edge_scores[:, None]])
+        edge_scores_target = nx.get_edge_attributes(G_target, 'weight')
+        edge_scores_target = np.array([edge_scores_target[e] for e in G_target.edges()])
+        edge_scores_target[edge_scores_target < 0.5] = 0
+
+        color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
+
 
         nx.draw(G_target, pos=self.features,
                 with_labels=False,
@@ -198,8 +187,17 @@ class Trainer(object):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, default='gcn_vae', help="models used")
+    parser.add_argument('--seed', type=int, default=42, help='Random seed.')
+    parser.add_argument('--hidden1', type=int, default=32, help='Number of units in hidden layer 1.')
+    parser.add_argument('--hidden2', type=int, default=64, help='Number of units in hidden layer 2.')
+    parser.add_argument('--hidden3', type=int, default=128, help='Number of units in hidden layer 3.')
+    parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate (1 - keep probability).')
+    parser.add_argument('--model_path', type=str, default='model-0007.ckpt', help='Path to save the model.')
 
     args = parser.parse_args()
+
     print(args)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -207,7 +205,7 @@ if __name__ == '__main__':
     dataset = ToyDataset()
     #dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
 
-
     trainer = Trainer(args, dataset)
 
     trainer.test()
+    #trainer.test_decode()
