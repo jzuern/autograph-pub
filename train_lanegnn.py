@@ -24,8 +24,6 @@ from lanegnn.utils import ParamLib, assign_edge_lengths
 from metrics.metrics import calc_all_metrics
 from lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
 
-print(torch.__version__)
-
 
 
 class Trainer():
@@ -80,7 +78,6 @@ class Trainer():
             num_edges_in_batch = num_edges_in_batch[0]
         else:
             num_edges_in_batch = data.edge_indices.shape[0]
-        print("num_edges_in_batch", num_edges_in_batch)
 
         node_pos = data.node_feats[data.batch == 0].cpu().numpy()
         node_scores_target = data.node_scores[data.batch == 0].cpu().numpy()
@@ -112,7 +109,7 @@ class Trainer():
                 graph_pred.add_edge(i, j, weight=1-edge_scores_pred[edge_idx])
 
 
-        cmap = plt.get_cmap('jet')
+        cmap = plt.get_cmap('viridis')
         color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
         color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
         color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
@@ -207,11 +204,10 @@ class Trainer():
                 edge_weight[data.edge_scores < 0.4] = 0.0
                 node_weight[data.node_scores < 0.4] = 0.0
 
-            data.edge_scores[data.edge_scores > 0.5] = 1.0
-            data.node_scores[data.node_scores > 0.5] = 1.0
-            data.edge_scores[data.edge_scores <= 0.5] = 0.0
-            data.node_scores[data.node_scores <= 0.5] = 0.0
-
+            # data.edge_scores[data.edge_scores > 0.5] = 1.0
+            # data.node_scores[data.node_scores > 0.5] = 1.0
+            # data.edge_scores[data.edge_scores <= 0.5] = 0.0
+            # data.node_scores[data.node_scores <= 0.5] = 0.0
 
             loss_dict = {
                 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
@@ -239,8 +235,8 @@ class Trainer():
 
             t_end = time.time()
 
-            text = 'Epoch {} / {} step {} / {}, train loss = {:03f} | Batch time: {:.3f} | Data time: {:.3f}'.\
-                format(epoch, self.params.model.num_epochs, step+1, len(self.dataloader_train), loss.item(), t_end-t_start, 0.0)
+            text = 'Epoch {} / {}, it {} / {}, it glob {}, train loss = {:03f} | Batch time: {:.3f}'.\
+                format(epoch, self.params.model.num_epochs, step+1, len(self.dataloader_train), epoch * len(self.dataloader_train) + step+1, loss.item(), t_end-t_start)
             train_progress.set_description(text)
 
             self.total_step += 1

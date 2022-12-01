@@ -27,7 +27,7 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     return model
 
 
-def preprocess_sample(G_gt_nx, sat_image_, roi_xxyy, sample_no, out_path):
+def preprocess_sample(G_gt_nx, sat_image_, centerline_image_, roi_xxyy, sample_no, out_path):
 
     margin = 200
 
@@ -54,6 +54,10 @@ def preprocess_sample(G_gt_nx, sat_image_, roi_xxyy, sample_no, out_path):
     rgb = sat_image_[roi_xxyy[0] : roi_xxyy[1],
                      roi_xxyy[2] : roi_xxyy[3]]
 
+    centerline_context = centerline_image_[roi_xxyy[0] - margin:roi_xxyy[1] + margin,
+                                           roi_xxyy[2] - margin:roi_xxyy[3] + margin].copy().astype(np.float32)
+
+
     for edge_idx, edge in enumerate(G_gt_nx.edges):
         i, j = edge
         s_x, s_y = G_gt_nx.nodes[i]["pos"]
@@ -68,25 +72,39 @@ def preprocess_sample(G_gt_nx, sat_image_, roi_xxyy, sample_no, out_path):
         center = np.array([mid_x + margin, mid_y + margin])
 
         crop_img_rgb = get_oriented_crop(edge_angle, center[0], center[1], rgb_context)
+        crop_centerline = get_oriented_crop(edge_angle, center[0], center[1], centerline_context)
+
+        crop_img_rgb_ = transform2vgg(crop_img_rgb).unsqueeze(0).numpy()
+        crop_centerline_ = transform2vgg(crop_centerline).unsqueeze(0).numpy()
+        feats = np.concatenate([crop_img_rgb_, crop_centerline_], axis=1)
+
+        edge_img_feats.append(torch.tensor(feats))
 
         # print(center)
-        # print(sat_image_context.shape)
+        # print(delta_x, delta_y)
+        # print(rgb_context.shape)
         # print(crop_img_rgb.shape)
-        # fig, ax = plt.subplots(1, 2)
-        # ax[0].imshow(sat_image_context)
-        # ax[1].imshow(crop_img_rgb)
+        # fig, ax = plt.subplots(1, 3)
+        # ax[0].imshow(rgb_context)
+        # ax[1].imshow(rgb)
+        # ax[2].imshow(crop_img_rgb)
+
+        # # plot edges
+        # for e in G_gt_nx.edges:
+        #     ax[0].plot([G_gt_nx.nodes[e[0]]["pos"][0] + margin, G_gt_nx.nodes[e[1]]["pos"][0] + margin],
+        #                [G_gt_nx.nodes[e[0]]["pos"][1] + margin, G_gt_nx.nodes[e[1]]["pos"][1] + margin], "b")
+        #     ax[1].plot([G_gt_nx.nodes[e[0]]["pos"][0] , G_gt_nx.nodes[e[1]]["pos"][0] ],
+        #                   [G_gt_nx.nodes[e[0]]["pos"][1] , G_gt_nx.nodes[e[1]]["pos"][1] ], "b")
+        #
+        # ax[0].plot([s_x + margin, e_x + margin], [s_y + margin, e_y + margin], color="red")
+        # ax[1].plot([s_x , e_x ], [s_y , e_y ], color="red")
+        #
+        #
         # plt.show()
-
-        crop_img_rgb = transform2vgg(crop_img_rgb).unsqueeze(0)
-
-        #crop_img_feat = rgb_encoder(crop_img_rgb).detach()
-        #edge_img_feats.append(crop_img_feat)
-        edge_img_feats.append(crop_img_rgb)
 
         edge_tensor = torch.tensor([edge_angle, edge_len, mid_x, mid_y]).reshape(1, -1)
         edge_pos_feats.append(edge_tensor)
         edge_indices.append((i, j))
-
         edge_gt_score.append(G_gt_nx.edges[i, j]["p"])
 
     edge_indices = torch.tensor(edge_indices)
@@ -164,7 +182,8 @@ def bayes_update_graph(G, angle, x, y, p, r_min):
         node_id = list(G.nodes)[node]
         d = distances[node][0]
 
-        p = gaussian(d, 0, r_min)
+        #p = gaussian(d, 0, r_min)
+        p = 1
 
         G.nodes[node]["angle_observations"].append(angle)
         #G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + np.log(p / (1 - p))
@@ -172,6 +191,19 @@ def bayes_update_graph(G, angle, x, y, p, r_min):
 
     return G
 
+def assign_centerline_probs(G, centerline):
+
+    for node in G.nodes:
+        pos = G.nodes[node]["pos"]
+        centerline_val = centerline[int(pos[1]), int(pos[0])]
+        G.nodes[node]["p"] = centerline_val
+
+    for edge in G.edges:
+        midpoint = (G.nodes[edge[0]]["pos"] + G.nodes[edge[1]]["pos"]) / 2
+        centerline_val = centerline[int(midpoint[1]), int(midpoint[0])]
+        G.edges[edge]["p"] = centerline_val
+
+    return G
 
 def angle_kde(G):
 
@@ -223,6 +255,7 @@ def get_scenario_centerlines(static_map_path):
 
         centerlines.append(centerline)
 
+
     return np.array(centerlines)
 
 
@@ -235,10 +268,10 @@ if __name__ == "__main__":
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
-    rgb_encoder = edge_feature_encoder(in_channels=3, out_features=32)
-
 
     sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/Austin.png"))
+    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/Austin_centerlines.png"))
+    centerline_image_ = centerline_image_ / 255.0
 
     # generate roi_xxyy list over full satellite image in sliding window fashion
     roi_xxyy_list = []
@@ -252,7 +285,7 @@ if __name__ == "__main__":
 
 
     if not os.path.exists("lanes.npy"):
-        all_scenario_files = all_scenario_files[0:1000]
+        #all_scenario_files = all_scenario_files[0:1000]
 
         trajectories_ = []
         lanes_ = []
@@ -310,6 +343,7 @@ if __name__ == "__main__":
 
     for roi_xxyy in roi_xxyy_list:
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
+        centerline_image = centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
 
         trajectories = []
         for t in range(len(trajectories_)):
@@ -390,24 +424,9 @@ if __name__ == "__main__":
             print("no edge with high probability. skipping")
             continue
 
-
         # rescale probabilities
         node_probabilities = (node_probabilities - np.min(node_probabilities)) / (np.max(node_probabilities) - np.min(node_probabilities))
         edge_probabilities = (edge_probabilities - np.min(edge_probabilities)) / (np.max(edge_probabilities) - np.min(edge_probabilities))
-
-        cmap = plt.get_cmap('jet')
-        norm = plt.Normalize(vmin=0.0, vmax=1.0)
-        node_colors = cmap(norm(node_probabilities))
-
-        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        # ax.hist(edge_log_odds, bins=20, range=(0,1))
-        # ax.hist(edge_probabilities, bins=20, range=(0,1), alpha=0.5, color="red")
-        # plt.show()
-
-        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        # ax.hist(node_probabilities, bins=20, range=(0,1), color="red")
-        # plt.show()
-
 
         # assign probabilities to edges
         for i, e in enumerate(G.edges):
@@ -416,14 +435,23 @@ if __name__ == "__main__":
         for i, n in enumerate(G.nodes):
             G.nodes[n]["p"] = node_probabilities[i]
 
+        # ignore all before and just assign centerline probs
+        G = assign_centerline_probs(G, centerline_image)
+        node_probabilities = np.array([G.nodes[n]["p"] for n in G.nodes])
+        edge_probabilities = np.array([G.edges[e]["p"] for e in G.edges])
+
+        cmap = plt.get_cmap('viridis')
+        norm = plt.Normalize(vmin=0.0, vmax=1.0)
+        node_colors = cmap(norm(node_probabilities))
 
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
         ax.imshow(sat_image)
+        ax.imshow(centerline_image, alpha=0.5)
 
         # draw edges
         for t in trajectories:
-            ax.plot(t[:, 0], t[:, 1], color="black", alpha=0.4, linewidth=0.5)
+            ax.plot(t[:, 0], t[:, 1], 'rx', markersize=1)
 
         for n in G.nodes:
             angle_peaks = G.nodes[n]["angle_peaks"]
@@ -446,5 +474,6 @@ if __name__ == "__main__":
         plt.savefig("{}/{:04d}.png".format(out_path, sample_no))
 
         # preprocess sample into pth file
-        sample = preprocess_sample(G, sat_image_=sat_image_, roi_xxyy=roi_xxyy, sample_no=sample_no, out_path=out_path)
+        sample = preprocess_sample(G, sat_image_=sat_image_, centerline_image_=centerline_image_, roi_xxyy=roi_xxyy,
+                                   sample_no=sample_no, out_path=out_path)
         sample_no += 1

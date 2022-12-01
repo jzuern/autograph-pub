@@ -1098,12 +1098,9 @@ def get_ego_regression_target(params, data, split):
 def get_oriented_crop(edge_angle, mid_x, mid_y, rgb_context):
     # Size of quadratic destination image
     crop_size = 100
-    imsize = 512
 
     crop_rad = edge_angle
-    crop_x = mid_x + rgb_context.shape[1] // 4
-    crop_y = mid_y + rgb_context.shape[1] // 4
-    center = np.array([crop_x, crop_y])
+    center = np.array([mid_x, mid_y])
 
     # Source point coordinates already in coordinate system around center point of future crop
     src_pts = np.array([[-crop_size // 2, crop_size // 2 - 1],
