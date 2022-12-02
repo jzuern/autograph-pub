@@ -34,7 +34,6 @@ def preprocess_sample(G_gt_nx, sat_image_, centerline_image_, roi_xxyy, sample_n
     node_gt_score = []
     node_pos_feats = []
 
-
     for node in G_gt_nx.nodes:
         node_gt_score.append(G_gt_nx.nodes[node]["p"])
         node_pos_feats.append(G_gt_nx.nodes[node]["pos"])
@@ -186,10 +185,10 @@ def bayes_update_graph(G, angle, x, y, p, r_min):
         p = 1
 
         G.nodes[node]["angle_observations"].append(angle)
-        #G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + np.log(p / (1 - p))
         G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + p
 
     return G
+
 
 def assign_centerline_probs(G, centerline):
 
@@ -395,7 +394,7 @@ if __name__ == "__main__":
         # plt.imshow(am)
         # plt.show()
 
-        r_min = 15  # minimum radius of the circle for poisson disc sampling
+        r_min = 10  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in tqdm(trajectories):
@@ -437,6 +436,19 @@ if __name__ == "__main__":
 
         # ignore all before and just assign centerline probs
         G = assign_centerline_probs(G, centerline_image)
+
+        # remove all nodes with low probability
+        G_ = G.copy()
+        for n in G_.nodes:
+            if G.nodes[n]["p"] < 0.5:
+                G.remove_node(n)
+
+        # remap node ids and edges
+        node_ids = list(G.nodes)
+        node_id_map = {node_ids[i]: i for i in range(len(node_ids))}
+        G = nx.relabel_nodes(G, node_id_map)
+
+
         node_probabilities = np.array([G.nodes[n]["p"] for n in G.nodes])
         edge_probabilities = np.array([G.edges[e]["p"] for e in G.edges])
 
@@ -474,6 +486,10 @@ if __name__ == "__main__":
         plt.savefig("{}/{:04d}.png".format(out_path, sample_no))
 
         # preprocess sample into pth file
-        sample = preprocess_sample(G, sat_image_=sat_image_, centerline_image_=centerline_image_, roi_xxyy=roi_xxyy,
-                                   sample_no=sample_no, out_path=out_path)
+        preprocess_sample(G,
+                          sat_image_=sat_image_,
+                          centerline_image_=centerline_image_,
+                          roi_xxyy=roi_xxyy,
+                          sample_no=sample_no,
+                          out_path=out_path)
         sample_no += 1

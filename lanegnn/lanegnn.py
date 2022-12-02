@@ -18,59 +18,70 @@ def get_map_encoder(out_features=64, in_channels=3):
 
 
 class LaneGNN(torch.nn.Module):
-    def __init__(self, gnn_depth, edge_geo_dim, map_feat_dim, edge_dim, node_dim, msg_dim, in_channels=3, ego_regressor=None, context_regressor=None):
+    def __init__(self, gnn_depth, edge_geo_dim, map_feat_dim, edge_dim, node_dim, msg_dim, in_channels=3,
+                 ego_regressor=None, context_regressor=None):
         super(LaneGNN, self).__init__()
 
         self.edge_geo_dim = edge_geo_dim
         self.depth = gnn_depth
 
         self.edge_encoder = nn.Sequential(
-            nn.Linear(4, int(edge_geo_dim/2)),
+            nn.Linear(4, int(edge_geo_dim / 2)),
             nn.ReLU(inplace=True),
-            nn.Linear(int(edge_geo_dim/2), edge_geo_dim),
+            nn.Linear(int(edge_geo_dim / 2), edge_geo_dim),
         )
-        
-        self.map_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=in_channels)
+
+        self.map_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=in_channels)  # default: 64
 
         self.fuse_edge = nn.Sequential(
-            nn.Linear(edge_geo_dim+map_feat_dim, edge_dim*2),
+            nn.Linear(edge_geo_dim + map_feat_dim, edge_dim * 2),
             nn.ReLU(inplace=True),
-            nn.Linear(edge_dim*2, edge_dim),
+            nn.Linear(edge_dim * 2, edge_dim),
         )
 
         self.pose_encoder = nn.Sequential(
-            nn.Linear(2, int(node_dim/2)),
+            nn.Linear(2, int(node_dim / 2)),
             nn.ReLU(),
-            nn.Linear(int(node_dim/2), node_dim)
+            nn.Linear(int(node_dim / 2), node_dim)
         )
 
         self.node_classifier = nn.Sequential(
-            nn.Linear(node_dim, int(node_dim/2)),
+            nn.Linear(node_dim, int(node_dim / 2)),
             nn.ReLU(),
-            nn.Linear(int(node_dim/2), int(node_dim/4)),
+            nn.Linear(int(node_dim / 2), int(node_dim / 4)),
             nn.ReLU(),
-            nn.Linear(int(node_dim/4), 1),
+            nn.Linear(int(node_dim / 4), 1),
+        )
+
+        self.endpoint_classifier = nn.Sequential(
+            nn.Linear(node_dim, int(node_dim / 2)),
+            nn.ReLU(),
+            nn.Linear(int(node_dim / 2), int(node_dim / 4)),
+            nn.ReLU(),
+            nn.Linear(int(node_dim / 4), 1),
         )
 
         self.edge_classifier = nn.Sequential(
-            nn.Linear(edge_dim, int(edge_dim/2)),
+            nn.Linear(edge_dim, int(edge_dim / 2)),
             nn.ReLU(),
-            nn.Linear(int(edge_dim/2), int(edge_dim/4)),
+            nn.Linear(int(edge_dim / 2), int(edge_dim / 4)),
             nn.ReLU(),
-            nn.Linear(int(edge_dim/4), 1),
+            nn.Linear(int(edge_dim / 4), 1),
         )
 
         self.message_passing = CausalMessagePassing(node_dim=node_dim, edge_dim=edge_dim, msg_dim=msg_dim)
- 
-    def forward(self, data):
 
+
+    def forward(self, data):
         node_feats, edge_img_feats, edge_attr, edge_index = (
             data.node_feats,
             data.edge_img_feats,
             data.edge_pos_feats,
-            data.edge_indices
+            data.edge_indices,
         )
 
+        if edge_index.shape[1] == 2:
+            edge_index = edge_index.t().contiguous()
 
         x = self.pose_encoder(node_feats.float())  # N x D
         initial_x = x
@@ -83,60 +94,57 @@ class LaneGNN(torch.nn.Module):
 
         edge_attr = self.fuse_edge(fused_edge_attr)  # E x (D_E)
 
-        if edge_index.shape[0] != 2:
-            edge_index = edge_index.t().contiguous()
-
         for i in range(self.depth):
-            node_feats, edge_attr = self.message_passing.forward(node_feats=x,
-                                                                  edge_indices=edge_index,
-                                                                  edge_feats=edge_attr,
-                                                                  initial_node_feats=initial_x)
-            
-        return self.edge_classifier(edge_attr), self.node_classifier(node_feats)
+            x, edge_attr = self.message_passing.forward(x=x,
+                                                        edge_index=edge_index,
+                                                        edge_attr=edge_attr,
+                                                        initial_x=initial_x)
 
-        
+        return self.edge_classifier(edge_attr), self.node_classifier(x), self.endpoint_classifier(x)
+
+
 class CausalMessagePassing(torch_geometric.nn.MessagePassing):
 
     def __init__(self, node_dim=16, edge_dim=32, msg_dim=32):
         super(CausalMessagePassing, self).__init__(aggr='add', )
 
         self.my_edge_update = nn.Sequential(
-            nn.Linear(node_dim*2+edge_dim, node_dim*2),
+            nn.Linear(node_dim * 2 + edge_dim, node_dim * 2),
             nn.ReLU(),
-            nn.Linear(node_dim*2, edge_dim*2),
+            nn.Linear(node_dim * 2, edge_dim * 2),
             nn.ReLU(),
-            nn.Linear(edge_dim*2, edge_dim),
+            nn.Linear(edge_dim * 2, edge_dim),
         )
 
         self.create_past_msgs = nn.Sequential(
-            nn.Linear(node_dim*2+edge_dim, msg_dim*2),
+            nn.Linear(node_dim * 2 + edge_dim, msg_dim * 2),
             nn.ReLU(),
-            nn.Linear(msg_dim*2, msg_dim)
+            nn.Linear(msg_dim * 2, msg_dim)
         )
 
         self.create_future_msgs = nn.Sequential(
-            nn.Linear(node_dim*2+edge_dim, msg_dim*2),
+            nn.Linear(node_dim * 2 + edge_dim, msg_dim * 2),
             nn.ReLU(),
-            nn.Linear(msg_dim*2, msg_dim)
+            nn.Linear(msg_dim * 2, msg_dim)
         )
 
         self.combine_future_past = nn.Sequential(
-            nn.Linear(msg_dim*2, node_dim*2),
+            nn.Linear(msg_dim * 2, node_dim * 2),
             nn.ReLU(),
-            nn.Linear(node_dim*2, node_dim)
+            nn.Linear(node_dim * 2, node_dim)
         )
 
     def message_and_aggregate(self, adj_t: SparseTensor) -> Tensor:
         pass
 
-    def forward(self, node_feats, edge_indices, edge_feats, initial_node_feats):
+    def forward(self, x, edge_index, edge_attr, initial_x):
         # x has shape [N, in_channels]
         # edge_index has shape [2, E]
-        return self.propagate(edge_indices,
-                              size=(node_feats.size(0), node_feats.size(0)),
-                              x=node_feats,
-                              edge_attr=edge_feats,
-                              initial_x=initial_node_feats)
+        return self.propagate(edge_index,
+                              size=(x.size(0), x.size(0)),
+                              x=x,
+                              edge_attr=edge_attr,
+                              initial_x=initial_x)
 
     def propagate(self, edge_index: Adj, size: Size = None, **kwargs):
         r"""The initial call to start propagating messages.
@@ -188,10 +196,6 @@ class CausalMessagePassing(torch_geometric.nn.MessagePassing):
                                          kwargs)
 
             msg_kwargs = self.inspector.distribute('message', coll_dict)
-            #print(msg_kwargs)
-
-            #out = self.message(**msg_kwargs)
-
             past_msgs, future_msgs, update_edges_attr = self.message(**msg_kwargs)
 
             rows, cols = edge_index
@@ -221,19 +225,19 @@ class CausalMessagePassing(torch_geometric.nn.MessagePassing):
         :obj:`_j` to the variable name, *.e.g.* :obj:`x_i` and :obj:`x_j`.
         """
         # Update the edge features based on the adjacent nodes
-        #print("x_i shape: "+str(x_i.shape))
-        #print("x_j shape: "+str(x_j.shape))
-        #print("edge_attr shape: " +  str(edge_attr.shape))
+        # print("x_i shape: "+str(x_i.shape))
+        # print("x_j shape: "+str(x_j.shape))
+        # print("edge_attr shape: " +  str(edge_attr.shape))
 
         edge_update_features = torch.cat([x_i, x_j, edge_attr], dim=1)
-
+        # print(edge_update_features.shape)
         updated_edge_attr = self.my_edge_update(edge_update_features)
 
         # To construct messages that are in the future we look at
         # the features going into the nodes (edge directed into the future), thus x_i
-        #print("x_i shape: " + str(x_i.shape))
-        #print("updated_edge_attr shape: " + str(updated_edge_attr.shape))
-        #print("initial_x_i shape: " + str(initial_x_i.shape))
+        # print("x_i shape: " + str(x_i.shape))
+        # print("updated_edge_attr shape: " + str(updated_edge_attr.shape))
+        # print("initial_x_i shape: " + str(initial_x_i.shape))
 
         future_msg_feats = torch.cat([x_i, updated_edge_attr, initial_x_i], dim=1)
         future_msgs = self.create_future_msgs(future_msg_feats)
@@ -269,7 +273,7 @@ class CausalMessagePassing(torch_geometric.nn.MessagePassing):
         Takes in the output of aggregation as first argument and any argument
         which was initially passed to :meth:`propagate`.
         """
-        #Combine future and past
+        # Combine future and past
         updated_nodes = self.combine_future_past(inputs)
 
         return updated_nodes

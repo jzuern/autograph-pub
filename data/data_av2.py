@@ -444,7 +444,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         print("Loading preprocessed dataset from {}".format(path))
 
         self.path = path
-        self.pth_files = sorted(glob(path + '/*.pth'))
+        self.pth_files = sorted(glob(path + '/*.pth')) + sorted(glob(path + '/*.pt'))
         print("Found {} files".format(len(self.pth_files)))
         self.check_files()
 
@@ -474,6 +474,12 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         node_feats = data['node_feats'].float()
         node_scores = data['node_scores'].float()
 
+        # watershed = 0.7
+        # edge_scores[edge_scores > watershed] = 1.0
+        # node_scores[node_scores > watershed] = 1.0
+        # edge_scores[edge_scores <= watershed] = 0.0
+        # node_scores[node_scores <= watershed] = 0.0
+
         data = torch_geometric.data.Data(node_feats=node_feats,
                                          edge_indices=edge_indices.contiguous(),
                                          edge_pos_feats=edge_pos_feats,
@@ -489,4 +495,106 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
 
         return data
 
+
+
+
+
+class PreprocessedDatasetSuccessor(torch_geometric.data.Dataset):
+
+    def __init__(self, path):
+        super(PreprocessedDatasetSuccessor, self).__init__()
+
+
+        self.node_feats_files = []
+        self.edge_files = []
+        self.edge_attr_files = []
+        self.edge_img_feats_files = []
+        self.node_gt_files = []
+        self.node_endpoint_gt_files = []
+        self.edge_gt_files = []
+        self.edge_gt_onehot_files = []
+        self.gt_graph_files = []
+        self.rgb_files = []
+        self.rgb_context_files = []
+        self.context_regr_smooth_files = []
+        self.ego_regr_smooth_files = []
+
+        city_str = '*'
+        print(path + '/{}-node-feats.pth'.format(city_str))
+        self.node_feats_files.extend(glob(path + '/{}-node-feats.pth'.format(city_str)))
+        self.edge_files.extend(glob(path + '/{}-edges.pth'.format(city_str)))
+        self.edge_attr_files.extend(glob(path + '/{}-edge-attr.pth'.format(city_str)))
+        self.edge_img_feats_files.extend(glob(path + '/{}-edge-img-feats.pth'.format(city_str)))
+        self.node_gt_files.extend(glob(path + '/{}-node-gt.pth'.format(city_str)))
+        self.node_endpoint_gt_files.extend(glob(path + '/{}-node-endpoint-gt.pth'.format(city_str)))
+        self.edge_gt_files.extend(glob(path + '/{}-edge-gt.pth'.format(city_str)))
+        self.edge_gt_onehot_files.extend(glob(path + '/{}-edge-gt-onehot.pth'.format(city_str)))
+        self.gt_graph_files.extend(glob(path + '/{}-gt-graph.pth'.format(city_str)))
+        self.rgb_files.extend(glob(path + '/{}-rgb.pth'.format(city_str)))
+        self.rgb_context_files.extend(glob(path + '/{}-rgb-context.pth'.format(city_str)))
+        self.context_regr_smooth_files.extend(glob(path + '/{}-context-regr-smooth.pth'.format(city_str)))
+        self.ego_regr_smooth_files.extend(glob(path + '/{}-ego-regr-smooth.pth'.format(city_str)))
+
+        self.node_feats_files = sorted(self.node_feats_files)
+        self.edge_files = sorted(self.edge_files)
+        self.edge_attr_files = sorted(self.edge_attr_files)
+        self.edge_img_feats_files = sorted(self.edge_img_feats_files)
+        self.node_gt_files = sorted(self.node_gt_files)
+        self.node_endpoint_gt_files = sorted(self.node_endpoint_gt_files)
+        self.edge_gt_files = sorted(self.edge_gt_files)
+        self.edge_gt_onehot_files = sorted(self.edge_gt_onehot_files)
+        self.gt_graph_files = sorted(self.gt_graph_files)
+        self.rgb_files = sorted(self.rgb_files)
+        self.rgb_context_files = sorted(self.rgb_context_files)
+        self.context_regr_smooth_files = sorted(self.context_regr_smooth_files)
+        self.ego_regr_smooth_files = sorted(self.ego_regr_smooth_files)
+
+        print("Found {} samples in path {}".format(len(self.rgb_files), path))
+
+
+    def __len__(self):
+        return len(self.rgb_files)
+
+    def __getitem__(self, index):
+        # Return reduced data object if the index is in the index_filter (to save time)
+
+        start_time = time.time()
+
+        node_feats = torch.load(self.node_feats_files[index])
+        edges = torch.load(self.edge_files[index])
+        edge_attr = torch.load(self.edge_attr_files[index])
+        edge_img_feats = torch.load(self.edge_img_feats_files[index]).to(torch.float32) / 255.0 # cast uint8 to float32
+        node_gt = torch.load(self.node_gt_files[index])
+        node_endpoint_gt = torch.load(self.node_endpoint_gt_files[index]).float()
+        edge_gt = torch.load(self.edge_gt_files[index])
+        edge_gt_onehot = torch.load(self.edge_gt_onehot_files[index])
+        gt_graph = torch.load(self.gt_graph_files[index])
+        rgb = torch.load(self.rgb_files[index])
+        rgb_context = torch.load(self.rgb_context_files[index])
+        context_regr_smooth = torch.load(self.context_regr_smooth_files[index])
+        ego_regr_smooth = torch.load(self.ego_regr_smooth_files[index])
+
+        # switch node columns to match the order of the edge columns
+        node_feats = torch.cat((node_feats[:, 1:2], node_feats[:, 0:1]), dim=1)
+
+
+        data = torch_geometric.data.Data(node_feats=node_feats,
+                                         edge_indices=edges.t().contiguous(),
+                                         edge_pos_feats=edge_attr,
+                                         edge_img_feats=edge_img_feats,
+                                         node_scores=node_gt.t().contiguous(),
+                                         #node_endpoint_gt=node_endpoint_gt.t().contiguous(),
+                                         edge_scores=edge_gt.t().contiguous(),
+                                         #edge_gt_onehot=edge_gt_onehot.t().contiguous(),
+                                         gt_graph=gt_graph,
+                                         num_nodes=node_feats.shape[0],
+                                         batch_idx=torch.tensor(len(gt_graph)),
+                                         rgb=torch.FloatTensor(rgb / 255.), # [0.0, 1.0]
+                                         rgb_context=torch.FloatTensor(rgb_context / 255.), # [0.0, 1.0]
+                                         context_regr_smooth=torch.FloatTensor(context_regr_smooth), # [0.0, 1.0]
+                                         ego_regr_smooth=torch.FloatTensor(ego_regr_smooth), # [0.0, 1.0]
+                                         data_time=torch.tensor(time.time() - start_time),
+                                         )
+
+        return data
 

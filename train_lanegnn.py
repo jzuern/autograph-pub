@@ -19,7 +19,7 @@ from torch_geometric.data import Batch
 
 
 from lanegnn.lanegnn import LaneGNN
-from data.data_av2 import PreprocessedDataset
+from data.data_av2 import PreprocessedDataset, PreprocessedDatasetSuccessor
 from lanegnn.utils import ParamLib, assign_edge_lengths
 from metrics.metrics import calc_all_metrics
 from lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
@@ -64,7 +64,7 @@ class Trainer():
         plt.tight_layout()
 
         with torch.no_grad():
-            edge_scores_pred, node_scores_pred = self.model(data)
+            edge_scores_pred, node_scores_pred, _ = self.model(data)
             edge_scores_pred = torch.nn.Sigmoid()(edge_scores_pred).squeeze().cpu().numpy()
             node_scores_pred = torch.nn.Sigmoid()(node_scores_pred).squeeze().cpu().numpy()
 
@@ -72,7 +72,9 @@ class Trainer():
             data = Batch.from_data_list(data)
 
         # Do logging
-        #num_edges_in_batch = unbatch_edge_index(data.edge_indices.T, data.batch)[0].shape[1]
+        if data.edge_indices.shape[0] == 2:
+            data.edge_indices = data.edge_indices.t().contiguous()
+
         num_edges_in_batch = self.crappy_edge_batch_detection(data.edge_indices)
         if len(num_edges_in_batch) > 0:
             num_edges_in_batch = num_edges_in_batch[0]
@@ -85,6 +87,7 @@ class Trainer():
         edge_indices = data.edge_indices[:num_edges_in_batch].cpu().numpy()
         node_scores_pred = node_scores_pred[data.batch.cpu() == 0]
         edge_scores_pred = edge_scores_pred[:num_edges_in_batch]
+
 
         num_rgb_rows = data.rgb.shape[0] // np.unique(data.batch.cpu().numpy()).shape[0]
         rgb = data.rgb[:num_rgb_rows].cpu().numpy()
@@ -172,7 +175,6 @@ class Trainer():
     def train(self, epoch):
 
         self.model.train()
-        print('Training')
 
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
@@ -186,7 +188,7 @@ class Trainer():
                 data = data.to(self.device)
 
             # loss and optim
-            edge_scores, node_scores = self.model(data)
+            edge_scores, node_scores, _ = self.model(data)
             edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
             node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
 
@@ -204,10 +206,6 @@ class Trainer():
                 edge_weight[data.edge_scores < 0.4] = 0.0
                 node_weight[data.node_scores < 0.4] = 0.0
 
-            # data.edge_scores[data.edge_scores > 0.5] = 1.0
-            # data.node_scores[data.node_scores > 0.5] = 1.0
-            # data.edge_scores[data.edge_scores <= 0.5] = 0.0
-            # data.node_scores[data.node_scores <= 0.5] = 0.0
 
             loss_dict = {
                 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
@@ -223,12 +221,12 @@ class Trainer():
 
             if not self.params.main.disable_wandb:
                 wandb.log({"train/loss_total": loss.item(),
-                           "train/edge_loss": loss_dict['edge_loss'].item(),
+                           #"train/edge_loss": loss_dict['edge_loss'].item(),
                            "train/node_loss": loss_dict['node_loss'].item()}
                           )
 
             # # Visualization
-            if self.total_step % 500 == 0:
+            if self.total_step % 1000 == 0:
                 if self.params.model.dataparallel:
                     data = data_orig
                 self.do_logging(data, self.total_step, 'train/Images', 'train')
@@ -244,124 +242,125 @@ class Trainer():
         if not self.params.main.disable_wandb:
             wandb.log({"train/epoch": epoch})
 
-    def eval(self, epoch, split='test'):
-
-        edge_threshold = 0.5
-        node_threshold = 0.5
-
-        self.model.eval()
-        print('Evaluating on {}'.format(split))
-
-        if split == 'test':
-            dataloader = self.dataloader_test
-        elif split == 'trainoverfit':
-            dataloader = self.dataloader_trainoverfit
-        else:
-            raise ValueError('Unknown split: {}'.format(split))
-
-        dataloader_progress = tqdm(dataloader, desc='Evaluating on {}'.format(split))
-
-        node_losses = []
-        node_endpoint_losses = []
-        edge_losses = []
-        ap_edge_list = []
-        ap_node_list = []
-        recall_edge_list = []
-        recall_node_list = []
-        metrics_dict_list = []
-
-        for i_val, data in enumerate(dataloader_progress):
-
-            if self.params.model.dataparallel:
-                data = [item.to(self.device) for item in data]
-            else:
-                data = data.to(self.device)
-
-            with torch.no_grad():
-                edge_scores, node_scores, endpoint_scores = self.model(data)
-                edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
-                node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
-
-            # Convert list of Data to DataBatch for post-processing and loss calculation
-            if self.params.model.dataparallel:
-                data_orig = data.copy()
-                data = Batch.from_data_list(data)
-
-            # loss and optim
-            edge_weight = torch.ones_like(data.edge_scores)
-            node_weight = torch.ones_like(data.node_scores)
-
-            edge_weight[data.edge_scores < 0.4] = 0.0
-            node_weight[data.node_scores < 0.4] = 0.0
-
-            try:
-                #edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_dijkstra)
-                edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores)
-                node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores)
-            except Exception as e:
-                print(e)
-                continue
-
-            node_losses.append(node_loss.item())
-            edge_losses.append(edge_loss.item())
-
-            ap_edge = average_precision((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1)
-            recall_edge = recall((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1, multiclass=False)
-            ap_node = average_precision((node_scores > node_threshold).int(), (data.node_gt > node_threshold).int(), num_classes=1)
-            recall_node = recall((node_scores > node_threshold).int(), (data.node_gt > node_threshold).int(), num_classes=1, multiclass=False)
-
-            ap_edge_list.append(ap_edge.item())
-            recall_edge_list.append(recall_edge.item())
-            ap_node_list.append(ap_node.item())
-            recall_node_list.append(recall_node.item())
-
-            data.edge_scores = edge_scores
-            data.node_scores = node_scores
-
-            # Get networkx graph objects
-            if self.params.model.dataparallel:
-                _, node_scores_pred, endpoint_scores_pred, _, img_rgb, node_pos, fut_nodes, _, startpoint_idx = preprocess_predictions(self.params, self.model, data_orig)
-            else:
-                _, node_scores_pred, endpoint_scores_pred, _, img_rgb, node_pos, fut_nodes, _, startpoint_idx = preprocess_predictions(self.params, self.model, data)
-
-            graph_pred_nx = predict_lanegraph(fut_nodes, startpoint_idx, node_scores_pred, endpoint_scores_pred, node_pos, endpoint_thresh=0.5, rad_thresh=20)
-            #graph_gt_nx = get_gt_graph(get_target_data(self.params, data, split=split))
-
-            graph_pred_nx = assign_edge_lengths(graph_pred_nx)
-            #graph_gt_nx = assign_edge_lengths(graph_gt_nx)
-
-            #metrics_dict = calc_all_metrics(graph_gt_nx, graph_pred_nx, split=split)
-            #metrics_dict_list.append(metrics_dict)
-
-            # Visualization
-            if i_val % 25 == 0:
-                if self.params.model.dataparallel:
-                    data = data_orig
-                self.do_logging(data, self.total_step, plot_text='test/Images', split='test')
-
-        ap_edge_mean = np.mean(ap_edge_list)
-        recall_edge_mean = np.mean(recall_edge_list)
-        ap_node_mean = np.mean(ap_node_list)
-        recall_node_mean = np.mean(recall_node_list)
-
-        # Calculate mean values for all metrics in metrics_dict
-        # metrics_dict_mean = {}
-        # for key in metrics_dict_list[0].keys():
-        #     metrics_dict_mean[key] = np.mean([metrics_dict[key] for metrics_dict in metrics_dict_list])
-        #     print('{}: {:.3f}'.format(key, metrics_dict_mean[key])
-
-        print('Edge AP: {:.3f}, Recall: {:.3f}'.format(ap_edge_mean, recall_edge_mean))
-        print('Node AP: {:.3f}, Recall: {:.3f}'.format(ap_node_mean, recall_node_mean))
-        print('Edge loss: {:.3f}, Node loss: {:.3f}, Node endpoint loss: {:.3f}'.format(np.mean(edge_losses), np.mean(node_losses), np.mean(node_endpoint_losses)))
-        print('Total loss: {:.3f}'.format(np.mean(edge_losses) + np.mean(node_losses)))
-
-        if not self.params.main.disable_wandb:
-            wandb.log({"{}/Edge AP".format(split): ap_edge_mean,
-                       "{}/Edge Recall".format(split): recall_edge_mean,
-                       "{}/Node AP".format(split): ap_node_mean,
-                       "{}/Node Recall".format(split): recall_node_mean,
-                       "{}/Edge Loss".format(split): np.mean(edge_losses),
-                       "{}/Node Loss".format(split): np.mean(node_losses),})
+    # def eval(self, epoch, split='test'):
+    #
+    #     edge_threshold = 0.5
+    #     node_threshold = 0.5
+    #
+    #     self.model.eval()
+    #     print('Evaluating on {}'.format(split))
+    #
+    #     if split == 'test':
+    #         dataloader = self.dataloader_test
+    #     elif split == 'trainoverfit':
+    #         dataloader = self.dataloader_trainoverfit
+    #     else:
+    #         raise ValueError('Unknown split: {}'.format(split))
+    #
+    #     dataloader_progress = tqdm(dataloader, desc='Evaluating on {}'.format(split))
+    #
+    #     node_losses = []
+    #     node_endpoint_losses = []
+    #     edge_losses = []
+    #     ap_edge_list = []
+    #     ap_node_list = []
+    #     recall_edge_list = []
+    #     recall_node_list = []
+    #     metrics_dict_list = []
+    #
+    #     for i_val, data in enumerate(dataloader_progress):
+    #
+    #         if self.params.model.dataparallel:
+    #             data = [item.to(self.device) for item in data]
+    #         else:
+    #             data = data.to(self.device)
+    #
+    #         with torch.no_grad():
+    #             edge_scores, node_scores, endpoint_scores = self.model(data)
+    #             edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
+    #             node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
+    #
+    #         # Convert list of Data to DataBatch for post-processing and loss calculation
+    #         if self.params.model.dataparallel:
+    #             data_orig = data.copy()
+    #             data = Batch.from_data_list(data)
+    #
+    #         # loss and optim
+    #         edge_weight = torch.ones_like(data.edge_scores)
+    #         node_weight = torch.ones_like(data.node_scores)
+    #
+    #         #edge_weight[data.edge_scores < 0.4] = 0.0
+    #         #node_weight[data.node_scores < 0.4] = 0.0
+    #
+    #         try:
+    #             #edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores)
+    #             #node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores)
+    #             node_loss = torch.nn.MSELoss()(node_scores, data.node_scores)
+    #             edge_loss = torch.nn.MSELoss()(node_scores, data.node_scores)
+    #         except Exception as e:
+    #             print(e)
+    #             continue
+    #
+    #         node_losses.append(node_loss.item())
+    #         edge_losses.append(edge_loss.item())
+    #
+    #         ap_edge = average_precision((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1)
+    #         recall_edge = recall((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1, multiclass=False)
+    #         ap_node = average_precision((node_scores > node_threshold).int(), (data.node_gt > node_threshold).int(), num_classes=1)
+    #         recall_node = recall((node_scores > node_threshold).int(), (data.node_gt > node_threshold).int(), num_classes=1, multiclass=False)
+    #
+    #         ap_edge_list.append(ap_edge.item())
+    #         recall_edge_list.append(recall_edge.item())
+    #         ap_node_list.append(ap_node.item())
+    #         recall_node_list.append(recall_node.item())
+    #
+    #         data.edge_scores = edge_scores
+    #         data.node_scores = node_scores
+    #
+    #         # Get networkx graph objects
+    #         if self.params.model.dataparallel:
+    #             _, node_scores_pred, endpoint_scores_pred, _, img_rgb, node_pos, fut_nodes, _, startpoint_idx = preprocess_predictions(self.params, self.model, data_orig)
+    #         else:
+    #             _, node_scores_pred, endpoint_scores_pred, _, img_rgb, node_pos, fut_nodes, _, startpoint_idx = preprocess_predictions(self.params, self.model, data)
+    #
+    #         graph_pred_nx = predict_lanegraph(fut_nodes, startpoint_idx, node_scores_pred, endpoint_scores_pred, node_pos, endpoint_thresh=0.5, rad_thresh=20)
+    #         #graph_gt_nx = get_gt_graph(get_target_data(self.params, data, split=split))
+    #
+    #         graph_pred_nx = assign_edge_lengths(graph_pred_nx)
+    #         #graph_gt_nx = assign_edge_lengths(graph_gt_nx)
+    #
+    #         #metrics_dict = calc_all_metrics(graph_gt_nx, graph_pred_nx, split=split)
+    #         #metrics_dict_list.append(metrics_dict)
+    #
+    #         # Visualization
+    #         if i_val % 25 == 0:
+    #             if self.params.model.dataparallel:
+    #                 data = data_orig
+    #             self.do_logging(data, self.total_step, plot_text='test/Images', split='test')
+    #
+    #     ap_edge_mean = np.mean(ap_edge_list)
+    #     recall_edge_mean = np.mean(recall_edge_list)
+    #     ap_node_mean = np.mean(ap_node_list)
+    #     recall_node_mean = np.mean(recall_node_list)
+    #
+    #     # Calculate mean values for all metrics in metrics_dict
+    #     # metrics_dict_mean = {}
+    #     # for key in metrics_dict_list[0].keys():
+    #     #     metrics_dict_mean[key] = np.mean([metrics_dict[key] for metrics_dict in metrics_dict_list])
+    #     #     print('{}: {:.3f}'.format(key, metrics_dict_mean[key])
+    #
+    #     print('Edge AP: {:.3f}, Recall: {:.3f}'.format(ap_edge_mean, recall_edge_mean))
+    #     print('Node AP: {:.3f}, Recall: {:.3f}'.format(ap_node_mean, recall_node_mean))
+    #     print('Edge loss: {:.3f}, Node loss: {:.3f}, Node endpoint loss: {:.3f}'.format(np.mean(edge_losses), np.mean(node_losses), np.mean(node_endpoint_losses)))
+    #     print('Total loss: {:.3f}'.format(np.mean(edge_losses) + np.mean(node_losses)))
+    #
+    #     if not self.params.main.disable_wandb:
+    #         wandb.log({"{}/Edge AP".format(split): ap_edge_mean,
+    #                    "{}/Edge Recall".format(split): recall_edge_mean,
+    #                    "{}/Node AP".format(split): ap_node_mean,
+    #                    "{}/Node Recall".format(split): recall_node_mean,
+    #                    "{}/Edge Loss".format(split): np.mean(edge_losses),
+    #                    "{}/Node Loss".format(split): np.mean(node_losses),})
 
 
 def main():
@@ -434,9 +433,14 @@ def main():
     # define own collator that skips bad samples
     train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
     test_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
-
     dataset_train = PreprocessedDataset(path=train_path)
     dataset_test = PreprocessedDataset(path=test_path)
+
+    #train_path = '/data/lanegraph/data_sep/all/010922-large/preprocessed/test/n400-halton-endpoint-010922-large-posreg/'
+    #dataset_train = PreprocessedDatasetSuccessor(path=train_path)
+    #dataset_test = PreprocessedDatasetSuccessor(path=train_path)
+
+
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
