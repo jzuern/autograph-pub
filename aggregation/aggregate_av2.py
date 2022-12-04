@@ -277,8 +277,8 @@ if __name__ == "__main__":
     # generate roi_xxyy list over full satellite image in sliding window fashion
     meta_roi = [25000, 35000, 15000, 25000]
     roi_xxyy_list = []
-    for i in range(meta_roi[2], meta_roi[3], 256):
-        for j in range(meta_roi[0], meta_roi[1], 256):
+    for i in range(meta_roi[2], meta_roi[3], 100):
+        for j in range(meta_roi[0], meta_roi[1], 100):
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()

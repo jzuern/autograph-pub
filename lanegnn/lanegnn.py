@@ -83,6 +83,8 @@ class LaneGNN(torch.nn.Module):
         if edge_index.shape[1] == 2:
             edge_index = edge_index.t().contiguous()
 
+        node_feats = node_feats / 256.
+
         x = self.pose_encoder(node_feats.float())  # N x D
         initial_x = x
 
@@ -94,11 +96,11 @@ class LaneGNN(torch.nn.Module):
 
         edge_attr = self.fuse_edge(fused_edge_attr)  # E x (D_E)
 
-        # for i in range(self.depth):
-        #     x, edge_attr = self.message_passing.forward(x=x,
-        #                                                 edge_index=edge_index,
-        #                                                 edge_attr=edge_attr,
-        #                                                 initial_x=initial_x)
+        for i in range(self.depth):
+            x, edge_attr = self.message_passing.forward(x=x,
+                                                        edge_index=edge_index,
+                                                        edge_attr=edge_attr,
+                                                        initial_x=initial_x)
 
         return self.edge_classifier(edge_attr), self.node_classifier(x), self.endpoint_classifier(x)
 

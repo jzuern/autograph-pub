@@ -28,7 +28,7 @@ model:
     beta_lo: 0.9
     beta_hi: 0.999
     num_epochs: 10000
-    gnn_depth: 6      # default: 3
+    gnn_depth: 1      # default: 1 works
     # lane_mpnn
     map_feat_dim: 64
     node_dim: 16

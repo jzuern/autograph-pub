@@ -10,7 +10,7 @@ import torch
 import torch.utils.data
 import torch_geometric.data
 from torchmetrics.functional.classification.average_precision import average_precision
-from torchmetrics.functional.classification.precision_recall import recall
+from torchmetrics.functional.classification.precision_recall import recall, precision
 import matplotlib.pyplot as plt
 
 from torch_geometric.nn import DataParallel
@@ -19,10 +19,9 @@ from torch_geometric.data import Batch
 
 
 from lanegnn.lanegnn import LaneGNN
-from data.data_av2 import PreprocessedDataset, PreprocessedDatasetSuccessor
+from data.data_av2 import PreprocessedDataset
 from lanegnn.utils import ParamLib, assign_edge_lengths
 from metrics.metrics import calc_all_metrics
-from lanegnn.traverse_endpoint import preprocess_predictions, predict_lanegraph
 
 
 
@@ -84,6 +83,11 @@ class Trainer():
         node_scores_pred = node_scores_pred[data.batch.cpu() == 0].detach().cpu().numpy()
         edge_scores_pred = edge_scores_pred[:num_edges_in_batch].detach().cpu().numpy()
 
+        # Calculate node and edge score accuracies
+        node_score_accuracy = np.sum(np.round(node_scores_pred) == np.round(node_scores_target)) / node_scores_target.shape[0]
+        edge_score_accuracy = np.sum(np.round(edge_scores_pred) == np.round(edge_scores_target)) / edge_scores_target.shape[0]
+        node_score_recall = recall(torch.from_numpy(node_scores_pred).int(), torch.from_numpy(node_scores_target).int())
+        edge_score_recall = recall(torch.from_numpy(edge_scores_pred).int(), torch.from_numpy(edge_scores_target).int())
 
         num_rgb_rows = data.rgb.shape[0] // np.unique(data.batch.cpu().numpy()).shape[0]
         rgb = data.rgb[:num_rgb_rows].cpu().numpy()
@@ -159,13 +163,19 @@ class Trainer():
             pass
 
         if not self.params.main.disable_wandb:
-            wandb.log({plot_text: figure_log})
+            wandb.log({plot_text: figure_log,
+                       "node_score_accuracy": node_score_accuracy,
+                       "edge_score_accuracy": edge_score_accuracy,
+                       "node_score_recall": node_score_recall,
+                       "edge_score_recall": edge_score_recall,
+                       "node_score_pred": wandb.Histogram(node_scores_pred),
+                       })
 
         del figure_log
         del axarr_log
         plt.close()
 
-        print("\n...logging completed!")
+
 
     def train(self, epoch):
 
@@ -186,10 +196,6 @@ class Trainer():
             edge_scores, node_scores, _ = self.model(data)
             edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
             node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
-
-            # print(node_scores.shape)
-            # print(node_scores)
-            # print("------")
 
             # Convert list of Data to DataBatch for post-processing and loss calculation
             if self.params.model.dataparallel:
