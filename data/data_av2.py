@@ -504,7 +504,6 @@ class PreprocessedDatasetSuccessor(torch_geometric.data.Dataset):
     def __init__(self, path):
         super(PreprocessedDatasetSuccessor, self).__init__()
 
-
         self.node_feats_files = []
         self.edge_files = []
         self.edge_attr_files = []

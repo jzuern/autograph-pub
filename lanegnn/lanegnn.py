@@ -94,11 +94,11 @@ class LaneGNN(torch.nn.Module):
 
         edge_attr = self.fuse_edge(fused_edge_attr)  # E x (D_E)
 
-        for i in range(self.depth):
-            x, edge_attr = self.message_passing.forward(x=x,
-                                                        edge_index=edge_index,
-                                                        edge_attr=edge_attr,
-                                                        initial_x=initial_x)
+        # for i in range(self.depth):
+        #     x, edge_attr = self.message_passing.forward(x=x,
+        #                                                 edge_index=edge_index,
+        #                                                 edge_attr=edge_attr,
+        #                                                 initial_x=initial_x)
 
         return self.edge_classifier(edge_attr), self.node_classifier(x), self.endpoint_classifier(x)
 

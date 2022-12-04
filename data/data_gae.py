@@ -73,8 +73,7 @@ def get_func_graphs(n_graphs):
     return graphs
 
 
-def get_random_circles(n_graphs):
-    n_nodes = 100
+def get_random_circles(n_graphs, n_nodes=10):
 
     graphs = []
 

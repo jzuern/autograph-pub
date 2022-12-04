@@ -15,7 +15,7 @@ preprocessing:
     gt_pointwise: True
     sampling_method: poisson
     num_node_samples: 2000
-    edge_proposal_method: triangular  # triangular or random
+    edge_proposal_method: random  # triangular or random
     N_interp: 5
     k_waypoints: 1
     visualize: False

@@ -194,12 +194,11 @@ def assign_centerline_probs(G, centerline):
 
     for node in G.nodes:
         pos = G.nodes[node]["pos"]
-        centerline_val = centerline[int(pos[1]), int(pos[0])]
-        G.nodes[node]["p"] = centerline_val
+        G.nodes[node]["p"] = centerline[int(pos[1]), int(pos[0])] ** 2
 
     for edge in G.edges:
         midpoint = (G.nodes[edge[0]]["pos"] + G.nodes[edge[1]]["pos"]) / 2
-        centerline_val = centerline[int(midpoint[1]), int(midpoint[0])]
+        centerline_val = centerline[int(midpoint[1]), int(midpoint[0])]  ** 2
         G.edges[edge]["p"] = centerline_val
 
     return G
@@ -272,20 +271,21 @@ if __name__ == "__main__":
     centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/Austin_centerlines.png"))
     centerline_image_ = centerline_image_ / 255.0
 
+    # sat_image_ = 128 * np.ones((60000, 60000, 3), dtype=np.uint8)
+    # centerline_image_ = np.zeros((60000, 60000), dtype=np.uint8)
+
     # generate roi_xxyy list over full satellite image in sliding window fashion
+    meta_roi = [25000, 35000, 15000, 25000]
     roi_xxyy_list = []
-    for i in range(15000, 25000, 256):
-        for j in range(30000, 40000, 256):
+    for i in range(meta_roi[2], meta_roi[3], 256):
+        for j in range(meta_roi[0], meta_roi[1], 256):
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
 
     [R, c, t] = get_transform_params(city_name)
 
-
     if not os.path.exists("lanes.npy"):
-        #all_scenario_files = all_scenario_files[0:1000]
-
         trajectories_ = []
         lanes_ = []
 
@@ -336,9 +336,21 @@ if __name__ == "__main__":
         np.save("trajectories.npy", trajectories_)
         np.save("lanes.npy", lanes_)
     else:
-        #trajectories_ = np.load("trajectories.npy", allow_pickle=True)
-        trajectories_ = np.load("lanes.npy", allow_pickle=True)
+        trajectories_ = np.load("trajectories.npy", allow_pickle=True)
+        #trajectories_ = np.load("lanes.npy", allow_pickle=True)
 
+        ts = []
+        for trajectory in trajectories_:
+            if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
+                    np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
+                ts.append(trajectory)
+        trajectories_ = np.array(ts)
+        # print(len(trajectories_))
+        #
+        # for t in trajectories_:
+        #     plt.scatter(t[:, 0], t[:, 1], s=0.1, c="blue")
+        # plt.show()
+    meta_roi
 
     for roi_xxyy in roi_xxyy_list:
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
@@ -360,8 +372,84 @@ if __name__ == "__main__":
                 trajectories.append(trajectory)
 
         if len(trajectories) < 1:
-            print("no trajectories in roi. skipping")
+            print("no trajectories in roi {}. skipping".format(roi_xxyy))
             continue
+
+        print("number of trajectories in roi: ", len(trajectories))
+
+
+        # r_min = 5  # minimum radius of the circle for poisson disc sampling
+
+
+        # for trajectory in trajectories:
+        #     G = initialize_graph(roi_xxyy, r_min=r_min)
+        #
+        #     # Now we update the angular gridmap
+        #     for i in range(len(trajectory) - 1):
+        #         pos = trajectory[i]
+        #         next_pos = trajectory[i + 1]
+        #         angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
+        #         G = bayes_update_graph(G, angle, x=pos[0], y=pos[1], p=0.9, r_min=r_min)
+        #
+        #     node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
+        #     node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
+        #     for i, n in enumerate(G.nodes):
+        #         G.nodes[n]["p"] = node_probabilities[i]
+        #
+        #     for e in G.edges:
+        #         G.edges[e]["log_odds"] = G.nodes[e[0]]["log_odds"] + G.nodes[e[1]]["log_odds"]
+        #     edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
+        #     edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
+        #     for i, e in enumerate(G.edges):
+        #         G.edges[e]["p"] = edge_probabilities[i]
+        #
+        #     if np.count_nonzero(edge_log_odds[edge_log_odds > 1]) < 10:
+        #         print("no edge with high probability. skipping")
+        #         continue
+        #
+        #     # rescale probabilities
+        #     #node_probabilities = (node_probabilities - np.min(node_probabilities)) / (
+        #     #            np.max(node_probabilities) - np.min(node_probabilities))
+        #     #edge_probabilities = (edge_probabilities - np.min(edge_probabilities)) / (
+        #     #            np.max(edge_probabilities) - np.min(edge_probabilities))
+        #
+        #     cmap = plt.get_cmap('viridis')
+        #     norm = plt.Normalize(vmin=0.0, vmax=1.0)
+        #     node_colors = cmap(norm(node_probabilities))
+        #
+        #     fig, ax = plt.subplots(figsize=(10, 10))
+        #     ax.set_aspect('equal')
+        #     ax.imshow(sat_image)
+        #     #ax.imshow(centerline_image, alpha=0.5)
+        #
+        #     # draw edges
+        #     for t in trajectories:
+        #         ax.plot(t[:, 0], t[:, 1], 'rx', markersize=1)
+        #
+        #     edge_colors = cmap(norm(edge_probabilities))
+        #
+        #     nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
+        #                      edge_color=edge_colors,
+        #                      node_color=node_colors,
+        #                      with_labels=False,
+        #                      node_size=10,
+        #                      arrowsize=3.0,
+        #                      width=1,
+        #                      )
+        #
+        #     out_path = '/data/self-supervised-graph/preprocessed/av2'
+        #     plt.savefig("{}/{:04d}.png".format(out_path, sample_no))
+        #
+        #     # preprocess sample into pth file
+        #     preprocess_sample(G,
+        #                       sat_image_=sat_image_,
+        #                       centerline_image_=centerline_image_,
+        #                       roi_xxyy=roi_xxyy,
+        #                       sample_no=sample_no,
+        #                       out_path=out_path)
+        #     sample_no += 1
+        #
+        # G = initialize_graph(roi_xxyy, r_min=r_min)
 
         print("number of trajectories in roi: ", len(trajectories))
 
@@ -394,7 +482,7 @@ if __name__ == "__main__":
         # plt.imshow(am)
         # plt.show()
 
-        r_min = 10  # minimum radius of the circle for poisson disc sampling
+        r_min = 8  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in tqdm(trajectories):
@@ -434,23 +522,27 @@ if __name__ == "__main__":
         for i, n in enumerate(G.nodes):
             G.nodes[n]["p"] = node_probabilities[i]
 
-        # ignore all before and just assign centerline probs
-        G = assign_centerline_probs(G, centerline_image)
-
-        # remove all nodes with low probability
-        G_ = G.copy()
-        for n in G_.nodes:
-            if G.nodes[n]["p"] < 0.5:
-                G.remove_node(n)
-
-        # remap node ids and edges
-        node_ids = list(G.nodes)
-        node_id_map = {node_ids[i]: i for i in range(len(node_ids))}
-        G = nx.relabel_nodes(G, node_id_map)
+        # # ignore all before and just assign centerline probs
+        # G = assign_centerline_probs(G, centerline_image)
+        #
+        # # remove all nodes with low probability
+        # G_ = G.copy()
+        # for n in G_.nodes:
+        #     if G.nodes[n]["p"] < 0.5:
+        #         G.remove_node(n)
+        #
+        # # remap node ids and edges
+        # node_ids = list(G.nodes)
+        # node_id_map = {node_ids[i]: i for i in range(len(node_ids))}
+        # G = nx.relabel_nodes(G, node_id_map)
 
 
         node_probabilities = np.array([G.nodes[n]["p"] for n in G.nodes])
         edge_probabilities = np.array([G.edges[e]["p"] for e in G.edges])
+
+        if np.any(np.isnan(node_probabilities)) or np.any(np.isnan(edge_probabilities)):
+            print("nan in node or edge probabilities. skipping")
+            continue
 
         cmap = plt.get_cmap('viridis')
         norm = plt.Normalize(vmin=0.0, vmax=1.0)
@@ -459,7 +551,7 @@ if __name__ == "__main__":
         fig, ax = plt.subplots(figsize=(10, 10))
         ax.set_aspect('equal')
         ax.imshow(sat_image)
-        ax.imshow(centerline_image, alpha=0.5)
+        #ax.imshow(centerline_image, alpha=0.5)
 
         # draw edges
         for t in trajectories:

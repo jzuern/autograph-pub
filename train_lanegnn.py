@@ -57,16 +57,11 @@ class Trainer():
         return jumps
 
 
-    def do_logging(self, data, step, plot_text, split=None):
+    def do_logging(self, data, edge_scores_pred, node_scores_pred, plot_text):
         
         print("\nLogging synchronously...")
         figure_log, axarr_log = plt.subplots(1, 2, figsize=(15, 8))
         plt.tight_layout()
-
-        with torch.no_grad():
-            edge_scores_pred, node_scores_pred, _ = self.model(data)
-            edge_scores_pred = torch.nn.Sigmoid()(edge_scores_pred).squeeze().cpu().numpy()
-            node_scores_pred = torch.nn.Sigmoid()(node_scores_pred).squeeze().cpu().numpy()
 
         if self.params.model.dataparallel:
             data = Batch.from_data_list(data)
@@ -85,8 +80,9 @@ class Trainer():
         node_scores_target = data.node_scores[data.batch == 0].cpu().numpy()
         edge_scores_target = data.edge_scores[:num_edges_in_batch].cpu().numpy()
         edge_indices = data.edge_indices[:num_edges_in_batch].cpu().numpy()
-        node_scores_pred = node_scores_pred[data.batch.cpu() == 0]
-        edge_scores_pred = edge_scores_pred[:num_edges_in_batch]
+
+        node_scores_pred = node_scores_pred[data.batch.cpu() == 0].detach().cpu().numpy()
+        edge_scores_pred = edge_scores_pred[:num_edges_in_batch].detach().cpu().numpy()
 
 
         num_rgb_rows = data.rgb.shape[0] // np.unique(data.batch.cpu().numpy()).shape[0]
@@ -111,16 +107,15 @@ class Trainer():
             if graph_pred.has_node(i) and graph_pred.has_node(j):
                 graph_pred.add_edge(i, j, weight=1-edge_scores_pred[edge_idx])
 
-
         cmap = plt.get_cmap('viridis')
-        color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
-        color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
-        color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
-        color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
-        #color_edge_target = cmap(edge_scores_target)[:, 0:3]
-        #color_node_target = cmap(node_scores_target)[:, 0:3]
-        #color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
-        #color_node_pred = cmap(node_scores_pred)[:, 0:3]
+        # color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
+        # color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
+        # color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
+        # color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
+        color_edge_target = cmap(edge_scores_target)[:, 0:3]
+        color_node_target = cmap(node_scores_target)[:, 0:3]
+        color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
+        color_node_pred = cmap(node_scores_pred)[:, 0:3]
 
 
         axarr_log[0].cla()
@@ -156,7 +151,7 @@ class Trainer():
         figure_log.canvas.draw()
         figure_log.canvas.flush_events()
 
-        imname = "/home/zuern/Desktop/self-supervised-graph-viz/{:05d}.png".format(step)
+        imname = "/home/zuern/Desktop/self-supervised-graph-viz/{:05d}.png".format(self.total_step)
         try:
             plt.savefig(imname)
             print("Saved logging image to {}".format(imname))
@@ -192,6 +187,10 @@ class Trainer():
             edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
             node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
 
+            # print(node_scores.shape)
+            # print(node_scores)
+            # print("------")
+
             # Convert list of Data to DataBatch for post-processing and loss calculation
             if self.params.model.dataparallel:
                 data_orig = data.copy()
@@ -206,12 +205,9 @@ class Trainer():
                 edge_weight[data.edge_scores < 0.4] = 0.0
                 node_weight[data.node_scores < 0.4] = 0.0
 
-
             loss_dict = {
                 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
                 'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
-                #'edge_loss': torch.nn.MSELoss()(edge_scores, data.edge_scores),
-                #'node_loss': torch.nn.MSELoss()(node_scores, data.node_scores),
             }
 
             loss = sum(loss_dict.values())
@@ -221,15 +217,15 @@ class Trainer():
 
             if not self.params.main.disable_wandb:
                 wandb.log({"train/loss_total": loss.item(),
-                           #"train/edge_loss": loss_dict['edge_loss'].item(),
+                           "train/edge_loss": loss_dict['edge_loss'].item(),
                            "train/node_loss": loss_dict['node_loss'].item()}
                           )
 
             # # Visualization
-            if self.total_step % 1000 == 0:
+            if self.total_step % 500 == 0:
                 if self.params.model.dataparallel:
                     data = data_orig
-                self.do_logging(data, self.total_step, 'train/Images', 'train')
+                self.do_logging(data, edge_scores, node_scores, 'train/Images')
 
             t_end = time.time()
 
@@ -430,7 +426,6 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    # define own collator that skips bad samples
     train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
     test_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
     dataset_train = PreprocessedDataset(path=train_path)
