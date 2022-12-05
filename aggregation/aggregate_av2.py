@@ -18,6 +18,8 @@ from torchvision.models import resnet18
 import torch.nn as nn
 from av2.geometry.interpolate import compute_midpoint_line
 from av2.map.map_api import ArgoverseStaticMap
+import cv2
+import skfmm
 
 
 def edge_feature_encoder(out_features=64, in_channels=3):
@@ -27,7 +29,7 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     return model
 
 
-def preprocess_sample(G_gt_nx, sat_image_, centerline_image_, roi_xxyy, sample_no, out_path):
+def preprocess_sample(G_gt_nx, sat_image_, global_sdf, centerline_image_, roi_xxyy, sample_no, out_path):
 
     margin = 200
 
@@ -39,7 +41,7 @@ def preprocess_sample(G_gt_nx, sat_image_, centerline_image_, roi_xxyy, sample_n
         node_pos_feats.append(G_gt_nx.nodes[node]["pos"])
 
     node_gt_score = torch.tensor(node_gt_score)
-    node_pos_feats = torch.tensor(node_pos_feats)
+    node_pos_feats = torch.tensor(np.array(node_pos_feats))
 
 
     edge_pos_feats = []
@@ -114,6 +116,7 @@ def preprocess_sample(G_gt_nx, sat_image_, centerline_image_, roi_xxyy, sample_n
 
     torch.save({
         "rgb": torch.FloatTensor(rgb),
+        "sdf": torch.FloatTensor(global_sdf),
         "node_feats": node_pos_feats,
         "edge_pos_feats": edge_pos_feats,
         "edge_img_feats": edge_img_feats,
@@ -180,9 +183,8 @@ def bayes_update_graph(G, angle, x, y, p, r_min):
     for node in closest_nodes:
         node_id = list(G.nodes)[node]
         d = distances[node][0]
-
-        #p = gaussian(d, 0, r_min)
-        p = 1
+        p = gaussian(d, 0, r_min)
+        #p = 1
 
         G.nodes[node]["angle_observations"].append(angle)
         G.nodes[node_id]["log_odds"] = G.nodes[node_id]["log_odds"] + p
@@ -257,25 +259,99 @@ def get_scenario_centerlines(static_map_path):
     return np.array(centerlines)
 
 
+def dijkstra_trajectories(G, trajectories, imsize):
+    '''
+    This function assigns the graph edge probabilities according to the dijkstra traversal along the recorded
+    trajectories
+    :param G: input graph
+    :param trajectories: list of trajectories
+    :return: updated graph
+    '''
+
+
+    global_sdf = np.zeros(imsize, dtype=np.float32)
+
+
+    for n in G.nodes:
+        G.nodes[n]["p_dijkstra"] = 0.0
+    for e in G.edges:
+        G.edges[e]["p_dijkstra"] = 0.0
+
+    for t in trajectories:
+
+        # create sdf of trajectory
+        sdf = np.zeros(imsize, dtype=np.float32)
+        for i in range(len(t) - 1):
+            cv2.line(sdf, (int(t[i][0]), int(t[i][1])), (int(t[i + 1][0]), int(t[i + 1][1])), 1, 1)
+
+        f = 10  # distance function scale
+        sdf = skfmm.distance(1 - sdf)
+        sdf[sdf > f] = f
+        sdf = sdf / f
+
+        global_sdf = np.maximum(global_sdf, 1-sdf)
+
+        # assign cost to nodes and edges
+        for e in G.edges:
+            start = G.nodes[e[0]]["pos"]
+            end = G.nodes[e[1]]["pos"]
+            midpoint = (start + end) / 2
+            G.edges[e]["c"] = sdf[int(midpoint[1]), int(midpoint[0])] ** 0.5 + \
+                              sdf[int(start[1]), int(start[0])] ** 0.5 +  \
+                              sdf[int(end[1]), int(end[0])] ** 0.5
+
+        start_node = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - t[0], axis=1))
+        end_node = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - t[-1], axis=1))
+
+        path = nx.dijkstra_path(G, start_node, end_node, weight="c")
+
+        for i in range(len(path) - 1):
+            G.edges[path[i], path[i+1]]["p_dijkstra"] = 1.0
+        for i in range(len(path)):
+            G.nodes[path[i]]["p_dijkstra"] = 1.0
+
+    return G, global_sdf
+
+
+
+def resample_trajectory(trajectory, dist=5):
+    '''
+    Resample a trajectory to a fixed distance between points
+
+    :param trajectory:
+    :param dist:
+    :return:
+    '''
+
+    new_trajectory = [trajectory[0]]
+    curr_pos = trajectory[0]
+    for i in range(1, len(trajectory)):
+        dist_travelled = np.linalg.norm(trajectory[i] - curr_pos)
+        if dist_travelled > dist:
+            new_trajectory.append(trajectory[i])
+            curr_pos = trajectory[i]
+    return np.array(new_trajectory)
+
 
 if __name__ == "__main__":
 
-    city_name = "austin"
+    city_name = "Pittsburgh"
     sample_no = 0
     imsize = 0
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
 
-    sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/Austin.png"))
-    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/Austin_centerlines.png"))
+    sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name)))
+    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
     centerline_image_ = centerline_image_ / 255.0
 
     # sat_image_ = 128 * np.ones((60000, 60000, 3), dtype=np.uint8)
     # centerline_image_ = np.zeros((60000, 60000), dtype=np.uint8)
 
     # generate roi_xxyy list over full satellite image in sliding window fashion
-    meta_roi = [25000, 35000, 15000, 25000]
+    #meta_roi = [25000, 35000, 15000, 25000]  # ymin, ymax, xmin, xmax, ymin, ymax
+    meta_roi = [0, 20000, 0, 20000]  #
     roi_xxyy_list = []
     for i in range(meta_roi[2], meta_roi[3], 100):
         for j in range(meta_roi[0], meta_roi[1], 100):
@@ -283,9 +359,10 @@ if __name__ == "__main__":
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
 
-    [R, c, t] = get_transform_params(city_name)
+    [R, c, t] = get_transform_params(city_name.lower())
 
-    if not os.path.exists("lanes.npy"):
+    if not os.path.exists("lanes_{}.npy".format(city_name)) or not os.path.exists("trajectories_{}.npy".format(city_name)):
+        print("Generating trajectories and gt-lanes")
         trajectories_ = []
         lanes_ = []
 
@@ -295,7 +372,7 @@ if __name__ == "__main__":
             static_map_path = scenario_path.parents[0] / f"log_map_archive_{scenario_id}.json"
             scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
 
-            if scenario.city_name != city_name:
+            if scenario.city_name != city_name.lower():
                 continue
 
             scenario_lanes = get_scenario_centerlines(static_map_path)
@@ -333,24 +410,27 @@ if __name__ == "__main__":
         lanes_ = np.array(lanes_)
 
         # save trajectories
-        np.save("trajectories.npy", trajectories_)
-        np.save("lanes.npy", lanes_)
+        np.save("trajectories_{}.npy".format(city_name), trajectories_)
+        np.save("lanes_{}.npy".format(city_name), lanes_)
     else:
-        trajectories_ = np.load("trajectories.npy", allow_pickle=True)
-        #trajectories_ = np.load("lanes.npy", allow_pickle=True)
+        trajectories_ = np.load("trajectories_{}.npy".format(city_name), allow_pickle=True)
+        lanes_ = np.load("lanes_{}.npy".format(city_name), allow_pickle=True)
 
         ts = []
         for trajectory in trajectories_:
-            if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
-                    np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
-                ts.append(trajectory)
+            ts.append(trajectory)
+            # if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
+            #         np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
+            #     ts.append(trajectory)
         trajectories_ = np.array(ts)
-        # print(len(trajectories_))
-        #
-        # for t in trajectories_:
-        #     plt.scatter(t[:, 0], t[:, 1], s=0.1, c="blue")
-        # plt.show()
-    meta_roi
+
+        # plot
+        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        ax.set_aspect('equal')
+        for trajectory in trajectories_[0:1000]:
+            ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
+        plt.show()
+
 
     for roi_xxyy in roi_xxyy_list:
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
@@ -368,6 +448,9 @@ if __name__ == "__main__":
             is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] < sat_image.shape[0])
             trajectory = trajectory[is_in_roi]
 
+            # resample trajectory to have equally distant points
+            if len(trajectory) > 2:
+                trajectory = resample_trajectory(trajectory, dist=5)
             if len(trajectory) > 2:
                 trajectories.append(trajectory)
 
@@ -378,102 +461,27 @@ if __name__ == "__main__":
         print("number of trajectories in roi: ", len(trajectories))
 
 
-        # r_min = 5  # minimum radius of the circle for poisson disc sampling
 
-
+        # # No we start to bayes aggregate the trajectories
+        # # First we create a grid map, uniform prior
+        # grid_size = 1
+        # num_angle_bins = 16
+        #
+        # grid_map_occ = np.ones((int((roi_xxyy[3] - roi_xxyy[2]) / grid_size), int((roi_xxyy[1] - roi_xxyy[0]) / grid_size))) * 0.5
+        # grid_map_angle = np.ones((int((roi_xxyy[3] - roi_xxyy[2]) / grid_size), int((roi_xxyy[1] - roi_xxyy[0]) / grid_size), num_angle_bins)) * float(1 / num_angle_bins)
+        #
+        # print(grid_map_angle.shape, grid_map_angle.shape, sat_image.shape)
+        #
         # for trajectory in trajectories:
-        #     G = initialize_graph(roi_xxyy, r_min=r_min)
+        #     for pos in trajectory:
+        #         grid_map_occ = bayes_update_gridmap(grid_map_occ, x=int(pos[0] / grid_size), y=int(pos[1] / grid_size), p=0.9)
         #
         #     # Now we update the angular gridmap
         #     for i in range(len(trajectory) - 1):
         #         pos = trajectory[i]
         #         next_pos = trajectory[i + 1]
         #         angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
-        #         G = bayes_update_graph(G, angle, x=pos[0], y=pos[1], p=0.9, r_min=r_min)
-        #
-        #     node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
-        #     node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
-        #     for i, n in enumerate(G.nodes):
-        #         G.nodes[n]["p"] = node_probabilities[i]
-        #
-        #     for e in G.edges:
-        #         G.edges[e]["log_odds"] = G.nodes[e[0]]["log_odds"] + G.nodes[e[1]]["log_odds"]
-        #     edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
-        #     edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
-        #     for i, e in enumerate(G.edges):
-        #         G.edges[e]["p"] = edge_probabilities[i]
-        #
-        #     if np.count_nonzero(edge_log_odds[edge_log_odds > 1]) < 10:
-        #         print("no edge with high probability. skipping")
-        #         continue
-        #
-        #     # rescale probabilities
-        #     #node_probabilities = (node_probabilities - np.min(node_probabilities)) / (
-        #     #            np.max(node_probabilities) - np.min(node_probabilities))
-        #     #edge_probabilities = (edge_probabilities - np.min(edge_probabilities)) / (
-        #     #            np.max(edge_probabilities) - np.min(edge_probabilities))
-        #
-        #     cmap = plt.get_cmap('viridis')
-        #     norm = plt.Normalize(vmin=0.0, vmax=1.0)
-        #     node_colors = cmap(norm(node_probabilities))
-        #
-        #     fig, ax = plt.subplots(figsize=(10, 10))
-        #     ax.set_aspect('equal')
-        #     ax.imshow(sat_image)
-        #     #ax.imshow(centerline_image, alpha=0.5)
-        #
-        #     # draw edges
-        #     for t in trajectories:
-        #         ax.plot(t[:, 0], t[:, 1], 'rx', markersize=1)
-        #
-        #     edge_colors = cmap(norm(edge_probabilities))
-        #
-        #     nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
-        #                      edge_color=edge_colors,
-        #                      node_color=node_colors,
-        #                      with_labels=False,
-        #                      node_size=10,
-        #                      arrowsize=3.0,
-        #                      width=1,
-        #                      )
-        #
-        #     out_path = '/data/self-supervised-graph/preprocessed/av2'
-        #     plt.savefig("{}/{:04d}.png".format(out_path, sample_no))
-        #
-        #     # preprocess sample into pth file
-        #     preprocess_sample(G,
-        #                       sat_image_=sat_image_,
-        #                       centerline_image_=centerline_image_,
-        #                       roi_xxyy=roi_xxyy,
-        #                       sample_no=sample_no,
-        #                       out_path=out_path)
-        #     sample_no += 1
-        #
-        # G = initialize_graph(roi_xxyy, r_min=r_min)
-
-        print("number of trajectories in roi: ", len(trajectories))
-
-        # No we start to bayes aggregate the trajectories
-        # First we create a grid map, uniform prior
-        grid_size = 1
-        num_angle_bins = 16
-
-        grid_map_occ = np.ones((int((roi_xxyy[3] - roi_xxyy[2]) / grid_size), int((roi_xxyy[1] - roi_xxyy[0]) / grid_size))) * 0.5
-        grid_map_angle = np.ones((int((roi_xxyy[3] - roi_xxyy[2]) / grid_size), int((roi_xxyy[1] - roi_xxyy[0]) / grid_size), num_angle_bins)) * float(1 / num_angle_bins)
-
-        print(grid_map_angle.shape, grid_map_angle.shape, sat_image.shape)
-
-        for trajectory in trajectories:
-            for pos in trajectory:
-                grid_map_occ = bayes_update_gridmap(grid_map_occ, x=int(pos[0] / grid_size), y=int(pos[1] / grid_size), p=0.9)
-
-            # Now we update the angular gridmap
-            for i in range(len(trajectory) - 1):
-                pos = trajectory[i]
-                next_pos = trajectory[i + 1]
-                angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
-                grid_map_angle = bayes_update_gridmap_angle(grid_map_angle, angle, x=int(pos[0] / grid_size), y=int(pos[1] / grid_size), p=0.9)
-
+        #         grid_map_angle = bayes_update_gridmap_angle(grid_map_angle, angle, x=int(pos[0] / grid_size), y=int(pos[1] / grid_size), p=0.9)
         # plt.imshow(grid_map_occ)
         # plt.show()
         #
@@ -506,6 +514,12 @@ if __name__ == "__main__":
 
         edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
         edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
+
+
+        # assign edge probabilities according to dijstra-approximated trajectories
+        G, global_sdf = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
+        edge_probabilities = np.array([G.edges[e]["p_dijkstra"] for e in G.edges])
+        node_probabilities = np.array([G.nodes[n]["p_dijkstra"] for n in G.nodes])
 
         if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 2:
             print("no edge with high probability. skipping")
@@ -549,13 +563,19 @@ if __name__ == "__main__":
         node_colors = cmap(norm(node_probabilities))
 
         fig, ax = plt.subplots(figsize=(10, 10))
+        plt.tight_layout()
         ax.set_aspect('equal')
         ax.imshow(sat_image)
         #ax.imshow(centerline_image, alpha=0.5)
+        ax.imshow(global_sdf, alpha=0.5)
 
         # draw edges
         for t in trajectories:
-            ax.plot(t[:, 0], t[:, 1], 'rx', markersize=1)
+            for i in range(len(t) - 1):
+                ax.arrow(t[i][0], t[i][1],
+                         t[i + 1][0] - t[i][0],
+                         t[i + 1][1] - t[i][1],
+                         color="white", alpha=0.5,width=0.5, head_width=1, head_length=1)
 
         for n in G.nodes:
             angle_peaks = G.nodes[n]["angle_peaks"]
@@ -575,11 +595,12 @@ if __name__ == "__main__":
                          )
 
         out_path = '/data/self-supervised-graph/preprocessed/av2'
-        plt.savefig("{}/{:04d}.png".format(out_path, sample_no))
+        plt.savefig("{}/{:04d}.png".format(out_path, sample_no), dpi=800)
 
         # preprocess sample into pth file
         preprocess_sample(G,
                           sat_image_=sat_image_,
+                          global_sdf=global_sdf,
                           centerline_image_=centerline_image_,
                           roi_xxyy=roi_xxyy,
                           sample_no=sample_no,

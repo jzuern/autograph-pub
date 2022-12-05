@@ -439,11 +439,13 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
 
 class PreprocessedDataset(torch_geometric.data.Dataset):
 
-    def __init__(self, path):
+    def __init__(self, path, split='train'):
         super(PreprocessedDataset, self).__init__(path)
         print("Loading preprocessed dataset from {}".format(path))
 
         self.path = path
+        self.split = split
+
         self.pth_files = sorted(glob(path + '/*.pth')) + sorted(glob(path + '/*.pt'))
         print("Found {} files".format(len(self.pth_files)))
         self.check_files()
@@ -461,11 +463,22 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
                 continue
 
 
+    # def augment(self, data):
+    #     if self.params.preprocessing.augment and self.split == 'train':
+    #         angle = np.random.choice([0, 90, 180, 270])
+    #         # rotate image
+    #         data.rgb = torch.rot90(data.rgb, k=int(angle / 90), dims=[1, 2])
+    #         data.sdf = torch.rot90(data.sdf, k=int(angle / 90), dims=[1, 2])
+    #
+    #     return data
+
+
     def __getitem__(self, index):
 
         data = torch.load(self.pth_files[index])
 
         rgb = data['rgb']
+        sdf = data['sdf'].float()
         edge_pos_feats = data['edge_pos_feats'].float()
         edge_img_feats = data['edge_img_feats'].float()
         edge_scores = data['edge_scores'].float()
@@ -473,12 +486,6 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         graph = data['graph']
         node_feats = data['node_feats'].float()
         node_scores = data['node_scores'].float()
-
-        # watershed = 0.7
-        # edge_scores[edge_scores > watershed] = 1.0
-        # node_scores[node_scores > watershed] = 1.0
-        # edge_scores[edge_scores <= watershed] = 0.0
-        # node_scores[node_scores <= watershed] = 0.0
 
         data = torch_geometric.data.Data(node_feats=node_feats,
                                          edge_indices=edge_indices.contiguous(),
@@ -491,6 +498,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
                                          num_nodes=node_feats.shape[0],
                                          batch_idx=torch.tensor(index),
                                          rgb=torch.FloatTensor(rgb / 255.),
+                                         sdf=torch.FloatTensor(sdf),
                                          )
 
         return data

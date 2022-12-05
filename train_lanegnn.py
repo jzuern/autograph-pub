@@ -88,6 +88,8 @@ class Trainer():
         edge_score_accuracy = np.sum(np.round(edge_scores_pred) == np.round(edge_scores_target)) / edge_scores_target.shape[0]
         node_score_recall = recall(torch.from_numpy(node_scores_pred).int(), torch.from_numpy(node_scores_target).int())
         edge_score_recall = recall(torch.from_numpy(edge_scores_pred).int(), torch.from_numpy(edge_scores_target).int())
+        node_score_precision = precision(torch.from_numpy(node_scores_pred).int(), torch.from_numpy(node_scores_target).int())
+        edge_score_precision = precision(torch.from_numpy(edge_scores_pred).int(), torch.from_numpy(edge_scores_target).int())
 
         num_rgb_rows = data.rgb.shape[0] // np.unique(data.batch.cpu().numpy()).shape[0]
         rgb = data.rgb[:num_rgb_rows].cpu().numpy()
@@ -168,6 +170,8 @@ class Trainer():
                        "edge_score_accuracy": edge_score_accuracy,
                        "node_score_recall": node_score_recall,
                        "edge_score_recall": edge_score_recall,
+                       "node_score_precision": node_score_precision,
+                       "edge_score_precision": edge_score_precision,
                        "node_score_pred": wandb.Histogram(node_scores_pred),
                        })
 
