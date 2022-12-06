@@ -29,7 +29,7 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     return model
 
 
-def preprocess_sample(G_gt_nx, sat_image_, global_sdf, centerline_image_, roi_xxyy, sample_no, out_path):
+def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline_image_, roi_xxyy, sample_no, out_path):
 
     margin = 200
 
@@ -109,14 +109,15 @@ def preprocess_sample(G_gt_nx, sat_image_, global_sdf, centerline_image_, roi_xx
         edge_gt_score.append(G_gt_nx.edges[i, j]["p"])
 
     edge_indices = torch.tensor(edge_indices)
-    edge_pos_feats = torch.cat(edge_pos_feats, dim=0)
-    edge_img_feats = torch.cat(edge_img_feats, dim=0)
+    edge_pos_feats = torch.cat(edge_pos_feats, dim=0).half()
+    edge_img_feats = torch.cat(edge_img_feats, dim=0).half()
     edge_gt_score = torch.tensor(edge_gt_score)
 
 
     torch.save({
         "rgb": torch.FloatTensor(rgb),
         "sdf": torch.FloatTensor(global_sdf),
+        "angles": torch.FloatTensor(global_angles),
         "node_feats": node_pos_feats,
         "edge_pos_feats": edge_pos_feats,
         "edge_img_feats": edge_img_feats,
@@ -160,7 +161,7 @@ def initialize_graph(roi_xxyy, r_min):
                              min_point_dist=r_min,
                              max_point_dist=2*r_min)
 
-    G = nx.Graph()
+    G = nx.DiGraph()
 
     for i in range(len(points)):
         G.add_node(i, pos=points[i],
@@ -265,11 +266,13 @@ def dijkstra_trajectories(G, trajectories, imsize):
     trajectories
     :param G: input graph
     :param trajectories: list of trajectories
-    :return: updated graph
+    :return: updated graph, angle mask, sdf mask
     '''
 
 
     global_sdf = np.zeros(imsize, dtype=np.float32)
+    global_angle = np.zeros(imsize, dtype=np.float32)
+    global_mask = np.zeros((imsize[0], imsize[1], 3), dtype=np.uint8)
 
 
     for n in G.nodes:
@@ -282,7 +285,16 @@ def dijkstra_trajectories(G, trajectories, imsize):
         # create sdf of trajectory
         sdf = np.zeros(imsize, dtype=np.float32)
         for i in range(len(t) - 1):
-            cv2.line(sdf, (int(t[i][0]), int(t[i][1])), (int(t[i + 1][0]), int(t[i + 1][1])), 1, 1)
+            x1 = int(t[i][0])
+            y1 = int(t[i][1])
+            x2 = int(t[i + 1][0])
+            y2 = int(t[i + 1][1])
+            cv2.line(sdf, (x1, y1), (x2, y2), 1, 1)
+
+            angle = np.arctan2(y2 - y1, x2 - x1)
+            cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=5)
+            cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
+
 
         f = 10  # distance function scale
         sdf = skfmm.distance(1 - sdf)
@@ -290,6 +302,17 @@ def dijkstra_trajectories(G, trajectories, imsize):
         sdf = sdf / f
 
         global_sdf = np.maximum(global_sdf, 1-sdf)
+
+
+
+
+        directions_hsv = np.zeros_like(global_mask)
+        directions_hsv[:, :, 0] = np.sin(global_angle) * 127 + 127
+        directions_hsv[:, :, 1] = np.cos(global_angle) * 127 + 127
+        directions_hsv[:, :, 2] = global_mask[:, :, 0] * 255
+
+        directions_hsv = directions_hsv * global_mask
+
 
         # assign cost to nodes and edges
         for e in G.edges:
@@ -310,7 +333,7 @@ def dijkstra_trajectories(G, trajectories, imsize):
         for i in range(len(path)):
             G.nodes[path[i]]["p_dijkstra"] = 1.0
 
-    return G, global_sdf
+    return G, global_sdf, directions_hsv
 
 
 
@@ -336,22 +359,29 @@ def resample_trajectory(trajectory, dist=5):
 if __name__ == "__main__":
 
     city_name = "Pittsburgh"
+    out_path = '/data/self-supervised-graph/preprocessed/av2'
+
     sample_no = 0
     imsize = 0
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
 
-    sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name)))
+    sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name))).astype(np.uint8)
     centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
     centerline_image_ = centerline_image_ / 255.0
+
+
 
     # sat_image_ = 128 * np.ones((60000, 60000, 3), dtype=np.uint8)
     # centerline_image_ = np.zeros((60000, 60000), dtype=np.uint8)
 
     # generate roi_xxyy list over full satellite image in sliding window fashion
-    #meta_roi = [25000, 35000, 15000, 25000]  # ymin, ymax, xmin, xmax, ymin, ymax
-    meta_roi = [0, 20000, 0, 20000]  #
+    meta_roi = [20000, 25000, 30000, 35000]   # ymin, ymax, xmin, xmax, ymin, ymax PIT
+
+    #sat_image_ = np.ascontiguousarray(sat_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3], :])
+    #centerline_image_ = np.ascontiguousarray(centerline_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3]])
+
     roi_xxyy_list = []
     for i in range(meta_roi[2], meta_roi[3], 100):
         for j in range(meta_roi[0], meta_roi[1], 100):
@@ -418,21 +448,20 @@ if __name__ == "__main__":
 
         ts = []
         for trajectory in trajectories_:
-            ts.append(trajectory)
-            # if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
-            #         np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
-            #     ts.append(trajectory)
+            if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
+                    np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
+                ts.append(trajectory)
         trajectories_ = np.array(ts)
 
         # plot
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        ax.set_aspect('equal')
-        for trajectory in trajectories_[0:1000]:
-            ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
-        plt.show()
+        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        # ax.set_aspect('equal')
+        # for trajectory in trajectories_[0:100000]:
+        #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
+        # plt.show()
 
 
-    for roi_xxyy in roi_xxyy_list:
+    for roi_xxyy in tqdm(roi_xxyy_list):
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
         centerline_image = centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
 
@@ -457,10 +486,6 @@ if __name__ == "__main__":
         if len(trajectories) < 1:
             print("no trajectories in roi {}. skipping".format(roi_xxyy))
             continue
-
-        print("number of trajectories in roi: ", len(trajectories))
-
-
 
         # # No we start to bayes aggregate the trajectories
         # # First we create a grid map, uniform prior
@@ -493,7 +518,7 @@ if __name__ == "__main__":
         r_min = 8  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
-        for trajectory in tqdm(trajectories):
+        for trajectory in trajectories:
 
             # check length of trajectory
             if np.linalg.norm(trajectory[0] - trajectory[-1]) < 50:
@@ -515,14 +540,13 @@ if __name__ == "__main__":
         edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
         edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
 
-
         # assign edge probabilities according to dijstra-approximated trajectories
-        G, global_sdf = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
+        G, global_sdf, global_angles = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
         edge_probabilities = np.array([G.edges[e]["p_dijkstra"] for e in G.edges])
         node_probabilities = np.array([G.nodes[n]["p_dijkstra"] for n in G.nodes])
 
-        if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 2:
-            print("no edge with high probability. skipping")
+        if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 20:
+            print("too few edges with high probability. skipping")
             continue
 
         # rescale probabilities
@@ -567,7 +591,11 @@ if __name__ == "__main__":
         ax.set_aspect('equal')
         ax.imshow(sat_image)
         #ax.imshow(centerline_image, alpha=0.5)
-        ax.imshow(global_sdf, alpha=0.5)
+        ax.imshow(global_sdf, alpha=0.3)
+        ax.imshow(global_angles, alpha=0.3)
+
+        Image.fromarray(global_angles).save("{}/{:04d}-angles.png".format(out_path, sample_no))
+        Image.fromarray(global_sdf * 255.).convert("L").save("{}/{:04d}-sdf.png".format(out_path, sample_no))
 
         # draw edges
         for t in trajectories:
@@ -594,13 +622,13 @@ if __name__ == "__main__":
                          width=1,
                          )
 
-        out_path = '/data/self-supervised-graph/preprocessed/av2'
-        plt.savefig("{}/{:04d}.png".format(out_path, sample_no), dpi=800)
+        plt.savefig("{}/{:04d}.png".format(out_path, sample_no), dpi=400)
 
         # preprocess sample into pth file
         preprocess_sample(G,
                           sat_image_=sat_image_,
                           global_sdf=global_sdf,
+                          global_angles=global_angles,
                           centerline_image_=centerline_image_,
                           roi_xxyy=roi_xxyy,
                           sample_no=sample_no,

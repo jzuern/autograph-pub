@@ -2,7 +2,7 @@ main:
     project: 'self_supervised_graph'
     dataset: 'paloalto'
     version: 'none'
-    disable_wandb: True
+    disable_wandb: False
 paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
@@ -28,7 +28,7 @@ model:
     beta_lo: 0.9
     beta_hi: 0.999
     num_epochs: 10000
-    gnn_depth: 2      # default: 1, 2 works
+    gnn_depth: 1      # default: 1, 2 works
     # lane_mpnn
     map_feat_dim: 64
     node_dim: 16

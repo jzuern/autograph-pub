@@ -9,8 +9,7 @@ import time
 import torch
 import torch.utils.data
 import torch_geometric.data
-from torchmetrics.functional.classification.average_precision import average_precision
-from torchmetrics.functional.classification.precision_recall import recall, precision
+from torchmetrics.classification import BinaryAccuracy, Precision, Recall
 import matplotlib.pyplot as plt
 
 from torch_geometric.nn import DataParallel
@@ -80,16 +79,22 @@ class Trainer():
         edge_scores_target = data.edge_scores[:num_edges_in_batch].cpu().numpy()
         edge_indices = data.edge_indices[:num_edges_in_batch].cpu().numpy()
 
+        node_scores_pred = node_scores_pred.cpu()
+        edge_scores_pred = edge_scores_pred.cpu()
+        data = data.cpu()
+
+
+        # Calculate node and edge score accuracies
+        acc_node = BinaryAccuracy(task="binary")(node_scores_pred, torch.round(data.node_scores))
+        acc_edge = BinaryAccuracy(task="binary")(edge_scores_pred, torch.round(data.edge_scores))
+        recall_node = Recall(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores))
+        recall_edge = Recall(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores))
+        precision_node = Precision(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores))
+        precision_edge = Precision(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores))
+
         node_scores_pred = node_scores_pred[data.batch.cpu() == 0].detach().cpu().numpy()
         edge_scores_pred = edge_scores_pred[:num_edges_in_batch].detach().cpu().numpy()
 
-        # Calculate node and edge score accuracies
-        node_score_accuracy = np.sum(np.round(node_scores_pred) == np.round(node_scores_target)) / node_scores_target.shape[0]
-        edge_score_accuracy = np.sum(np.round(edge_scores_pred) == np.round(edge_scores_target)) / edge_scores_target.shape[0]
-        node_score_recall = recall(torch.from_numpy(node_scores_pred).int(), torch.from_numpy(node_scores_target).int())
-        edge_score_recall = recall(torch.from_numpy(edge_scores_pred).int(), torch.from_numpy(edge_scores_target).int())
-        node_score_precision = precision(torch.from_numpy(node_scores_pred).int(), torch.from_numpy(node_scores_target).int())
-        edge_score_precision = precision(torch.from_numpy(edge_scores_pred).int(), torch.from_numpy(edge_scores_target).int())
 
         num_rgb_rows = data.rgb.shape[0] // np.unique(data.batch.cpu().numpy()).shape[0]
         rgb = data.rgb[:num_rgb_rows].cpu().numpy()
@@ -166,13 +171,13 @@ class Trainer():
 
         if not self.params.main.disable_wandb:
             wandb.log({plot_text: figure_log,
-                       "node_score_accuracy": node_score_accuracy,
-                       "edge_score_accuracy": edge_score_accuracy,
-                       "node_score_recall": node_score_recall,
-                       "edge_score_recall": edge_score_recall,
-                       "node_score_precision": node_score_precision,
-                       "edge_score_precision": edge_score_precision,
-                       "node_score_pred": wandb.Histogram(node_scores_pred),
+                       "node_score_accuracy": acc_node,
+                       "edge_score_accuracy": acc_edge,
+                       "node_score_recall": recall_node,
+                       "edge_score_recall": recall_edge,
+                       "node_score_precision": precision_node,
+                       "edge_score_precision": precision_edge,
+                       #"node_score_pred": wandb.Histogram(node_scores_pred),
                        })
 
         del figure_log
@@ -211,9 +216,9 @@ class Trainer():
             node_weight = torch.ones_like(data.node_scores)
 
             # Specify ignore regions
-            if self.params.model.ignore_low_scores:
-                edge_weight[data.edge_scores < 0.4] = 0.0
-                node_weight[data.node_scores < 0.4] = 0.0
+            # if self.params.model.ignore_low_scores:
+            #     edge_weight[data.edge_scores < 0.4] = 0.0
+            #     node_weight[data.node_scores < 0.4] = 0.0
 
             loss_dict = {
                 'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
