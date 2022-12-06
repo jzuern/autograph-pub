@@ -125,8 +125,10 @@ class Trainer():
         # color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
         color_edge_target = cmap(edge_scores_target)[:, 0:3]
         color_node_target = cmap(node_scores_target)[:, 0:3]
+        color_node_target[:, -1] = 0.5
         color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
         color_node_pred = cmap(node_scores_pred)[:, 0:3]
+        color_node_pred[:, -1] = 0.5
 
 
         axarr_log[0].cla()

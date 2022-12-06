@@ -13,20 +13,35 @@ import matplotlib.pyplot as plt
 
 from torch_geometric.nn import DataParallel
 from torch_geometric.loader import DataListLoader
-from torch_geometric.data import Batch
 import cv2
 from regressors.build_net import build_network
-from data.data_av2 import PreprocessedDataset
-from lanegnn.utils import ParamLib, assign_edge_lengths
+from data.data_av2 import RegressorDataset
+from lanegnn.utils import ParamLib
+
+
+def visualize_angles(a_x, a_y, mask):
+    if mask is None:
+        mask = np.ones_like(a_x, dtype=np.uint8)
+    global_mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
+    global_mask = ((global_mask > 0.5) * 255).astype(np.uint8)
+    directions_hsv = np.ones([a_x.shape[0], a_x.shape[1], 3], dtype=np.uint8)
+
+    directions_hsv[:, :, 0] = a_x * 127 + 127
+    directions_hsv[:, :, 1] = a_y * 127 + 127
+    directions_hsv[:, :, 2] = global_mask[:, :, 0]
+
+    directions_hsv = directions_hsv * global_mask
+
+    return directions_hsv
 
 
 class Trainer():
 
-    def __init__(self, params, model, dataloader_train, dataloader_test, optimizer):
+    def __init__(self, params, model, dataloader_train, dataloader_val, optimizer):
 
         self.model = model
         self.dataloader_train = dataloader_train
-        self.dataloader_test = dataloader_test
+        self.dataloader_val = dataloader_val
         self.params = params
         self.optimizer = optimizer
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -52,29 +67,28 @@ class Trainer():
 
             self.optimizer.zero_grad()
 
-            if self.params.model.dataparallel:
-                data = [item.to(self.device) for item in data]
-            else:
-                data = data.to(self.device)
-
             # loss and optim
-            sdf_target = data.sdf.unsqueeze(0)
-            rgb = data.rgb.permute(2, 0, 1)
+            sdf_target = data["sdf"].cuda()
+            rgb = data["rgb"].cuda()
+            angle_x_target = data["angles_x"].cuda()
+            angle_y_target = data["angles_y"].cuda()
 
-            # split along dim 1 into batches
-            rgb = torch.split(rgb, rgb.shape[1] // self.params.model.batch_size, dim=1)
-            rgb = torch.stack(rgb, dim=0)
-            sdf_target = torch.split(sdf_target, sdf_target.shape[1] // self.params.model.batch_size, dim=1)
-            sdf_target = torch.stack(sdf_target, dim=0)
+            pred = self.model(rgb)
+            pred = torch.nn.Tanh()(pred)
 
+            if self.params.model.target == "sdf":
+                target = sdf_target.unsqueeze(1)
 
-            sdf_pred = self.model(rgb)
-            sdf_pred = torch.nn.Sigmoid()(sdf_pred)
+                loss_dict = {
+                    'loss': torch.nn.BCELoss()(pred, target),
+                }
 
+            elif self.params.model.target == "angle":
+                target = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
 
-            loss_dict = {
-                'loss': torch.nn.BCELoss()(sdf_pred, sdf_target),
-            }
+                loss_dict = {
+                    'loss': torch.nn.MSELoss()(pred, target),
+                }
 
             loss = sum(loss_dict.values())
             loss.backward()
@@ -86,9 +100,20 @@ class Trainer():
 
             # Visualization
             if self.total_step % 10 == 0:
-                cv2.imshow("rgb", cv2.cvtColor(rgb[0].cpu().numpy().transpose(1, 2, 0), cv2.COLOR_RGB2BGR))
-                cv2.imshow("sdf_target", sdf_target[0, 0].cpu().numpy())
-                cv2.imshow("sdf_pred", sdf_pred[0, 0].detach().cpu().numpy())
+                cv2.imshow("rgb", rgb[0].cpu().numpy().transpose(1, 2, 0))
+
+                if self.params.model.target == "sdf":
+                    pred_viz = pred[0].detach().cpu().detach().numpy()
+                    target_viz = sdf_target[0].cpu().detach().numpy()
+                elif self.params.model.target == "angle":
+                    pred_viz = visualize_angles(pred[0,0].detach().cpu().numpy(), pred[0,1].detach().cpu().numpy(), mask=None)
+                    target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), sdf_target[0].cpu().numpy())
+                    #pred_viz = cv2.cvtColor(pred_viz, cv2.COLOR_BGR2RGB)
+                    #target_viz = cv2.cvtColor(target_viz, cv2.COLOR_BGR2RGB)
+
+                cv2.imshow("target", target_viz)
+                cv2.imshow("pred", pred_viz)
+
                 cv2.waitKey(1)
 
             text = 'Epoch {} / {}, it {} / {}, it glob {}, train loss = {:03f}'.\
@@ -101,6 +126,45 @@ class Trainer():
             wandb.log({"train/epoch": epoch})
 
 
+    def eval(self, epoch):
+
+        self.model.eval()
+
+        angle_accuaries = []
+
+        eval_progress = tqdm(self.dataloader_val)
+        for step, data in enumerate(eval_progress):
+
+            self.optimizer.zero_grad()
+
+            # loss and optim
+            sdf_target = data["sdf"].cuda()
+            rgb = data["rgb"].cuda()
+            angle_x_target = data["angles_x"].cuda()
+            angle_y_target = data["angles_y"].cuda()
+
+            pred = self.model(rgb)
+            pred = torch.nn.Tanh()(pred)
+
+            if self.params.model.target == "sdf":
+                target = sdf_target.unsqueeze(1)
+            elif self.params.model.target == "angle":
+                target = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
+
+            angle_accuracy = torch.nn.functional.cosine_similarity(pred, target, dim=1).mean()
+            angle_accuaries.append(angle_accuracy.item())
+
+        angle_accuracy = np.nanmean(angle_accuaries)
+
+        if not self.params.main.disable_wandb:
+            wandb.log({"eval/angle_accuracy": angle_accuracy})
+
+
+
+
+
+
+
 def main():
 
     # ----------- Parameter sourcing --------------
@@ -111,6 +175,7 @@ def main():
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
+    parser.add_argument('--target', type=str, choices=["sdf", "angle"], help="define the target that is used")
 
     opt = parser.parse_args()
 
@@ -118,8 +183,9 @@ def main():
     params.main.overwrite(opt)
     params.preprocessing.overwrite(opt)
     params.model.overwrite(opt)
+    params.model.target = opt.target
 
-    print("Batch size summed over all GPUs: ", params.model.batch_size)
+    print("Batch size summed over all GPUs: ", params.model.batch_size_reg)
     
     if not params.main.disable_wandb:
         wandb.login()
@@ -136,7 +202,10 @@ def main():
 
     # -------  Model, optimizer and data initialization ------
 
-    model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=1).to(params.model.device)
+    if params.model.target == "sdf":
+        model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=1).to(params.model.device)
+    elif params.model.target == "angle":
+        model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=2).to(params.model.device)
 
     # Make model parallel if available
     if params.model.dataparallel:
@@ -155,8 +224,8 @@ def main():
 
     train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
     test_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
-    dataset_train = PreprocessedDataset(path=train_path)
-    dataset_test = PreprocessedDataset(path=test_path)
+    dataset_train = RegressorDataset(path=train_path, split='train')
+    dataset_val = RegressorDataset(path=test_path, split='val')
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
@@ -164,15 +233,15 @@ def main():
         dataloader_obj = torch_geometric.loader.DataLoader
 
     dataloader_train = dataloader_obj(dataset_train,
-                                      batch_size=params.model.batch_size,
+                                      batch_size=params.model.batch_size_reg,
                                       num_workers=params.model.loader_workers,
                                       shuffle=True)
-    dataloader_test = dataloader_obj(dataset_test,
+    dataloader_val = dataloader_obj(dataset_val,
                                      batch_size=1,
                                      num_workers=1,
                                      shuffle=False)
 
-    trainer = Trainer(params, model, dataloader_train, dataloader_test, optimizer)
+    trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
 
     for epoch in range(params.model.num_epochs):
         trainer.train(epoch)
@@ -191,7 +260,7 @@ def main():
             torch.save(model.state_dict(), checkpoint_path)
 
         # Evaluate
-        # trainer.eval(epoch, split='test')
+        trainer.eval(epoch)
 
 
 if __name__ == '__main__':

@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 from pathlib import Path
 from av2.datasets.motion_forecasting import scenario_serialization
@@ -20,6 +22,7 @@ from av2.geometry.interpolate import compute_midpoint_line
 from av2.map.map_api import ArgoverseStaticMap
 import cv2
 import skfmm
+from ray.util.multiprocessing import Pool
 
 
 def edge_feature_encoder(out_features=64, in_channels=3):
@@ -29,7 +32,7 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     return model
 
 
-def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline_image_, roi_xxyy, sample_no, out_path):
+def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline_image_, roi_xxyy, sample_id, out_path):
 
     margin = 200
 
@@ -77,6 +80,7 @@ def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline
 
         crop_img_rgb_ = transform2vgg(crop_img_rgb).unsqueeze(0).numpy()
         crop_centerline_ = transform2vgg(crop_centerline).unsqueeze(0).numpy()
+
         feats = np.concatenate([crop_img_rgb_, crop_centerline_], axis=1)
 
         edge_img_feats.append(torch.tensor(feats))
@@ -125,7 +129,7 @@ def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline
         "edge_scores": edge_gt_score,
         "node_scores": node_gt_score,
         "graph": G_gt_nx,
-    }, os.path.join(out_path, "{:04d}.pth".format(sample_no)))
+    }, os.path.join(out_path, "{}.pth".format(sample_id)))
 
 
 
@@ -356,112 +360,10 @@ def resample_trajectory(trajectory, dist=5):
     return np.array(new_trajectory)
 
 
-if __name__ == "__main__":
-
-    city_name = "Pittsburgh"
-    out_path = '/data/self-supervised-graph/preprocessed/av2'
-
-    sample_no = 0
-    imsize = 0
-
-    '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
-
-
-    sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name))).astype(np.uint8)
-    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
-    centerline_image_ = centerline_image_ / 255.0
-
-
-
-    # sat_image_ = 128 * np.ones((60000, 60000, 3), dtype=np.uint8)
-    # centerline_image_ = np.zeros((60000, 60000), dtype=np.uint8)
-
-    # generate roi_xxyy list over full satellite image in sliding window fashion
-    meta_roi = [20000, 25000, 30000, 35000]   # ymin, ymax, xmin, xmax, ymin, ymax PIT
-
-    #sat_image_ = np.ascontiguousarray(sat_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3], :])
-    #centerline_image_ = np.ascontiguousarray(centerline_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3]])
-
-    roi_xxyy_list = []
-    for i in range(meta_roi[2], meta_roi[3], 100):
-        for j in range(meta_roi[0], meta_roi[1], 100):
-            roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
-
-    all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
-
-    [R, c, t] = get_transform_params(city_name.lower())
-
-    if not os.path.exists("lanes_{}.npy".format(city_name)) or not os.path.exists("trajectories_{}.npy".format(city_name)):
-        print("Generating trajectories and gt-lanes")
-        trajectories_ = []
-        lanes_ = []
-
-        for scenario_path in tqdm(all_scenario_files):
-            scenario_path = Path(scenario_path)
-            scenario_id = scenario_path.stem.split("_")[-1]
-            static_map_path = scenario_path.parents[0] / f"log_map_archive_{scenario_id}.json"
-            scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
-
-            if scenario.city_name != city_name.lower():
-                continue
-
-            scenario_lanes = get_scenario_centerlines(static_map_path)
-
-            for lane in scenario_lanes:
-                for i in range(len(lane)):
-                    bb = np.array([lane[i, 0], lane[i, 1], 0])
-                    tmp = t + c * R @ bb
-                    lane[i] = tmp[0:2]
-
-            for track in scenario.tracks:
-                # Get actor trajectory and heading history
-                actor_trajectory = np.array([list(object_state.position) for object_state in track.object_states])
-                actor_headings = np.array([object_state.heading for object_state in track.object_states])
-
-                if track.object_type != "vehicle":
-                    continue
-
-                # Coordinate transformation
-                for i in range(len(actor_trajectory)):
-                    bb = np.array([actor_trajectory[i, 0], actor_trajectory[i, 1], 0])
-                    tmp = t + c * R @ bb
-                    actor_trajectory[i] = tmp[0:2]
-
-                # ignore standing vehicles
-                if np.linalg.norm(actor_trajectory[0] - actor_trajectory[-1]) < 5:
-                    continue
-
-                trajectories_.append(actor_trajectory)
-
-            for lane in scenario_lanes:
-                lanes_.append(lane)
-
-        trajectories_ = np.array(trajectories_)
-        lanes_ = np.array(lanes_)
-
-        # save trajectories
-        np.save("trajectories_{}.npy".format(city_name), trajectories_)
-        np.save("lanes_{}.npy".format(city_name), lanes_)
-    else:
-        trajectories_ = np.load("trajectories_{}.npy".format(city_name), allow_pickle=True)
-        lanes_ = np.load("lanes_{}.npy".format(city_name), allow_pickle=True)
-
-        ts = []
-        for trajectory in trajectories_:
-            if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
-                    np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
-                ts.append(trajectory)
-        trajectories_ = np.array(ts)
-
-        # plot
-        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        # ax.set_aspect('equal')
-        # for trajectory in trajectories_[0:100000]:
-        #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
-        # plt.show()
-
+def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_image_):
 
     for roi_xxyy in tqdm(roi_xxyy_list):
+        sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
         centerline_image = centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
 
@@ -478,42 +380,14 @@ if __name__ == "__main__":
             trajectory = trajectory[is_in_roi]
 
             # resample trajectory to have equally distant points
-            if len(trajectory) > 2:
+            if len(trajectory) > 5:
                 trajectory = resample_trajectory(trajectory, dist=5)
-            if len(trajectory) > 2:
+            if len(trajectory) > 5:
                 trajectories.append(trajectory)
 
         if len(trajectories) < 1:
-            print("no trajectories in roi {}. skipping".format(roi_xxyy))
+            #print("no trajectories in roi {}. skipping".format(roi_xxyy))
             continue
-
-        # # No we start to bayes aggregate the trajectories
-        # # First we create a grid map, uniform prior
-        # grid_size = 1
-        # num_angle_bins = 16
-        #
-        # grid_map_occ = np.ones((int((roi_xxyy[3] - roi_xxyy[2]) / grid_size), int((roi_xxyy[1] - roi_xxyy[0]) / grid_size))) * 0.5
-        # grid_map_angle = np.ones((int((roi_xxyy[3] - roi_xxyy[2]) / grid_size), int((roi_xxyy[1] - roi_xxyy[0]) / grid_size), num_angle_bins)) * float(1 / num_angle_bins)
-        #
-        # print(grid_map_angle.shape, grid_map_angle.shape, sat_image.shape)
-        #
-        # for trajectory in trajectories:
-        #     for pos in trajectory:
-        #         grid_map_occ = bayes_update_gridmap(grid_map_occ, x=int(pos[0] / grid_size), y=int(pos[1] / grid_size), p=0.9)
-        #
-        #     # Now we update the angular gridmap
-        #     for i in range(len(trajectory) - 1):
-        #         pos = trajectory[i]
-        #         next_pos = trajectory[i + 1]
-        #         angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
-        #         grid_map_angle = bayes_update_gridmap_angle(grid_map_angle, angle, x=int(pos[0] / grid_size), y=int(pos[1] / grid_size), p=0.9)
-        # plt.imshow(grid_map_occ)
-        # plt.show()
-        #
-        # am = np.argmax(grid_map_angle, axis=2)
-        #
-        # plt.imshow(am)
-        # plt.show()
 
         r_min = 8  # minimum radius of the circle for poisson disc sampling
         G = initialize_graph(roi_xxyy, r_min=r_min)
@@ -594,8 +468,9 @@ if __name__ == "__main__":
         ax.imshow(global_sdf, alpha=0.3)
         ax.imshow(global_angles, alpha=0.3)
 
-        Image.fromarray(global_angles).save("{}/{:04d}-angles.png".format(out_path, sample_no))
-        Image.fromarray(global_sdf * 255.).convert("L").save("{}/{:04d}-sdf.png".format(out_path, sample_no))
+        Image.fromarray(sat_image).save("{}/{}-rgb.png".format(out_path, sample_id))
+        Image.fromarray(global_angles).save("{}/{}-angles.png".format(out_path, sample_id))
+        Image.fromarray(global_sdf * 255.).convert("L").save("{}/{}-sdf.png".format(out_path, sample_id))
 
         # draw edges
         for t in trajectories:
@@ -603,7 +478,7 @@ if __name__ == "__main__":
                 ax.arrow(t[i][0], t[i][1],
                          t[i + 1][0] - t[i][0],
                          t[i + 1][1] - t[i][1],
-                         color="white", alpha=0.5,width=0.5, head_width=1, head_length=1)
+                         color="white", alpha=0.5, width=0.5, head_width=1, head_length=1)
 
         for n in G.nodes:
             angle_peaks = G.nodes[n]["angle_peaks"]
@@ -612,6 +487,7 @@ if __name__ == "__main__":
                 ax.arrow(pos[0], pos[1], np.cos(peak) * 3, np.sin(peak) * 3, color='r', width=0.3)
 
         edge_colors = cmap(norm(edge_probabilities))
+        edge_colors[:, -1] = 0.5
 
         nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
                          edge_color=edge_colors,
@@ -622,15 +498,153 @@ if __name__ == "__main__":
                          width=1,
                          )
 
-        plt.savefig("{}/{:04d}.png".format(out_path, sample_no), dpi=400)
+        plt.savefig("{}/{}.png".format(out_path, sample_id), dpi=400)
 
         # preprocess sample into pth file
+        print("Processing {}...".format(sample_id))
         preprocess_sample(G,
                           sat_image_=sat_image_,
                           global_sdf=global_sdf,
                           global_angles=global_angles,
                           centerline_image_=centerline_image_,
                           roi_xxyy=roi_xxyy,
-                          sample_no=sample_no,
+                          sample_id=sample_id,
                           out_path=out_path)
-        sample_no += 1
+
+
+
+if __name__ == "__main__":
+
+    city_name = "Pittsburgh"
+    out_path = '/data/self-supervised-graph/preprocessed/av2'
+
+    sample_no = 0
+    imsize = 0
+
+    '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
+
+
+    sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name))).astype(np.uint8)
+    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
+    centerline_image_ = centerline_image_ / 255.0
+
+    print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
+
+
+
+    # sat_image_ = 128 * np.ones((60000, 60000, 3), dtype=np.uint8)
+    # centerline_image_ = np.zeros((60000, 60000), dtype=np.uint8)
+
+    # generate roi_xxyy list over full satellite image in sliding window fashion
+    meta_roi = [0, 25000, 0, 25000]   # ymin, ymax, xmin, xmax, ymin, ymax PIT
+
+    sat_image_ = np.ascontiguousarray(sat_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3], :])
+    centerline_image_ = np.ascontiguousarray(centerline_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3]])
+
+    roi_xxyy_list = []
+    for i in range(meta_roi[2], meta_roi[3], 100):
+        for j in range(meta_roi[0], meta_roi[1], 100):
+            roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
+    random.shuffle(roi_xxyy_list)
+
+    all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
+
+    [R, c, t] = get_transform_params(city_name.lower())
+
+    if not os.path.exists("lanes_{}.npy".format(city_name)) or not os.path.exists("trajectories_{}.npy".format(city_name)):
+        print("Generating trajectories and gt-lanes")
+        trajectories_ = []
+        lanes_ = []
+
+        for scenario_path in tqdm(all_scenario_files):
+            scenario_path = Path(scenario_path)
+            scenario_id = scenario_path.stem.split("_")[-1]
+            static_map_path = scenario_path.parents[0] / f"log_map_archive_{scenario_id}.json"
+            scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
+
+            if scenario.city_name != city_name.lower():
+                continue
+
+            scenario_lanes = get_scenario_centerlines(static_map_path)
+
+            for lane in scenario_lanes:
+                for i in range(len(lane)):
+                    bb = np.array([lane[i, 0], lane[i, 1], 0])
+                    tmp = t + c * R @ bb
+                    lane[i] = tmp[0:2]
+
+            for track in scenario.tracks:
+                # Get actor trajectory and heading history
+                actor_trajectory = np.array([list(object_state.position) for object_state in track.object_states])
+                actor_headings = np.array([object_state.heading for object_state in track.object_states])
+
+                if track.object_type != "vehicle":
+                    continue
+
+                # Coordinate transformation
+                for i in range(len(actor_trajectory)):
+                    bb = np.array([actor_trajectory[i, 0], actor_trajectory[i, 1], 0])
+                    tmp = t + c * R @ bb
+                    actor_trajectory[i] = tmp[0:2]
+
+                # ignore standing vehicles
+                if np.linalg.norm(actor_trajectory[0] - actor_trajectory[-1]) < 5:
+                    continue
+
+                trajectories_.append(actor_trajectory)
+
+            for lane in scenario_lanes:
+                lanes_.append(lane)
+
+        trajectories_ = np.array(trajectories_)
+        lanes_ = np.array(lanes_)
+
+        # save trajectories
+        np.save("trajectories_{}.npy".format(city_name), trajectories_)
+        np.save("lanes_{}.npy".format(city_name), lanes_)
+    else:
+        trajectories_ = np.load("trajectories_{}.npy".format(city_name), allow_pickle=True)
+        lanes_ = np.load("lanes_{}.npy".format(city_name), allow_pickle=True)
+
+        ts = []
+        for trajectory in trajectories_:
+            if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
+                    np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
+                ts.append(trajectory)
+        trajectories_ = np.array(ts)
+
+        # plot
+        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+        # ax.set_aspect('equal')
+        # for trajectory in trajectories_[0:100000]:
+        #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
+        # plt.show()
+
+    # single core
+    #process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_image_)
+
+
+
+    # multi core
+    def chunkify(lst, n):
+        """Yield successive n-sized chunks from lst."""
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+
+    num_cpus = 8
+    num_samples = len(roi_xxyy_list)
+    num_chunks = int(np.ceil(num_samples / num_cpus))
+    roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
+
+    from itertools import repeat
+
+    arguments = zip(roi_chunks,
+                    repeat(trajectories_),
+                    repeat(lanes_),
+                    repeat(sat_image_),
+                    repeat(centerline_image_))
+
+    Pool(num_cpus).starmap(process_chunk, arguments)
+
+
+

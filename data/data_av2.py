@@ -437,6 +437,71 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
         return data
 
 
+
+class RegressorDataset(torch.utils.data.Dataset):
+    def __init__(self, path, split):
+        self.path = path
+
+        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf.png')))
+        self.angles_files = sorted(glob(os.path.join(path, '*-angles.png')))
+        self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
+
+        # only use files for which we have all three modalities
+        file_ids = [os.path.basename(f).split('-')[0] for f in self.sdf_files]
+        self.sdf_files = [f for f in self.sdf_files if os.path.basename(f).split('-')[0] in file_ids]
+        self.angles_files = [f for f in self.angles_files if os.path.basename(f).split('-')[0] in file_ids]
+        self.rgb_files = [f for f in self.rgb_files if os.path.basename(f).split('-')[0] in file_ids]
+
+
+
+        # check if all files are present
+        assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files)
+
+        self.split = split
+
+        # split data with 80/20 ratio
+        ratio = 0.8
+        if self.split == 'train':
+            self.sdf_files = self.sdf_files[:int(ratio*len(self.sdf_files))]
+            self.angles_files = self.angles_files[:int(ratio*len(self.angles_files))]
+            self.rgb_files = self.rgb_files[:int(ratio*len(self.rgb_files))]
+        elif self.split == 'val':
+            self.sdf_files = self.sdf_files[int(ratio*len(self.sdf_files)):]
+            self.angles_files = self.angles_files[int(ratio*len(self.angles_files)):]
+            self.rgb_files = self.rgb_files[int(ratio*len(self.rgb_files)):]
+
+        print("Loaded {} {} files".format(len(self.sdf_files), self.split))
+
+
+    def __len__(self):
+        return len(self.sdf_files)
+
+    def __getitem__(self, idx):
+        sdf = cv2.imread(self.sdf_files[idx], cv2.IMREAD_UNCHANGED)
+        angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_ANYCOLOR)
+        rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
+
+
+        # convert from angles to unit circle coordinates
+        angles_x = angles[:, :, 1] / 255.0 * 2 - 1
+        angles_y = angles[:, :, 2] / 255.0 * 2 - 1
+
+        # to tensor
+        sdf = torch.from_numpy(sdf).float() / 255.0
+        angles_x = torch.from_numpy(angles_x).float()
+        angles_y = torch.from_numpy(angles_y).float()
+        rgb = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
+
+        return_dict = {
+            'sdf': sdf,
+            'angles_x': angles_x,
+            'angles_y': angles_y,
+            'rgb': rgb
+        }
+        return return_dict
+
+
+
 class PreprocessedDataset(torch_geometric.data.Dataset):
 
     def __init__(self, path, split='train'):
