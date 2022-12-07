@@ -6,10 +6,9 @@ main:
 paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
-    dataroot: /data/self-supervised-graph/
+    dataroot: /data/autograph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    split: train
     config_name: av2-continuous  # av2 or ind
 preprocessing:
     gt_pointwise: True

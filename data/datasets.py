@@ -4,7 +4,7 @@ import torch_geometric
 import torch_geometric.data.dataset
 from tqdm import tqdm
 import os
-
+import cv2
 
 
 class RegressorDataset(torch.utils.data.Dataset):
@@ -27,17 +27,6 @@ class RegressorDataset(torch.utils.data.Dataset):
         assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files)
 
         self.split = split
-
-        # split data with 80/20 ratio
-        ratio = 0.8
-        if self.split == 'train':
-            self.sdf_files = self.sdf_files[:int(ratio*len(self.sdf_files))]
-            self.angles_files = self.angles_files[:int(ratio*len(self.angles_files))]
-            self.rgb_files = self.rgb_files[:int(ratio*len(self.rgb_files))]
-        elif self.split == 'val':
-            self.sdf_files = self.sdf_files[int(ratio*len(self.sdf_files)):]
-            self.angles_files = self.angles_files[int(ratio*len(self.angles_files)):]
-            self.rgb_files = self.rgb_files[int(ratio*len(self.rgb_files)):]
 
         print("Loaded {} {} files".format(len(self.sdf_files), self.split))
 

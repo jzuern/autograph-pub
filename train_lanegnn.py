@@ -26,11 +26,11 @@ from metrics.metrics import calc_all_metrics
 
 class Trainer():
 
-    def __init__(self, params, model, dataloader_train, dataloader_test, optimizer):
+    def __init__(self, params, model, dataloader_train, dataloader_val, optimizer):
 
         self.model = model
         self.dataloader_train = dataloader_train
-        self.dataloader_test = dataloader_test
+        self.dataloader_val = dataloader_val
         self.params = params
         self.optimizer = optimizer
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -87,14 +87,13 @@ class Trainer():
         # Calculate node and edge score accuracies
         acc_node = Accuracy(num_classes=1)(node_scores_pred, torch.round(data.node_scores).int())
         acc_edge = Accuracy(num_classes=1)(edge_scores_pred, torch.round(data.edge_scores).int())
-        recall_node = Recall(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores))
-        recall_edge = Recall(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores))
-        precision_node = Precision(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores))
-        precision_edge = Precision(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores))
+        recall_node = Recall(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores).int())
+        recall_edge = Recall(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores).int())
+        precision_node = Precision(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores).int())
+        precision_edge = Precision(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores).int())
 
         node_scores_pred = node_scores_pred[data.batch.cpu() == 0].detach().cpu().numpy()
         edge_scores_pred = edge_scores_pred[:num_edges_in_batch].detach().cpu().numpy()
-
 
         num_rgb_rows = data.rgb.shape[0] // np.unique(data.batch.cpu().numpy()).shape[0]
         rgb = data.rgb[:num_rgb_rows].cpu().numpy()
@@ -119,10 +118,6 @@ class Trainer():
                 graph_pred.add_edge(i, j, weight=1-edge_scores_pred[edge_idx])
 
         cmap = plt.get_cmap('viridis')
-        # color_edge_target = np.hstack([cmap(edge_scores_target)[:, 0:3], edge_scores_target[:, None]])
-        # color_node_target = np.hstack([cmap(node_scores_target)[:, 0:3], node_scores_target[:, None]])
-        # color_edge_pred = np.hstack([cmap(edge_scores_pred)[:, 0:3], edge_scores_pred[:, None]])
-        # color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
         color_edge_target = cmap(edge_scores_target)[:, 0:3]
         color_node_target = cmap(node_scores_target)[:, 0:3]
         color_edge_target[:, -1] = 0.5
@@ -172,15 +167,7 @@ class Trainer():
             pass
 
         if not self.params.main.disable_wandb:
-            wandb.log({plot_text: figure_log,
-                       "node_score_accuracy": acc_node,
-                       "edge_score_accuracy": acc_edge,
-                       "node_score_recall": recall_node,
-                       "edge_score_recall": recall_edge,
-                       "node_score_precision": precision_node,
-                       "edge_score_precision": precision_edge,
-                       #"node_score_pred": wandb.Histogram(node_scores_pred),
-                       })
+            wandb.log({plot_text: figure_log})
 
         del figure_log
         del axarr_log
@@ -255,126 +242,107 @@ class Trainer():
         if not self.params.main.disable_wandb:
             wandb.log({"train/epoch": epoch})
 
-    # def eval(self, epoch, split='test'):
-    #
-    #     edge_threshold = 0.5
-    #     node_threshold = 0.5
-    #
-    #     self.model.eval()
-    #     print('Evaluating on {}'.format(split))
-    #
-    #     if split == 'test':
-    #         dataloader = self.dataloader_test
-    #     elif split == 'trainoverfit':
-    #         dataloader = self.dataloader_trainoverfit
-    #     else:
-    #         raise ValueError('Unknown split: {}'.format(split))
-    #
-    #     dataloader_progress = tqdm(dataloader, desc='Evaluating on {}'.format(split))
-    #
-    #     node_losses = []
-    #     node_endpoint_losses = []
-    #     edge_losses = []
-    #     ap_edge_list = []
-    #     ap_node_list = []
-    #     recall_edge_list = []
-    #     recall_node_list = []
-    #     metrics_dict_list = []
-    #
-    #     for i_val, data in enumerate(dataloader_progress):
-    #
-    #         if self.params.model.dataparallel:
-    #             data = [item.to(self.device) for item in data]
-    #         else:
-    #             data = data.to(self.device)
-    #
-    #         with torch.no_grad():
-    #             edge_scores, node_scores, endpoint_scores = self.model(data)
-    #             edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
-    #             node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
-    #
-    #         # Convert list of Data to DataBatch for post-processing and loss calculation
-    #         if self.params.model.dataparallel:
-    #             data_orig = data.copy()
-    #             data = Batch.from_data_list(data)
-    #
-    #         # loss and optim
-    #         edge_weight = torch.ones_like(data.edge_scores)
-    #         node_weight = torch.ones_like(data.node_scores)
-    #
-    #         #edge_weight[data.edge_scores < 0.4] = 0.0
-    #         #node_weight[data.node_scores < 0.4] = 0.0
-    #
-    #         try:
-    #             #edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores)
-    #             #node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores)
-    #             node_loss = torch.nn.MSELoss()(node_scores, data.node_scores)
-    #             edge_loss = torch.nn.MSELoss()(node_scores, data.node_scores)
-    #         except Exception as e:
-    #             print(e)
-    #             continue
-    #
-    #         node_losses.append(node_loss.item())
-    #         edge_losses.append(edge_loss.item())
-    #
-    #         ap_edge = average_precision((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1)
-    #         recall_edge = recall((edge_scores > edge_threshold).int(), (data.edge_gt > edge_threshold).int(), num_classes=1, multiclass=False)
-    #         ap_node = average_precision((node_scores > node_threshold).int(), (data.node_gt > node_threshold).int(), num_classes=1)
-    #         recall_node = recall((node_scores > node_threshold).int(), (data.node_gt > node_threshold).int(), num_classes=1, multiclass=False)
-    #
-    #         ap_edge_list.append(ap_edge.item())
-    #         recall_edge_list.append(recall_edge.item())
-    #         ap_node_list.append(ap_node.item())
-    #         recall_node_list.append(recall_node.item())
-    #
-    #         data.edge_scores = edge_scores
-    #         data.node_scores = node_scores
-    #
-    #         # Get networkx graph objects
-    #         if self.params.model.dataparallel:
-    #             _, node_scores_pred, endpoint_scores_pred, _, img_rgb, node_pos, fut_nodes, _, startpoint_idx = preprocess_predictions(self.params, self.model, data_orig)
-    #         else:
-    #             _, node_scores_pred, endpoint_scores_pred, _, img_rgb, node_pos, fut_nodes, _, startpoint_idx = preprocess_predictions(self.params, self.model, data)
-    #
-    #         graph_pred_nx = predict_lanegraph(fut_nodes, startpoint_idx, node_scores_pred, endpoint_scores_pred, node_pos, endpoint_thresh=0.5, rad_thresh=20)
-    #         #graph_gt_nx = get_gt_graph(get_target_data(self.params, data, split=split))
-    #
-    #         graph_pred_nx = assign_edge_lengths(graph_pred_nx)
-    #         #graph_gt_nx = assign_edge_lengths(graph_gt_nx)
-    #
-    #         #metrics_dict = calc_all_metrics(graph_gt_nx, graph_pred_nx, split=split)
-    #         #metrics_dict_list.append(metrics_dict)
-    #
-    #         # Visualization
-    #         if i_val % 25 == 0:
-    #             if self.params.model.dataparallel:
-    #                 data = data_orig
-    #             self.do_logging(data, self.total_step, plot_text='test/Images', split='test')
-    #
-    #     ap_edge_mean = np.mean(ap_edge_list)
-    #     recall_edge_mean = np.mean(recall_edge_list)
-    #     ap_node_mean = np.mean(ap_node_list)
-    #     recall_node_mean = np.mean(recall_node_list)
-    #
-    #     # Calculate mean values for all metrics in metrics_dict
-    #     # metrics_dict_mean = {}
-    #     # for key in metrics_dict_list[0].keys():
-    #     #     metrics_dict_mean[key] = np.mean([metrics_dict[key] for metrics_dict in metrics_dict_list])
-    #     #     print('{}: {:.3f}'.format(key, metrics_dict_mean[key])
-    #
-    #     print('Edge AP: {:.3f}, Recall: {:.3f}'.format(ap_edge_mean, recall_edge_mean))
-    #     print('Node AP: {:.3f}, Recall: {:.3f}'.format(ap_node_mean, recall_node_mean))
-    #     print('Edge loss: {:.3f}, Node loss: {:.3f}, Node endpoint loss: {:.3f}'.format(np.mean(edge_losses), np.mean(node_losses), np.mean(node_endpoint_losses)))
-    #     print('Total loss: {:.3f}'.format(np.mean(edge_losses) + np.mean(node_losses)))
-    #
-    #     if not self.params.main.disable_wandb:
-    #         wandb.log({"{}/Edge AP".format(split): ap_edge_mean,
-    #                    "{}/Edge Recall".format(split): recall_edge_mean,
-    #                    "{}/Node AP".format(split): ap_node_mean,
-    #                    "{}/Node Recall".format(split): recall_node_mean,
-    #                    "{}/Edge Loss".format(split): np.mean(edge_losses),
-    #                    "{}/Node Loss".format(split): np.mean(node_losses),})
 
+    def eval(self):
+
+        self.model.eval()
+        print('Evaluating...')
+
+        dataloader_progress = tqdm(self.dataloader_val, desc='Evaluating...')
+
+        node_losses = []
+        edge_losses = []
+        acc_edge_list = []
+        acc_node_list = []
+        precision_edge_list = []
+        precision_node_list = []
+        recall_edge_list = []
+        recall_node_list = []
+        metrics_dict_list = []
+
+        for i_val, data in enumerate(dataloader_progress):
+
+            if self.params.model.dataparallel:
+                data = [item.to(self.device) for item in data]
+            else:
+                data = data.to(self.device)
+
+            with torch.no_grad():
+                edge_scores, node_scores, _ = self.model(data)
+                edge_scores = torch.nn.Sigmoid()(edge_scores).squeeze()
+                node_scores = torch.nn.Sigmoid()(node_scores).squeeze()
+
+            # Convert list of Data to DataBatch for post-processing and loss calculation
+            if self.params.model.dataparallel:
+                data_orig = data.copy()
+                data = Batch.from_data_list(data)
+
+            # loss and optim
+            edge_weight = torch.ones_like(data.edge_scores)
+            node_weight = torch.ones_like(data.node_scores)
+
+            try:
+                edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores)
+                node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores)
+            except Exception as e:
+                print(e)
+                continue
+
+            node_losses.append(node_loss.item())
+            edge_losses.append(edge_loss.item())
+
+            node_scores = node_scores.cpu()
+            edge_scores = edge_scores.cpu()
+            data = data.cpu()
+
+            acc_node = Accuracy(num_classes=1)(node_scores, torch.round(data.node_scores).int())
+            acc_edge = Accuracy(num_classes=1)(edge_scores, torch.round(data.edge_scores).int())
+            recall_node = Recall(task="binary")(torch.round(node_scores), torch.round(data.node_scores).int())
+            recall_edge = Recall(task="binary")(torch.round(edge_scores), torch.round(data.edge_scores).int())
+            precision_node = Precision(task="binary")(torch.round(node_scores),
+                                                      torch.round(data.node_scores).int())
+            precision_edge = Precision(task="binary")(torch.round(edge_scores),
+                                                      torch.round(data.edge_scores).int())
+
+            recall_edge_list.append(recall_edge.item())
+            recall_node_list.append(recall_node.item())
+            precision_edge_list.append(precision_edge.item())
+            precision_node_list.append(precision_node.item())
+            acc_node_list.append(acc_node.item())
+            acc_edge_list.append(acc_edge.item())
+
+            # Visualization
+            if i_val == 0:
+                if self.params.model.dataparallel:
+                    data = data_orig
+                self.do_logging(data, edge_scores, node_scores, plot_text='test/Images')
+
+        re = np.mean(recall_edge_list)
+        rn = np.mean(recall_node_list)
+        pe = np.mean(precision_edge_list)
+        pn = np.mean(precision_node_list)
+        ae = np.mean(acc_edge_list)
+        an = np.mean(acc_node_list)
+        nl = np.mean(node_losses)
+        el = np.mean(edge_losses)
+
+        # Calculate mean values for all metrics in metrics_dict
+        # metrics_dict_mean = {}
+        # for key in metrics_dict_list[0].keys():
+        #     metrics_dict_mean[key] = np.mean([metrics_dict[key] for metrics_dict in metrics_dict_list])
+        #     print('{}: {:.3f}'.format(key, metrics_dict_mean[key])
+
+        if not self.params.main.disable_wandb:
+            wandb.log({"test/loss_total": nl + el,
+                       "test/edge_loss": el,
+                       "test/node_loss": nl,
+                       "test/acc_edge": ae,
+                       "test/acc_node": an,
+                       "test/recall_edge": re,
+                       "test/recall_node": rn,
+                       "test/precision_edge": pe,
+                       "test/precision_node": pn}
+                      )
 
 def main():
 
@@ -443,16 +411,10 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
-    test_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
+    train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, 'train')
+    val_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, 'val')
     dataset_train = PreprocessedDataset(path=train_path)
-    dataset_test = PreprocessedDataset(path=test_path)
-
-    #train_path = '/data/lanegraph/data_sep/all/010922-large/preprocessed/test/n400-halton-endpoint-010922-large-posreg/'
-    #dataset_train = PreprocessedDatasetSuccessor(path=train_path)
-    #dataset_test = PreprocessedDatasetSuccessor(path=train_path)
-
-
+    dataset_val = PreprocessedDataset(path=val_path)
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
@@ -463,12 +425,12 @@ def main():
                                       batch_size=params.model.batch_size,
                                       num_workers=params.model.loader_workers,
                                       shuffle=True)
-    dataloader_test = dataloader_obj(dataset_test,
+    dataloader_val = dataloader_obj(dataset_val,
                                      batch_size=1,
                                      num_workers=1,
                                      shuffle=False)
 
-    trainer = Trainer(params, model, dataloader_train, dataloader_test, optimizer)
+    trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
 
     for epoch in range(params.model.num_epochs):
         trainer.train(epoch)
@@ -487,7 +449,7 @@ def main():
             torch.save(model.state_dict(), checkpoint_path)
 
         # Evaluate
-        # trainer.eval(epoch, split='test')
+        trainer.eval()
 
 
 if __name__ == '__main__':

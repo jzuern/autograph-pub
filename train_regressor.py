@@ -74,21 +74,39 @@ class Trainer():
             angle_x_target = data["angles_x"].cuda()
             angle_y_target = data["angles_y"].cuda()
 
-            pred = self.model(rgb)
-            pred = torch.nn.Tanh()(pred)
 
             if self.params.model.target == "sdf":
+                pred = self.model(rgb)
+                pred = torch.nn.Sigmoid()(pred)
+
                 target = sdf_target.unsqueeze(1)
 
                 loss_dict = {
-                    'loss': torch.nn.BCELoss()(pred, target),
+                    'loss_sdf': torch.nn.BCELoss()(pred, target),
                 }
 
             elif self.params.model.target == "angle":
+                pred = self.model(rgb)
+                pred = torch.nn.Tanh()(pred)
+
                 target = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
 
                 loss_dict = {
-                    'loss': torch.nn.MSELoss()(pred, target),
+                    'loss_angles': torch.nn.MSELoss()(pred, target),
+                }
+
+            elif self.params.model.target == "both":
+
+                pred = self.model(rgb)
+                pred_angle = torch.nn.Tanh()(pred[:, :2])
+                pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
+
+                target_sdf = sdf_target.unsqueeze(1)
+                target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
+
+                loss_dict = {
+                    'loss_sdf': torch.nn.BCELoss()(pred_sdf, target_sdf),
+                    'loss_angles': torch.nn.MSELoss()(pred_angle, target_angle),
                 }
 
             loss = sum(loss_dict.values())
@@ -109,8 +127,14 @@ class Trainer():
                 elif self.params.model.target == "angle":
                     pred_viz = visualize_angles(pred[0,0].detach().cpu().numpy(), pred[0,1].detach().cpu().numpy(), mask=None)
                     target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), sdf_target[0].cpu().numpy())
-                    #pred_viz = cv2.cvtColor(pred_viz, cv2.COLOR_BGR2RGB)
-                    #target_viz = cv2.cvtColor(target_viz, cv2.COLOR_BGR2RGB)
+                elif self.params.model.target == "both":
+                    mask_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
+                    mask_target = sdf_target[0].cpu().detach().numpy()
+                    #mask_pred = None
+                    pred_viz = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=mask_pred)
+                    target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), mask=mask_target)
+
+                    cv2.imshow("mask_pred", mask_pred)
 
                 cv2.imshow("target", target_viz)
                 cv2.imshow("pred", pred_viz)
@@ -173,7 +197,7 @@ def main():
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
-    parser.add_argument('--target', type=str, choices=["sdf", "angle"], help="define the target that is used")
+    parser.add_argument('--target', type=str, choices=["sdf", "angle", "both"], help="define the target that is used")
 
     opt = parser.parse_args()
 
@@ -204,6 +228,9 @@ def main():
         model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=1).to(params.model.device)
     elif params.model.target == "angle":
         model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=2).to(params.model.device)
+    elif params.model.target == "both":
+        model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=3).to(params.model.device)
+
 
     # Make model parallel if available
     if params.model.dataparallel:
@@ -220,10 +247,10 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
-    test_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name)
+    train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, "train")
+    val_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, "val")
     dataset_train = RegressorDataset(path=train_path, split='train')
-    dataset_val = RegressorDataset(path=test_path, split='val')
+    dataset_val = RegressorDataset(path=val_path, split='val')
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
@@ -258,7 +285,7 @@ def main():
             torch.save(model.state_dict(), checkpoint_path)
 
         # Evaluate
-        trainer.eval(epoch)
+        #trainer.eval(epoch)
 
 
 if __name__ == '__main__':
