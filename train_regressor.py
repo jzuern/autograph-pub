@@ -10,12 +10,13 @@ import torch
 import torch.utils.data
 import torch_geometric.data
 import matplotlib.pyplot as plt
+import cv2
 
 from torch_geometric.nn import DataParallel
 from torch_geometric.loader import DataListLoader
-import cv2
+
 from regressors.build_net import build_network
-from data.data_av2 import RegressorDataset
+from data.datasets import RegressorDataset
 from lanegnn.utils import ParamLib
 
 
@@ -160,11 +161,6 @@ class Trainer():
 
         if not self.params.main.disable_wandb:
             wandb.log({"eval/angle_accuracy": angle_accuracy})
-
-
-
-
-
 
 
 def main():

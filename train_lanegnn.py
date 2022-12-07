@@ -18,8 +18,8 @@ from torch_geometric.data import Batch
 
 
 from lanegnn.lanegnn import LaneGNN
-from data.data_av2 import PreprocessedDataset
 from lanegnn.utils import ParamLib, assign_edge_lengths
+from data.datasets import PreprocessedDataset
 from metrics.metrics import calc_all_metrics
 
 
