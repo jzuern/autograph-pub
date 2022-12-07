@@ -83,7 +83,7 @@ def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline
 
         feats = np.concatenate([crop_img_rgb_, crop_centerline_], axis=1)
 
-        edge_img_feats.append(torch.tensor(feats))
+        edge_img_feats.append(torch.ByteTensor(feats * 255.))
 
         # print(center)
         # print(delta_x, delta_y)
@@ -113,8 +113,8 @@ def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline
         edge_gt_score.append(G_gt_nx.edges[i, j]["p"])
 
     edge_indices = torch.tensor(edge_indices)
-    edge_pos_feats = torch.cat(edge_pos_feats, dim=0).half()
-    edge_img_feats = torch.cat(edge_img_feats, dim=0).half()
+    edge_pos_feats = torch.cat(edge_pos_feats, dim=0).float()
+    edge_img_feats = torch.ByteTensor(torch.cat(edge_img_feats, dim=0))
     edge_gt_score = torch.tensor(edge_gt_score)
 
 
@@ -278,11 +278,10 @@ def dijkstra_trajectories(G, trajectories, imsize):
     global_angle = np.zeros(imsize, dtype=np.float32)
     global_mask = np.zeros((imsize[0], imsize[1], 3), dtype=np.uint8)
 
-
     for n in G.nodes:
-        G.nodes[n]["p_dijkstra"] = 0.0
+        G.nodes[n]["log_odds_dijkstra"] = 0.0
     for e in G.edges:
-        G.edges[e]["p_dijkstra"] = 0.0
+        G.edges[e]["log_odds_dijkstra"] = 0.0
 
     for t in trajectories:
 
@@ -308,8 +307,6 @@ def dijkstra_trajectories(G, trajectories, imsize):
         global_sdf = np.maximum(global_sdf, 1-sdf)
 
 
-
-
         directions_hsv = np.zeros_like(global_mask)
         directions_hsv[:, :, 0] = np.sin(global_angle) * 127 + 127
         directions_hsv[:, :, 1] = np.cos(global_angle) * 127 + 127
@@ -333,9 +330,9 @@ def dijkstra_trajectories(G, trajectories, imsize):
         path = nx.dijkstra_path(G, start_node, end_node, weight="c")
 
         for i in range(len(path) - 1):
-            G.edges[path[i], path[i+1]]["p_dijkstra"] = 1.0
+            G.edges[path[i], path[i+1]]["log_odds_dijkstra"] += 1
         for i in range(len(path)):
-            G.nodes[path[i]]["p_dijkstra"] = 1.0
+            G.nodes[path[i]]["log_odds_dijkstra"] += 1
 
     return G, global_sdf, directions_hsv
 
@@ -405,19 +402,28 @@ def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_i
                 angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
                 G = bayes_update_graph(G, angle, x=pos[0], y=pos[1], p=0.9, r_min=r_min)
 
-        node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
-        node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
-
-        # perform angle kernel density estimation and peak detection
+        # node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
+        # node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
+        #
+        # # perform angle kernel density estimation and peak detection
         G = angle_kde(G)
-
-        edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
-        edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
+        #
+        # edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
+        # edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
 
         # assign edge probabilities according to dijstra-approximated trajectories
         G, global_sdf, global_angles = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
-        edge_probabilities = np.array([G.edges[e]["p_dijkstra"] for e in G.edges])
-        node_probabilities = np.array([G.nodes[n]["p_dijkstra"] for n in G.nodes])
+        # edge_probabilities = np.array([G.edges[e]["p_dijkstra"] for e in G.edges])
+        # node_probabilities = np.array([G.nodes[n]["p_dijkstra"] for n in G.nodes])
+
+        log_odds_e = np.array([G.edges[e]["log_odds_dijkstra"] for e in G.edges])
+        log_odds_n = np.array([G.nodes[n]["log_odds_dijkstra"] for n in G.nodes])
+
+        node_probabilities = np.exp(log_odds_n) / (1 + np.exp(log_odds_n))
+        edge_probabilities = np.exp(log_odds_e) / (1 + np.exp(log_odds_e))
+
+
+
 
         if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 20:
             print("too few edges with high probability. skipping")
@@ -516,7 +522,8 @@ def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_i
 if __name__ == "__main__":
 
     city_name = "Pittsburgh"
-    out_path = '/data/self-supervised-graph/preprocessed/av2'
+    out_path = '/data/self-supervised-graph/preprocessed/av2-continuous'
+    os.makedirs(out_path, exist_ok=True)
 
     sample_no = 0
     imsize = 0
@@ -620,9 +627,11 @@ if __name__ == "__main__":
         #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
         # plt.show()
 
+
+
+
     # single core
     #process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_image_)
-
 
 
     # multi core

@@ -4,11 +4,11 @@ main:
     version: 'none'
     disable_wandb: True
 paths:
-    home: /home/zuern/
-    package: /home/zuern/self-supervised-graph/
-    dataroot: /data/self-supervised-graph/
-    dataroot_av2: /data/argoverse2/motion-forecasting/
-    checkpoints: /home/zuern/self-supervised-graph/checkpoints/
+    home: /home/buechner/zuern/
+    package: /home/buechner/zuern/self-supervised-graph/
+    dataroot: /data2/buechner/autograph/
+    #dataroot_av2: /data/argoverse2/motion-forecasting/
+    checkpoints: /home/buechner/zuern/self-supervised-graph/checkpoints/
     split: train
     config_name: av2-continuous  # av2 or ind
 preprocessing:
@@ -21,15 +21,14 @@ preprocessing:
     visualize: False
     ego_regressor_num_channels: 4
 model:
-    dataparallel: False
+    dataparallel: True
     device: cuda
-    batch_size: 2
-    batch_size_reg: 4
+    batch_size: 4
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
     num_epochs: 10000
-    gnn_depth: 2      # default: 1, 2 works
+    gnn_depth: 1
     # lane_mpnn
     map_feat_dim: 64
     node_dim: 16
@@ -38,7 +37,7 @@ model:
     edge_geo_dim: 16
     # end_of_archs
     in_channels: 4  # number of channels of image
-    loader_workers: 2
-    weight_decay: 1e-4
+    loader_workers: 4
+    weight_decay: 1e-4 #0.0001
     ignore_low_scores: False
     checkpoint:

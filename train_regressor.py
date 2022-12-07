@@ -156,6 +156,8 @@ class Trainer():
 
         angle_accuracy = np.nanmean(angle_accuaries)
 
+        print("angle_accuracy", angle_accuracy)
+
         if not self.params.main.disable_wandb:
             wandb.log({"eval/angle_accuracy": angle_accuracy})
 

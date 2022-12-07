@@ -6,7 +6,7 @@ from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
 from av2.datasets.motion_forecasting import scenario_serialization
 from pathlib import Path
-
+from tqdm import tqdm
 import cv2
 import time
 import torch_geometric.data.dataset
@@ -518,14 +518,17 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
     def __len__(self):
         return len(self.pth_files)
 
-
     def check_files(self):
-        for i, pth_file in enumerate(self.pth_files):
+        valid_files = []
+
+        for i, pth_file in tqdm(enumerate(self.pth_files)):
             try:
                 data = torch.load(pth_file)
+                valid_files.append(pth_file)
             except:
                 print("Error loading file {}".format(pth_file))
                 continue
+        self.pth_files = valid_files
 
 
     # def augment(self, data):
@@ -545,7 +548,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         rgb = data['rgb']
         sdf = data['sdf'].float()
         edge_pos_feats = data['edge_pos_feats'].float()
-        edge_img_feats = data['edge_img_feats'].float()
+        edge_img_feats = data['edge_img_feats'].float() / 255.
         edge_scores = data['edge_scores'].float()
         edge_indices = data['edge_indices']
         graph = data['graph']

@@ -9,7 +9,7 @@ import time
 import torch
 import torch.utils.data
 import torch_geometric.data
-from torchmetrics.classification import BinaryAccuracy, Precision, Recall
+from torchmetrics.classification import Accuracy, Precision, Recall
 import matplotlib.pyplot as plt
 
 from torch_geometric.nn import DataParallel
@@ -85,8 +85,8 @@ class Trainer():
 
 
         # Calculate node and edge score accuracies
-        acc_node = BinaryAccuracy(task="binary")(node_scores_pred, torch.round(data.node_scores))
-        acc_edge = BinaryAccuracy(task="binary")(edge_scores_pred, torch.round(data.edge_scores))
+        acc_node = Accuracy(num_classes=1)(node_scores_pred, torch.round(data.node_scores).int())
+        acc_edge = Accuracy(num_classes=1)(edge_scores_pred, torch.round(data.edge_scores).int())
         recall_node = Recall(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores))
         recall_edge = Recall(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores))
         precision_node = Precision(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores))
@@ -125,10 +125,10 @@ class Trainer():
         # color_node_pred = np.hstack([cmap(node_scores_pred)[:, 0:3], node_scores_pred[:, None]])
         color_edge_target = cmap(edge_scores_target)[:, 0:3]
         color_node_target = cmap(node_scores_target)[:, 0:3]
-        color_node_target[:, -1] = 0.5
+        color_edge_target[:, -1] = 0.5
         color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
         color_node_pred = cmap(node_scores_pred)[:, 0:3]
-        color_node_pred[:, -1] = 0.5
+        color_edge_pred[:, -1] = 0.5
 
 
         axarr_log[0].cla()
