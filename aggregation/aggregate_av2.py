@@ -1,16 +1,11 @@
 import random
-
 import numpy as np
 from pathlib import Path
-from av2.datasets.motion_forecasting import scenario_serialization
 import matplotlib.pyplot as plt
-from glob import glob
 from tqdm import tqdm
-from data.av2.settings import get_transform_params
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
 import os
-from lanegnn.utils import poisson_disk_sampling, get_random_edges, get_oriented_crop, transform2vgg
 import networkx as nx
 from scipy.spatial.distance import cdist
 import torch
@@ -18,11 +13,22 @@ from sklearn.neighbors import KernelDensity
 from scipy.signal import find_peaks
 from torchvision.models import resnet18
 import torch.nn as nn
-from av2.geometry.interpolate import compute_midpoint_line
-from av2.map.map_api import ArgoverseStaticMap
+from itertools import repeat
+from ray.util.multiprocessing import Pool
 import cv2
 import skfmm
-from ray.util.multiprocessing import Pool
+import argparse
+
+from av2.geometry.interpolate import compute_midpoint_line
+from av2.map.map_api import ArgoverseStaticMap
+from av2.datasets.motion_forecasting import scenario_serialization
+
+from lanegnn.utils import poisson_disk_sampling, get_random_edges, get_oriented_crop, transform2vgg
+from data.av2.settings import get_transform_params
+
+
+# random shuffle seed
+random.seed(0)
 
 
 def edge_feature_encoder(out_features=64, in_channels=3):
@@ -31,8 +37,23 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     model.fc = nn.Linear(model.fc.in_features, out_features)
     return model
 
+def visualize_angles(a_x, a_y, mask):
+    if mask is None:
+        mask = np.ones_like(a_x, dtype=np.uint8)
+    global_mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
+    global_mask = ((global_mask > 0.5) * 255).astype(np.uint8)
+    directions_hsv = np.ones([a_x.shape[0], a_x.shape[1], 3], dtype=np.uint8)
 
-def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline_image_, roi_xxyy, sample_id, out_path):
+    directions_hsv[:, :, 0] = a_x * 127 + 127
+    directions_hsv[:, :, 1] = a_y * 127 + 127
+    directions_hsv[:, :, 2] = global_mask[:, :, 0]
+
+    directions_hsv = directions_hsv * global_mask
+
+    return directions_hsv
+
+
+def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_xxyy, sample_id, out_path):
 
     margin = 200
 
@@ -45,7 +66,6 @@ def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline
 
     node_gt_score = torch.tensor(node_gt_score)
     node_pos_feats = torch.tensor(np.array(node_pos_feats))
-
 
     edge_pos_feats = []
     edge_indices = []
@@ -120,8 +140,8 @@ def preprocess_sample(G_gt_nx, sat_image_, global_sdf, global_angles, centerline
 
     torch.save({
         "rgb": torch.FloatTensor(rgb),
-        "sdf": torch.FloatTensor(global_sdf),
-        "angles": torch.FloatTensor(global_angles),
+        "sdf": torch.FloatTensor(sdf),
+        "angles": torch.FloatTensor(angles),
         "node_feats": node_pos_feats,
         "edge_pos_feats": edge_pos_feats,
         "edge_img_feats": edge_img_feats,
@@ -163,7 +183,7 @@ def initialize_graph(roi_xxyy, r_min):
     points = np.array(points)
     edges = get_random_edges(points,
                              min_point_dist=r_min,
-                             max_point_dist=2*r_min)
+                             max_point_dist=3*r_min)
 
     G = nx.DiGraph()
 
@@ -298,44 +318,47 @@ def dijkstra_trajectories(G, trajectories, imsize):
             cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=5)
             cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
 
-
-        f = 10  # distance function scale
+        f = 15  # distance function scale
         sdf = skfmm.distance(1 - sdf)
         sdf[sdf > f] = f
         sdf = sdf / f
 
         global_sdf = np.maximum(global_sdf, 1-sdf)
 
+        angles_viz = visualize_angles(np.cos(global_angle),
+                                      np.sin(global_angle),
+                                      mask=global_mask[:, :, 0])
 
-        directions_hsv = np.zeros_like(global_mask)
-        directions_hsv[:, :, 0] = np.sin(global_angle) * 127 + 127
-        directions_hsv[:, :, 1] = np.cos(global_angle) * 127 + 127
-        directions_hsv[:, :, 2] = global_mask[:, :, 0] * 255
+        #directions_hsv = np.zeros_like(global_mask)
+        #directions_hsv[:, :, 0] = np.sin(global_angle) * 127 + 127
+        #directions_hsv[:, :, 1] = np.cos(global_angle) * 127 + 127
+        #directions_hsv[:, :, 2] = global_mask[:, :, 0] * 255
 
-        directions_hsv = directions_hsv * global_mask
-
+        #directions_hsv = directions_hsv * global_mask
 
         # assign cost to nodes and edges
         for e in G.edges:
             start = G.nodes[e[0]]["pos"]
             end = G.nodes[e[1]]["pos"]
             midpoint = (start + end) / 2
-            G.edges[e]["c"] = sdf[int(midpoint[1]), int(midpoint[0])] ** 0.5 + \
-                              sdf[int(start[1]), int(start[0])] ** 0.5 +  \
-                              sdf[int(end[1]), int(end[0])] ** 0.5
+            try:
+                G.edges[e]["cost"] = sdf[int(midpoint[1]), int(midpoint[0])] ** 0.5 + \
+                                     sdf[int(start[1]), int(start[0])] ** 0.5 +  \
+                                     sdf[int(end[1]), int(end[0])] ** 0.5
+            except:
+                continue
 
         start_node = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - t[0], axis=1))
         end_node = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - t[-1], axis=1))
 
-        path = nx.dijkstra_path(G, start_node, end_node, weight="c")
+        path = nx.dijkstra_path(G, start_node, end_node, weight="cost")
 
         for i in range(len(path) - 1):
             G.edges[path[i], path[i+1]]["log_odds_dijkstra"] += 1
         for i in range(len(path)):
             G.nodes[path[i]]["log_odds_dijkstra"] += 1
 
-    return G, global_sdf, directions_hsv
-
+    return G, global_sdf, angles_viz
 
 
 def resample_trajectory(trajectory, dist=5):
@@ -357,12 +380,16 @@ def resample_trajectory(trajectory, dist=5):
     return np.array(new_trajectory)
 
 
-def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_image_):
+def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, centerline_image_, out_path_root):
 
     for roi_xxyy in tqdm(roi_xxyy_list):
         sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
-        centerline_image = centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
+        #centerline_image = centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
+
+        # Filter non-square sat_images:
+        if sat_image.shape[0] != sat_image.shape[1]:
+            continue
 
         trajectories = []
         for t in range(len(trajectories_)):
@@ -377,16 +404,27 @@ def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_i
             trajectory = trajectory[is_in_roi]
 
             # resample trajectory to have equally distant points
-            if len(trajectory) > 5:
-                trajectory = resample_trajectory(trajectory, dist=5)
-            if len(trajectory) > 5:
-                trajectories.append(trajectory)
+            if len(trajectory) < 5:
+                continue
+
+            trajectory = resample_trajectory(trajectory, dist=5)
+
+            # total length of trajectory
+            total_length = np.sum(np.linalg.norm(trajectory[1:] - trajectory[:-1], axis=1))
+            if total_length < 50:
+                continue
+
+            trajectories.append(trajectory)
+
+
 
         if len(trajectories) < 1:
-            #print("no trajectories in roi {}. skipping".format(roi_xxyy))
             continue
 
-        r_min = 8  # minimum radius of the circle for poisson disc sampling
+        min_distance_from_center = min([np.min(np.linalg.norm(trajectory - np.array(sat_image.shape[:2]) / 2, axis=1)) for trajectory in trajectories])
+        if min_distance_from_center > 20:
+            continue
+
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in trajectories:
@@ -402,19 +440,12 @@ def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_i
                 angle = np.arctan2(next_pos[1] - pos[1], next_pos[0] - pos[0])
                 G = bayes_update_graph(G, angle, x=pos[0], y=pos[1], p=0.9, r_min=r_min)
 
-        # node_log_odds = np.array([G.nodes[n]["log_odds"] for n in G.nodes])
-        # node_probabilities = np.exp(node_log_odds) / (1 + np.exp(node_log_odds))
-        #
-        # # perform angle kernel density estimation and peak detection
+        # perform angle kernel density estimation and peak detection
         G = angle_kde(G)
-        #
-        # edge_log_odds = np.array([G.edges[e]["log_odds"] for e in G.edges])
-        # edge_probabilities = np.exp(edge_log_odds) / (1 + np.exp(edge_log_odds))
+
 
         # assign edge probabilities according to dijstra-approximated trajectories
-        G, global_sdf, global_angles = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
-        # edge_probabilities = np.array([G.edges[e]["p_dijkstra"] for e in G.edges])
-        # node_probabilities = np.array([G.nodes[n]["p_dijkstra"] for n in G.nodes])
+        G, sdf, angles = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
 
         log_odds_e = np.array([G.edges[e]["log_odds_dijkstra"] for e in G.edges])
         log_odds_n = np.array([G.nodes[n]["log_odds_dijkstra"] for n in G.nodes])
@@ -422,11 +453,7 @@ def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_i
         node_probabilities = np.exp(log_odds_n) / (1 + np.exp(log_odds_n))
         edge_probabilities = np.exp(log_odds_e) / (1 + np.exp(log_odds_e))
 
-
-
-
         if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 20:
-            print("too few edges with high probability. skipping")
             continue
 
         # rescale probabilities
@@ -440,90 +467,110 @@ def process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_i
         for i, n in enumerate(G.nodes):
             G.nodes[n]["p"] = node_probabilities[i]
 
-        # # ignore all before and just assign centerline probs
-        # G = assign_centerline_probs(G, centerline_image)
-        #
-        # # remove all nodes with low probability
-        # G_ = G.copy()
-        # for n in G_.nodes:
-        #     if G.nodes[n]["p"] < 0.5:
-        #         G.remove_node(n)
-        #
-        # # remap node ids and edges
-        # node_ids = list(G.nodes)
-        # node_id_map = {node_ids[i]: i for i in range(len(node_ids))}
-        # G = nx.relabel_nodes(G, node_id_map)
-
-
-        node_probabilities = np.array([G.nodes[n]["p"] for n in G.nodes])
-        edge_probabilities = np.array([G.edges[e]["p"] for e in G.edges])
-
-        if np.any(np.isnan(node_probabilities)) or np.any(np.isnan(edge_probabilities)):
-            print("nan in node or edge probabilities. skipping")
-            continue
-
-        cmap = plt.get_cmap('viridis')
-        norm = plt.Normalize(vmin=0.0, vmax=1.0)
-        node_colors = cmap(norm(node_probabilities))
-
-        fig, ax = plt.subplots(figsize=(10, 10))
-        plt.tight_layout()
-        ax.set_aspect('equal')
-        ax.imshow(sat_image)
-        #ax.imshow(centerline_image, alpha=0.5)
-        ax.imshow(global_sdf, alpha=0.3)
-        ax.imshow(global_angles, alpha=0.3)
+        if roi_xxyy[0] < 16000:
+            out_path = os.path.join(out_path_root, "val")
+        else:
+            out_path = os.path.join(out_path_root, "train")
 
         Image.fromarray(sat_image).save("{}/{}-rgb.png".format(out_path, sample_id))
-        Image.fromarray(global_angles).save("{}/{}-angles.png".format(out_path, sample_id))
-        Image.fromarray(global_sdf * 255.).convert("L").save("{}/{}-sdf.png".format(out_path, sample_id))
+        Image.fromarray(angles).save("{}/{}-angles-tracklets.png".format(out_path, sample_id))
+        Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets.png".format(out_path, sample_id))
 
-        # draw edges
-        for t in trajectories:
-            for i in range(len(t) - 1):
-                ax.arrow(t[i][0], t[i][1],
-                         t[i + 1][0] - t[i][0],
-                         t[i + 1][1] - t[i][1],
-                         color="white", alpha=0.5, width=0.5, head_width=1, head_length=1)
 
-        for n in G.nodes:
-            angle_peaks = G.nodes[n]["angle_peaks"]
-            pos = G.nodes[n]["pos"]
-            for peak in angle_peaks:
-                ax.arrow(pos[0], pos[1], np.cos(peak) * 3, np.sin(peak) * 3, color='r', width=0.3)
+        if export_final:
 
-        edge_colors = cmap(norm(edge_probabilities))
-        edge_colors[:, -1] = 0.5
+            # Filter graph according to predicted sdf
+            G_ = G.copy()
+            for n in G_.nodes:
+                pos = G.nodes[n]["pos"]
+                if sdf[int(pos[1]), int(pos[0])] < 0.2:
+                    G.remove_node(n)
+            # remap node ids and edges
+            node_ids = list(G.nodes)
+            node_id_map = {node_ids[i]: i for i in range(len(node_ids))}
+            G = nx.relabel_nodes(G, node_id_map)
 
-        nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
-                         edge_color=edge_colors,
-                         node_color=node_colors,
-                         with_labels=False,
-                         node_size=10,
-                         arrowsize=3.0,
-                         width=1,
-                         )
+            node_probabilities = np.array([G.nodes[n]["p"] for n in G.nodes])
+            edge_probabilities = np.array([G.edges[e]["p"] for e in G.edges])
 
-        plt.savefig("{}/{}.png".format(out_path, sample_id), dpi=400)
+            if np.any(np.isnan(node_probabilities)) or np.any(np.isnan(edge_probabilities)):
+                print("nan in node or edge probabilities. skipping")
+                continue
 
-        # preprocess sample into pth file
-        print("Processing {}...".format(sample_id))
-        preprocess_sample(G,
-                          sat_image_=sat_image_,
-                          global_sdf=global_sdf,
-                          global_angles=global_angles,
-                          centerline_image_=centerline_image_,
-                          roi_xxyy=roi_xxyy,
-                          sample_id=sample_id,
-                          out_path=out_path)
+            print("Processing {}...".format(sample_id))
 
+            cmap = plt.get_cmap('viridis')
+            norm = plt.Normalize(vmin=0.0, vmax=1.0)
+            node_colors = cmap(norm(node_probabilities))
+
+
+            fig, ax = plt.subplots(figsize=(10, 10))
+            plt.tight_layout()
+            ax.set_aspect('equal')
+            ax.imshow(sat_image)
+
+
+            # draw edges
+            for t in trajectories:
+                for i in range(len(t) - 1):
+                    ax.arrow(t[i][0], t[i][1],
+                             t[i + 1][0] - t[i][0],
+                             t[i + 1][1] - t[i][1],
+                             color="white", alpha=0.5, width=0.5, head_width=1, head_length=1)
+
+            for n in G.nodes:
+                angle_peaks = G.nodes[n]["angle_peaks"]
+                pos = G.nodes[n]["pos"]
+                for peak in angle_peaks:
+                    ax.arrow(pos[0], pos[1], np.cos(peak) * 3, np.sin(peak) * 3, color='r', width=0.3)
+
+            edge_colors = cmap(norm(edge_probabilities))
+            edge_colors[:, -1] = edge_probabilities
+
+            nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
+                             edge_color=edge_colors,
+                             node_color=node_colors,
+                             with_labels=False,
+                             node_size=10,
+                             arrowsize=3.0,
+                             width=1,
+                             )
+
+            plt.savefig("{}/{}.png".format(out_path, sample_id), dpi=400)
+
+            # preprocess sample into pth file
+            preprocess_sample(G,
+                              sat_image_=sat_image_,
+                              sdf=sdf,
+                              angles=angles,
+                              centerline_image_=centerline_image_,
+                              roi_xxyy=roi_xxyy,
+                              sample_id=sample_id,
+                              out_path=out_path)
 
 
 if __name__ == "__main__":
 
-    city_name = "Pittsburgh"
-    out_path = '/data/self-supervised-graph/preprocessed/av2-continuous'
-    os.makedirs(out_path, exist_ok=True)
+    # argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--export_final", action="store_true")
+    parser.add_argument("--city_name", type=str, default="data")
+    parser.add_argument("--out_path_root", type=str, default="data")
+    args = parser.parse_args()
+
+    out_path_root = args.out_path_root
+    city_name = args.city_name
+    export_final = args.export_final
+
+    # parameters
+    num_cpus = 8
+    r_min = 5  # minimum radius of the circle for poisson disc sampling
+    meta_roi = [0, 25000, 0, 25000]   # ymin, ymax, xmin, xmax, ymin, ymax PIT
+
+
+    os.makedirs(os.path.join(out_path_root), exist_ok=True)
+    os.makedirs(os.path.join(out_path_root, 'train'), exist_ok=True)
+    os.makedirs(os.path.join(out_path_root, 'val'), exist_ok=True)
 
     sample_no = 0
     imsize = 0
@@ -537,13 +584,7 @@ if __name__ == "__main__":
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
-
-
-    # sat_image_ = 128 * np.ones((60000, 60000, 3), dtype=np.uint8)
-    # centerline_image_ = np.zeros((60000, 60000), dtype=np.uint8)
-
     # generate roi_xxyy list over full satellite image in sliding window fashion
-    meta_roi = [0, 25000, 0, 25000]   # ymin, ymax, xmin, xmax, ymin, ymax PIT
 
     sat_image_ = np.ascontiguousarray(sat_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3], :])
     centerline_image_ = np.ascontiguousarray(centerline_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3]])
@@ -552,6 +593,7 @@ if __name__ == "__main__":
     for i in range(meta_roi[2], meta_roi[3], 100):
         for j in range(meta_roi[0], meta_roi[1], 100):
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
+
     random.shuffle(roi_xxyy_list)
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
@@ -627,33 +669,32 @@ if __name__ == "__main__":
         #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
         # plt.show()
 
-
-
-
     # single core
-    #process_chunk(roi_xxyy_list, trajectories_, lanes_, sat_image_, centerline_image_)
+    if num_cpus <= 1:
+        process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, centerline_image_, out_path_root)
+
+    else:
+
+        # multi core
+        def chunkify(lst, n):
+            """Yield successive n-sized chunks from lst."""
+            for i in range(0, len(lst), n):
+                yield lst[i:i + n]
+
+        num_samples = len(roi_xxyy_list)
+        num_chunks = int(np.ceil(num_samples / num_cpus))
+        roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
 
 
-    # multi core
-    def chunkify(lst, n):
-        """Yield successive n-sized chunks from lst."""
-        for i in range(0, len(lst), n):
-            yield lst[i:i + n]
+        arguments = zip(roi_chunks,
+                        repeat(export_final),
+                        repeat(trajectories_),
+                        repeat(lanes_),
+                        repeat(sat_image_),
+                        repeat(centerline_image_),
+                        repeat(out_path_root))
 
-    num_cpus = 8
-    num_samples = len(roi_xxyy_list)
-    num_chunks = int(np.ceil(num_samples / num_cpus))
-    roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
-
-    from itertools import repeat
-
-    arguments = zip(roi_chunks,
-                    repeat(trajectories_),
-                    repeat(lanes_),
-                    repeat(sat_image_),
-                    repeat(centerline_image_))
-
-    Pool(num_cpus).starmap(process_chunk, arguments)
+        Pool(num_cpus).starmap(process_chunk, arguments)
 
 
 

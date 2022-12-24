@@ -27,9 +27,9 @@ def visualize_angles(a_x, a_y, mask):
     global_mask = ((global_mask > 0.5) * 255).astype(np.uint8)
     directions_hsv = np.ones([a_x.shape[0], a_x.shape[1], 3], dtype=np.uint8)
 
-    directions_hsv[:, :, 0] = a_x * 127 + 127
-    directions_hsv[:, :, 1] = a_y * 127 + 127
-    directions_hsv[:, :, 2] = global_mask[:, :, 0]
+    directions_hsv[:, :, 1] = a_x * 127 + 127
+    directions_hsv[:, :, 2] = a_y * 127 + 127
+    directions_hsv[:, :, 0] = global_mask[:, :, 0]
 
     directions_hsv = directions_hsv * global_mask
 
@@ -62,6 +62,8 @@ class Trainer():
     def train(self, epoch):
 
         self.model.train()
+        self.model.load_state_dict(torch.load("/home/zuern/self-supervised-graph/checkpoints/regressor-newest.pth"))
+
 
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
@@ -100,6 +102,10 @@ class Trainer():
                 pred = self.model(rgb)
                 pred_angle = torch.nn.Tanh()(pred[:, :2])
                 pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
+
+                plt.imshow(rgb[0].cpu().numpy().transpose(1, 2, 0))
+                plt.imshow(pred_sdf[0, 0].detach().cpu().numpy(), alpha=0.5)
+                plt.show()
 
                 target_sdf = sdf_target.unsqueeze(1)
                 target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)

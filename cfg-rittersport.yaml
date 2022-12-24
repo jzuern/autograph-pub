@@ -9,7 +9,7 @@ paths:
     dataroot: /data/autograph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    config_name: av2-continuous  # av2 or ind
+    config_name: av2-experiment-filtered
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
@@ -22,7 +22,7 @@ preprocessing:
 model:
     dataparallel: False
     device: cuda
-    batch_size: 2
+    batch_size: 1
     batch_size_reg: 4
     lr: 1e-3
     beta_lo: 0.9
@@ -30,14 +30,14 @@ model:
     num_epochs: 10000
     gnn_depth: 2      # default: 1, 2 works
     # lane_mpnn
-    map_feat_dim: 64
+    map_feat_dim: 32  # default 64
     node_dim: 16
     edge_dim: 32
     msg_dim: 32
     edge_geo_dim: 16
     # end_of_archs
     in_channels: 4  # number of channels of image
-    loader_workers: 2
+    loader_workers: 4
     weight_decay: 1e-4
     ignore_low_scores: False
     checkpoint:

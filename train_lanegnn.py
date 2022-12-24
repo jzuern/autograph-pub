@@ -118,12 +118,12 @@ class Trainer():
                 graph_pred.add_edge(i, j, weight=1-edge_scores_pred[edge_idx])
 
         cmap = plt.get_cmap('viridis')
-        color_edge_target = cmap(edge_scores_target)[:, 0:3]
-        color_node_target = cmap(node_scores_target)[:, 0:3]
-        color_edge_target[:, -1] = 0.5
-        color_edge_pred = cmap(edge_scores_pred)[:, 0:3]
-        color_node_pred = cmap(node_scores_pred)[:, 0:3]
-        color_edge_pred[:, -1] = 0.5
+        color_edge_target = cmap(edge_scores_target)[:, 0:4]
+        color_node_target = cmap(node_scores_target)[:, 0:4]
+        color_edge_target[:, -1] = edge_scores_target
+        color_edge_pred = cmap(edge_scores_pred)[:, 0:4]
+        color_node_pred = cmap(node_scores_pred)[:, 0:4]
+        color_edge_pred[:, -1] = edge_scores_pred
 
 
         axarr_log[0].cla()
@@ -248,6 +248,8 @@ class Trainer():
         self.model.eval()
         print('Evaluating...')
 
+        random_index = np.random.randint(0, len(self.dataloader_val))
+
         dataloader_progress = tqdm(self.dataloader_val, desc='Evaluating...')
 
         node_losses = []
@@ -312,7 +314,7 @@ class Trainer():
             acc_edge_list.append(acc_edge.item())
 
             # Visualization
-            if i_val == 0:
+            if i_val == random_index:
                 if self.params.model.dataparallel:
                     data = data_orig
                 self.do_logging(data, edge_scores, node_scores, plot_text='test/Images')

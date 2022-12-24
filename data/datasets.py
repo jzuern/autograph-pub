@@ -15,18 +15,30 @@ class RegressorDataset(torch.utils.data.Dataset):
         self.angles_files = sorted(glob(os.path.join(path, '*-angles.png')))
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
 
-        # only use files for which we have all three modalities
-        file_ids = [os.path.basename(f).split('-')[0] for f in self.sdf_files]
-        self.sdf_files = [f for f in self.sdf_files if os.path.basename(f).split('-')[0] in file_ids]
-        self.angles_files = [f for f in self.angles_files if os.path.basename(f).split('-')[0] in file_ids]
-        self.rgb_files = [f for f in self.rgb_files if os.path.basename(f).split('-')[0] in file_ids]
+        def get_id(filename):
+            return os.path.basename(filename).split('-')[1] + '-' + os.path.basename(filename).split('-')[2]
 
+
+        # check if all sdf files have same resolution
+        sdf_files = self.sdf_files
+        self.sdf_files = []
+        for sdf_file in sdf_files:
+            sdf_new = cv2.imread(sdf_file, cv2.IMREAD_UNCHANGED)
+            if sdf_new.shape[0] == sdf_new.shape[1]:
+                self.sdf_files.append(sdf_file)
+
+        # only use files for which we have all three modalities
+        file_ids = [get_id(f) for f in self.sdf_files]
+        self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
+        self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
+        self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
 
 
         # check if all files are present
         assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files)
 
         self.split = split
+
 
         print("Loaded {} {} files".format(len(self.sdf_files), self.split))
 
@@ -40,7 +52,7 @@ class RegressorDataset(torch.utils.data.Dataset):
         rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
 
 
-        # convert from angles to unit circle coordinates
+        # convert from angles to unit circle xy coordinates
         angles_x = angles[:, :, 1] / 255.0 * 2 - 1
         angles_y = angles[:, :, 2] / 255.0 * 2 - 1
 
