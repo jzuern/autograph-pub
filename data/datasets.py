@@ -5,19 +5,23 @@ import torch_geometric.data.dataset
 from tqdm import tqdm
 import os
 import cv2
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
 
 
 class RegressorDataset(torch.utils.data.Dataset):
     def __init__(self, path, split):
         self.path = path
 
-        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf.png')))
-        self.angles_files = sorted(glob(os.path.join(path, '*-angles.png')))
+        print("Looking for files in", path)
+
+        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets.png')))
+        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets.png')))
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
 
         def get_id(filename):
             return os.path.basename(filename).split('-')[1] + '-' + os.path.basename(filename).split('-')[2]
-
 
         # check if all sdf files have same resolution
         sdf_files = self.sdf_files
@@ -39,12 +43,30 @@ class RegressorDataset(torch.utils.data.Dataset):
 
         self.split = split
 
-
         print("Loaded {} {} files".format(len(self.sdf_files), self.split))
-
 
     def __len__(self):
         return len(self.sdf_files)
+
+
+    def random_rotate(self, return_dict):
+        # random rotation
+        #angle = np.random.choice([0, 90, 180, 270])
+        angle = np.random.choice([0])
+
+        return_dict['rgb'] = torch.rot90(return_dict['rgb'], int(angle / 90), [1, 2])
+        return_dict['sdf'] = torch.rot90(return_dict['sdf'], int(angle / 90), [0, 1])
+
+        return_dict['angles_x'] = torch.rot90(return_dict['angles_x'], int(angle / 90), [0, 1])
+        return_dict['angles_y'] = torch.rot90(return_dict['angles_y'], int(angle / 90), [0, 1])
+
+        return_dict['angles_x'] += torch.cos(torch.tensor(angle / 180 * np.pi))
+        return_dict['angles_y'] += torch.sin(torch.tensor(angle / 180 * np.pi))
+
+
+        return return_dict
+
+
 
     def __getitem__(self, idx):
         sdf = cv2.imread(self.sdf_files[idx], cv2.IMREAD_UNCHANGED)
@@ -53,8 +75,12 @@ class RegressorDataset(torch.utils.data.Dataset):
 
 
         # convert from angles to unit circle xy coordinates
-        angles_x = angles[:, :, 1] / 255.0 * 2 - 1
-        angles_y = angles[:, :, 2] / 255.0 * 2 - 1
+        # to hsv to get hue
+        angles = cv2.cvtColor(angles, cv2.COLOR_BGR2HSV)
+        angles = angles[:, :, 0] / 255.0 * 2 * np.pi - np.pi
+
+        angles_x = np.cos(angles)
+        angles_y = np.sin(angles)
 
         # to tensor
         sdf = torch.from_numpy(sdf).float() / 255.0
@@ -68,6 +94,9 @@ class RegressorDataset(torch.utils.data.Dataset):
             'angles_y': angles_y,
             'rgb': rgb
         }
+
+        return_dict = self.random_rotate(return_dict)
+
         return return_dict
 
 
@@ -105,14 +134,33 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         self.pth_files = valid_files
 
 
-    # def augment(self, data):
-    #     if self.params.preprocessing.augment and self.split == 'train':
-    #         angle = np.random.choice([0, 90, 180, 270])
-    #         # rotate image
-    #         data.rgb = torch.rot90(data.rgb, k=int(angle / 90), dims=[1, 2])
-    #         data.sdf = torch.rot90(data.sdf, k=int(angle / 90), dims=[1, 2])
-    #
-    #     return data
+    def random_rotate(self, data):
+
+        image_size = data['rgb'].shape[1]
+        center = image_size // 2
+
+        angle = torch.random.choice([0, 90, 180, 270])
+
+        # rotate images
+        data.rgb = torch.rot90(data.rgb, k=int(angle / 90), dims=[1, 2])
+        data.sdf = torch.rot90(data.sdf, k=int(angle / 90), dims=[1, 2])
+
+        # rotate node feats around center
+        data.pos[:, 0] = center + (data.pos[:, 0] - center) * torch.cos(angle / 180 * np.pi) - \
+                                  (data.pos[:, 1] - center) * torch.sin(angle / 180 * np.pi)
+        data.pos[:, 1] = center + (data.pos[:, 0] - center) * torch.sin(angle / 180 * np.pi) + \
+                                  (data.pos[:, 1] - center) * torch.cos(angle / 180 * np.pi)
+
+        # rotate graph around center
+        graph_node_pos = nx.get_node_attributes(data.graph, 'pos')
+        graph_node_pos[:, 0] = center + (graph_node_pos[:, 0] - center) * torch.cos(angle / 180 * np.pi) - \
+                                        (data.pos[:, 1] - center) * torch.sin(angle / 180 * np.pi)
+        graph_node_pos[:, 1] = center + (graph_node_pos[:, 0] - center) * torch.sin(angle / 180 * np.pi) + \
+                                        (data.pos[:, 1] - center) * torch.cos(angle / 180 * np.pi)
+        nx.set_node_attributes(data.graph, graph_node_pos, 'pos')
+
+
+        return data
 
 
     def __getitem__(self, index):
@@ -142,6 +190,9 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
                                          rgb=torch.FloatTensor(rgb / 255.),
                                          sdf=torch.FloatTensor(sdf),
                                          )
+
+        if self.params.preprocessing.augment and self.split == 'train':
+            data = self.random_rotate(data)
 
         return data
 

@@ -39,7 +39,7 @@ def get_transform_params(city_name):
         print("Using Detroit transform params")
         points_shapefile = coordinates_dict["DTW"]["points_shapefile"]
         points_image = coordinates_dict["DTW"]["points_image"]
-    elif "palo-alto" in city_name:
+    elif "palo" in city_name:
         print("Using PaloAlto transform params")
         points_shapefile = coordinates_dict["PAO"]["points_shapefile"]
         points_image = coordinates_dict["PAO"]["points_image"]

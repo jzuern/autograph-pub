@@ -37,20 +37,28 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     model.fc = nn.Linear(model.fc.in_features, out_features)
     return model
 
+
 def visualize_angles(a_x, a_y, mask):
     if mask is None:
         mask = np.ones_like(a_x, dtype=np.uint8)
-    global_mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
-    global_mask = ((global_mask > 0.5) * 255).astype(np.uint8)
-    directions_hsv = np.ones([a_x.shape[0], a_x.shape[1], 3], dtype=np.uint8)
 
-    directions_hsv[:, :, 0] = a_x * 127 + 127
-    directions_hsv[:, :, 1] = a_y * 127 + 127
-    directions_hsv[:, :, 2] = global_mask[:, :, 0]
 
-    directions_hsv = directions_hsv * global_mask
+    angle = np.arctan2(a_y, a_x)
+    angle = (angle + np.pi) / (2 * np.pi)
 
-    return directions_hsv
+    # plot angle in hsv color space
+    angle_hsv = np.ones((angle.shape[0], angle.shape[1], 3), dtype=np.float32)
+    angle_hsv[..., 0] = angle
+    angle_hsv = (angle_hsv * 255).astype(np.uint8)
+
+    angle_rgb = cv2.cvtColor(angle_hsv, cv2.COLOR_HSV2RGB)
+
+    mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
+    mask = (mask > 0.5).astype(np.uint8)
+
+    angle_rgb = angle_rgb * mask
+
+    return angle_rgb
 
 
 def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_xxyy, sample_id, out_path):
@@ -315,7 +323,7 @@ def dijkstra_trajectories(G, trajectories, imsize):
             cv2.line(sdf, (x1, y1), (x2, y2), 1, 1)
 
             angle = np.arctan2(y2 - y1, x2 - x1)
-            cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=5)
+            cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=8)
             cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
 
         f = 15  # distance function scale
@@ -324,17 +332,6 @@ def dijkstra_trajectories(G, trajectories, imsize):
         sdf = sdf / f
 
         global_sdf = np.maximum(global_sdf, 1-sdf)
-
-        angles_viz = visualize_angles(np.cos(global_angle),
-                                      np.sin(global_angle),
-                                      mask=global_mask[:, :, 0])
-
-        #directions_hsv = np.zeros_like(global_mask)
-        #directions_hsv[:, :, 0] = np.sin(global_angle) * 127 + 127
-        #directions_hsv[:, :, 1] = np.cos(global_angle) * 127 + 127
-        #directions_hsv[:, :, 2] = global_mask[:, :, 0] * 255
-
-        #directions_hsv = directions_hsv * global_mask
 
         # assign cost to nodes and edges
         for e in G.edges:
@@ -358,7 +355,13 @@ def dijkstra_trajectories(G, trajectories, imsize):
         for i in range(len(path)):
             G.nodes[path[i]]["log_odds_dijkstra"] += 1
 
-    return G, global_sdf, angles_viz
+
+    angles_viz = visualize_angles(np.cos(global_angle),
+                                  np.sin(global_angle),
+                                  mask=global_mask[:, :, 0])
+
+
+    return G, global_sdf, global_angle, angles_viz
 
 
 def resample_trajectory(trajectory, dist=5):
@@ -380,7 +383,7 @@ def resample_trajectory(trajectory, dist=5):
     return np.array(new_trajectory)
 
 
-def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, centerline_image_, out_path_root):
+def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
 
     for roi_xxyy in tqdm(roi_xxyy_list):
         sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
@@ -399,8 +402,15 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
 
             # filter trajectories according to current roi_xxyy
             is_in_roi = np.logical_and(trajectory[:, 0] > 0, trajectory[:, 0] < sat_image.shape[1])
+            if not np.any(is_in_roi):
+                continue
             is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] > 0)
+            if not np.any(is_in_roi):
+                continue
             is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] < sat_image.shape[0])
+            if not np.any(is_in_roi):
+                continue
+
             trajectory = trajectory[is_in_roi]
 
             # resample trajectory to have equally distant points
@@ -415,8 +425,6 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
                 continue
 
             trajectories.append(trajectory)
-
-
 
         if len(trajectories) < 1:
             continue
@@ -445,7 +453,7 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
 
 
         # assign edge probabilities according to dijstra-approximated trajectories
-        G, sdf, angles = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
+        G, sdf, angles, angles_viz = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
 
         log_odds_e = np.array([G.edges[e]["log_odds_dijkstra"] for e in G.edges])
         log_odds_n = np.array([G.nodes[n]["log_odds_dijkstra"] for n in G.nodes])
@@ -472,10 +480,11 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
         else:
             out_path = os.path.join(out_path_root, "train")
 
-        Image.fromarray(sat_image).save("{}/{}-rgb.png".format(out_path, sample_id))
-        Image.fromarray(angles).save("{}/{}-angles-tracklets.png".format(out_path, sample_id))
-        Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets.png".format(out_path, sample_id))
+        print("Saving to {}/{}-rgb.png".format(out_path, sample_id))
 
+        Image.fromarray(sat_image).save("{}/{}-rgb.png".format(out_path, sample_id))
+        Image.fromarray(angles_viz).save("{}/{}-angles-tracklets.png".format(out_path, sample_id))
+        Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets.png".format(out_path, sample_id))
 
         if export_final:
 
@@ -559,14 +568,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     out_path_root = args.out_path_root
-    city_name = args.city_name
+    city_name = args.city_name.capitalize()
+    if city_name == "Paloalto":
+        city_name = "PaloAlto"
     export_final = args.export_final
 
     # parameters
-    num_cpus = 8
+    num_cpus = 2
     r_min = 5  # minimum radius of the circle for poisson disc sampling
-    meta_roi = [0, 25000, 0, 25000]   # ymin, ymax, xmin, xmax, ymin, ymax PIT
-
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'train'), exist_ok=True)
@@ -577,26 +586,21 @@ if __name__ == "__main__":
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
-
     sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name))).astype(np.uint8)
-    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
-    centerline_image_ = centerline_image_ / 255.0
+    #centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
+    #centerline_image_ = centerline_image_ / 255.0
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
     # generate roi_xxyy list over full satellite image in sliding window fashion
-
-    sat_image_ = np.ascontiguousarray(sat_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3], :])
-    centerline_image_ = np.ascontiguousarray(centerline_image_[meta_roi[0]:meta_roi[1], meta_roi[2]:meta_roi[3]])
-
     roi_xxyy_list = []
-    for i in range(meta_roi[2], meta_roi[3], 100):
-        for j in range(meta_roi[0], meta_roi[1], 100):
+    for i in range(0, sat_image_.shape[1]-256, 100):
+        for j in range(0, sat_image_.shape[0]-256, 100):
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
 
-    all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/scenario_files.txt", dtype=str).tolist()
+    all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/aggregation/scenario_files.txt", dtype=str).tolist()
 
     [R, c, t] = get_transform_params(city_name.lower())
 
@@ -611,7 +615,16 @@ if __name__ == "__main__":
             static_map_path = scenario_path.parents[0] / f"log_map_archive_{scenario_id}.json"
             scenario = scenario_serialization.load_argoverse_scenario_parquet(scenario_path)
 
-            if scenario.city_name != city_name.lower():
+            if city_name == "PaloAlto":
+                city_name_log = "palo-alto"
+            elif city_name == "Washington":
+                city_name_log = "washington-dc"
+            elif city_name == "Detroit":
+                city_name_log = "dearborn"
+            else:
+                city_name_log = city_name
+
+            if scenario.city_name != city_name_log.lower():
                 continue
 
             scenario_lanes = get_scenario_centerlines(static_map_path)
@@ -655,23 +668,34 @@ if __name__ == "__main__":
         trajectories_ = np.load("trajectories_{}.npy".format(city_name), allow_pickle=True)
         lanes_ = np.load("lanes_{}.npy".format(city_name), allow_pickle=True)
 
-        ts = []
-        for trajectory in trajectories_:
-            if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
-                    np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
-                ts.append(trajectory)
-        trajectories_ = np.array(ts)
 
-        # plot
-        # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-        # ax.set_aspect('equal')
-        # for trajectory in trajectories_[0:100000]:
-        #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
-        # plt.show()
+        # ts = []
+        # for trajectory in trajectories_:
+        #     if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
+        #             np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
+        #         ts.append(trajectory)
+        # trajectories_ = np.array(ts)
+
+    print("Number of trajectories: {}".format(len(trajectories_)))
+    roi_xxyy_list = roi_xxyy_list[::10]
+
+    # plot
+    # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    # ax.set_aspect('equal')
+    # for trajectory in trajectories_[0:10000]:
+    #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
+    # plt.show()
 
     # single core
     if num_cpus <= 1:
-        process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, centerline_image_, out_path_root)
+        process_chunk(roi_xxyy_list,
+                      export_final,
+                      trajectories_,
+                      lanes_,
+                      sat_image_,
+                      out_path_root,
+                      #centerline_image_
+                      )
 
     else:
 
@@ -685,14 +709,14 @@ if __name__ == "__main__":
         num_chunks = int(np.ceil(num_samples / num_cpus))
         roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
 
-
         arguments = zip(roi_chunks,
                         repeat(export_final),
                         repeat(trajectories_),
                         repeat(lanes_),
                         repeat(sat_image_),
-                        repeat(centerline_image_),
-                        repeat(out_path_root))
+                        repeat(out_path_root),
+                        #repeat(centerline_image_),
+                        )
 
         Pool(num_cpus).starmap(process_chunk, arguments)
 

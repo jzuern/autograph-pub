@@ -1154,3 +1154,5 @@ transform2vgg = T.Compose([
     T.ToPILImage(),
     T.Resize(64),
     T.ToTensor()])
+
+

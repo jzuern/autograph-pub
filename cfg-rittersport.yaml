@@ -9,7 +9,7 @@ paths:
     dataroot: /data/autograph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    config_name: av2-experiment-filtered
+    config_name: pittsburgh
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
@@ -19,6 +19,7 @@ preprocessing:
     k_waypoints: 1
     visualize: False
     ego_regressor_num_channels: 4
+    augment: True
 model:
     dataparallel: False
     device: cuda

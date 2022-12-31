@@ -11,6 +11,7 @@ import torch.utils.data
 import torch_geometric.data
 import matplotlib.pyplot as plt
 import cv2
+from aggregation.aggregate_av2 import visualize_angles
 
 from torch_geometric.nn import DataParallel
 from torch_geometric.loader import DataListLoader
@@ -19,21 +20,6 @@ from regressors.build_net import build_network
 from data.datasets import RegressorDataset
 from lanegnn.utils import ParamLib
 
-
-def visualize_angles(a_x, a_y, mask):
-    if mask is None:
-        mask = np.ones_like(a_x, dtype=np.uint8)
-    global_mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
-    global_mask = ((global_mask > 0.5) * 255).astype(np.uint8)
-    directions_hsv = np.ones([a_x.shape[0], a_x.shape[1], 3], dtype=np.uint8)
-
-    directions_hsv[:, :, 1] = a_x * 127 + 127
-    directions_hsv[:, :, 2] = a_y * 127 + 127
-    directions_hsv[:, :, 0] = global_mask[:, :, 0]
-
-    directions_hsv = directions_hsv * global_mask
-
-    return directions_hsv
 
 
 class Trainer():
@@ -62,8 +48,6 @@ class Trainer():
     def train(self, epoch):
 
         self.model.train()
-        self.model.load_state_dict(torch.load("/home/zuern/self-supervised-graph/checkpoints/regressor-newest.pth"))
-
 
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
@@ -103,9 +87,13 @@ class Trainer():
                 pred_angle = torch.nn.Tanh()(pred[:, :2])
                 pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
 
-                plt.imshow(rgb[0].cpu().numpy().transpose(1, 2, 0))
-                plt.imshow(pred_sdf[0, 0].detach().cpu().numpy(), alpha=0.5)
-                plt.show()
+                # fig, axarr = plt.subplots(1, 2)
+                # axarr[0].imshow(rgb[0].cpu().numpy().transpose(1, 2, 0))
+                # axarr[0].imshow(angle_x_target[0].detach().cpu().numpy(), alpha=0.5)
+                # axarr[1].imshow(rgb[0].cpu().numpy().transpose(1, 2, 0))
+                # axarr[1].imshow(angle_y_target[0].detach().cpu().numpy(), alpha=0.5)
+                # plt.show()
+
 
                 target_sdf = sdf_target.unsqueeze(1)
                 target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
@@ -136,7 +124,7 @@ class Trainer():
                 elif self.params.model.target == "both":
                     mask_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
                     mask_target = sdf_target[0].cpu().detach().numpy()
-                    #mask_pred = None
+
                     pred_viz = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=mask_pred)
                     target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), mask=mask_target)
 
@@ -253,8 +241,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, "train")
-    val_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, "val")
+    train_path = os.path.join(params.paths.dataroot, 'preprocessed', "*", "train")
+    val_path =   os.path.join(params.paths.dataroot, 'preprocessed', "*", "val")
     dataset_train = RegressorDataset(path=train_path, split='train')
     dataset_val = RegressorDataset(path=val_path, split='val')
 
