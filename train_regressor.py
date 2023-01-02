@@ -58,14 +58,6 @@ class Trainer():
 
             #data = self.one_sample_data
 
-            self.optimizer.zero_grad()
-
-            if self.params.model.dataparallel:
-                data = [item.to(self.device) for item in data]
-            else:
-                data = data.to(self.device)
-
-
             # loss and optim
             sdf_target = data["sdf"].cuda()
             rgb = data["rgb"].cuda()
@@ -128,7 +120,7 @@ class Trainer():
                 wandb.log({"train/loss": loss.item()})
 
             # Visualization
-            if self.total_step % 10 == 0:
+            if self.total_step % 10 == 0 and self.params.visualize:
                 cv2.imshow("rgb", rgb[0].cpu().numpy().transpose(1, 2, 0))
 
                 if self.params.model.target == "sdf":
@@ -224,6 +216,7 @@ def main():
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
     parser.add_argument('--target', type=str, choices=["sdf", "angle", "both"], help="define the target that is used")
+    parser.add_argument('--visualize', action='store_true', help="visualize the dataset")
 
     opt = parser.parse_args()
 
@@ -232,6 +225,7 @@ def main():
     params.preprocessing.overwrite(opt)
     params.model.overwrite(opt)
     params.model.target = opt.target
+    params.visualize = opt.visualize
 
     print("Batch size summed over all GPUs: ", params.model.batch_size_reg)
     
