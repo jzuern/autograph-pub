@@ -38,28 +38,6 @@ def edge_feature_encoder(out_features=64, in_channels=3):
     return model
 
 
-def visualize_angles(a_x, a_y, mask):
-    if mask is None:
-        mask = np.ones_like(a_x, dtype=np.uint8)
-
-    angle = np.arctan2(a_y, a_x)
-    angle = (angle + np.pi) / (2 * np.pi)
-
-    # plot angle in hsv color space
-    angle_hsv = np.ones((angle.shape[0], angle.shape[1], 3), dtype=np.float32)
-    angle_hsv[..., 0] = angle
-    angle_hsv = (angle_hsv * 255).astype(np.uint8)
-
-    angle_rgb = cv2.cvtColor(angle_hsv, cv2.COLOR_HSV2RGB)
-
-    mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
-    mask = (mask > 0.5).astype(np.uint8)
-
-    angle_rgb = angle_rgb * mask
-
-    return angle_rgb
-
-
 def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_xxyy, sample_id, out_path):
 
     margin = 200

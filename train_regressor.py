@@ -11,14 +11,13 @@ import torch.utils.data
 import torch_geometric.data
 import matplotlib.pyplot as plt
 import cv2
-from aggregation.aggregate_av2 import visualize_angles
 
 from torch_geometric.nn import DataParallel
 from torch_geometric.loader import DataListLoader
 
 from regressors.build_net import build_network
 from data.datasets import RegressorDataset
-from lanegnn.utils import ParamLib
+from lanegnn.utils import ParamLib, visualize_angles
 
 
 def weighted_mse_loss(input, target, weight):
