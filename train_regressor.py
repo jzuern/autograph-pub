@@ -62,28 +62,27 @@ class Trainer():
             sdf_target = data["sdf"].cuda()
             rgb = data["rgb"].cuda()
             angle_mask_target = data["angles_mask"].cuda()
-            angle_x_target = data["angles_x"].cuda()
-            angle_y_target = data["angles_y"].cuda()
+            target_angle_x = data["angles_x"].cuda()
+            target_angle_y = data["angles_y"].cuda()
+
+            target_sdf = sdf_target.unsqueeze(1)
+            target_angle = torch.cat([target_angle_x.unsqueeze(1), target_angle_y.unsqueeze(1)], dim=1)
 
 
             if self.params.model.target == "sdf":
                 pred = self.model(rgb)
                 pred = torch.nn.Sigmoid()(pred)
 
-                target = sdf_target.unsqueeze(1)
-
                 loss_dict = {
-                    'loss_sdf': torch.nn.BCELoss()(pred, target),
+                    'loss_sdf': torch.nn.BCELoss()(pred, target_sdf),
                 }
 
             elif self.params.model.target == "angle":
                 pred = self.model(rgb)
                 pred = torch.nn.Tanh()(pred)
 
-                target = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
-
                 loss_dict = {
-                    'loss_angles': torch.nn.MSELoss()(pred, target),
+                    'loss_angles': torch.nn.MSELoss()(pred, target_angle),
                 }
 
             elif self.params.model.target == "both":
@@ -92,17 +91,6 @@ class Trainer():
                 pred_angle = torch.nn.Tanh()(pred[:, :2])
                 pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
 
-                # fig, axarr = plt.subplots(1, 2)
-                # axarr[0].imshow(rgb[0].cpu().numpy().transpose(1, 2, 0))
-                # axarr[0].imshow(angle_x_target[0].detach().cpu().numpy(), alpha=0.5)
-                # axarr[1].imshow(rgb[0].cpu().numpy().transpose(1, 2, 0))
-                # axarr[1].imshow(angle_y_target[0].detach().cpu().numpy(), alpha=0.5)
-                # plt.show()
-
-
-                target_sdf = sdf_target.unsqueeze(1)
-                target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
-
                 loss_weight = target_sdf > 0.5
                 loss_weight = loss_weight.float()
 
@@ -110,6 +98,9 @@ class Trainer():
                     'loss_sdf': torch.nn.BCELoss()(pred_sdf, target_sdf),
                     'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
                 }
+
+            else:
+                raise Exception("unknown target")
 
             loss = sum(loss_dict.values())
             loss.backward()
@@ -122,24 +113,24 @@ class Trainer():
             # Visualization
             if self.total_step % 10 == 0 and self.params.visualize:
                 cv2.imshow("rgb", rgb[0].cpu().numpy().transpose(1, 2, 0))
+                #cv2.imshow("rgb_unrotated", data["rgb_unrotated"][0].cpu().numpy().transpose(1, 2, 0))
 
                 if self.params.model.target == "sdf":
                     pred_viz = pred[0].detach().cpu().detach().numpy()
                     target_viz = sdf_target[0].cpu().detach().numpy()
                 elif self.params.model.target == "angle":
                     pred_viz = visualize_angles(pred[0,0].detach().cpu().numpy(), pred[0,1].detach().cpu().numpy(), mask=None)
-                    target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), sdf_target[0].cpu().numpy())
+                    target_viz = visualize_angles(target_angle_x[0].cpu().numpy(), target_angle_y[0].cpu().numpy(), sdf_target[0].cpu().numpy())
                 elif self.params.model.target == "both":
                     mask_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
                     mask_target = angle_mask_target[0].cpu().detach().numpy()
 
                     pred_viz = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=mask_pred)
                     pred_viz_nomask = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=None)
-                    target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), mask=mask_target)
+                    target_viz = visualize_angles(target_angle_x[0].cpu().numpy(), target_angle_y[0].cpu().numpy(), mask=mask_target)
 
                     cv2.imshow("mask_pred", mask_pred)
                     cv2.imshow("mask_target", mask_target)
-
 
                 cv2.imshow("angle target", target_viz)
                 cv2.imshow("angle pred", pred_viz)
@@ -147,7 +138,7 @@ class Trainer():
 
                 cv2.waitKey(1)
 
-            text = 'Epoch {} / {}, it {} / {}, it glob {}, train loss = {:03f}'.\
+            text = 'Epoch {} / {}, it {} / {}, it global {}, train loss = {:03f}'.\
                 format(epoch, self.params.model.num_epochs, step+1, len(self.dataloader_train), epoch * len(self.dataloader_train) + step+1, loss.item())
             train_progress.set_description(text)
 
@@ -203,6 +194,8 @@ class Trainer():
 
         if not self.params.main.disable_wandb:
             wandb.log({"eval/loss": val_loss})
+
+        return val_loss
 
 
 def main():
@@ -286,17 +279,19 @@ def main():
     for epoch in range(params.model.num_epochs):
 
         # Evaluate
-        trainer.eval(epoch)
         trainer.train(epoch)
 
         #if not params.main.disable_wandb:
         if epoch % 10 == 0:
+
+            eval_loss = trainer.eval(epoch)
+
             try:
                 wandb_run_name = wandb.run.name
             except:
                 wandb_run_name = "local_run"
 
-            fname = 'regressor_{}_{:04d}.pth'.format(wandb_run_name, epoch)
+            fname = 'regressor_{}_{:04d}-{:.5f}.pth'.format(wandb_run_name, epoch, eval_loss)
             checkpoint_path = os.path.join(params.paths.checkpoints, fname)
             print("Saving checkpoint to {}".format(checkpoint_path))
 

@@ -3,16 +3,15 @@ import os.path
 import torch
 import cv2
 from regressors.build_net import build_network
-from aggregate_av2 import visualize_angles
+from lanegnn.utils import visualize_angles
 from glob import glob
 from PIL import Image
 import argparse
+from tqdm import tqdm
 
 
 def get_id(filename):
     return '-'.join(os.path.basename(filename).split('-')[0:3])
-
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -21,13 +20,19 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     regressor = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=3).cuda()
-    regressor.load_state_dict(torch.load(args.checkpoint))
+
+    state_dict = torch.load(args.checkpoint)
+    for key in list(state_dict.keys()):
+        state_dict[key.replace('module.', '')] = state_dict[key]
+        del state_dict[key]
+
+    regressor.load_state_dict(state_dict)
     regressor.eval()
 
     sat_images = sorted(glob(os.path.join(args.out_path_root, "train", "*-rgb.png")) +
                         glob(os.path.join(args.out_path_root, "val", "*-rgb.png")))
 
-    for sat_image_f in sat_images:
+    for sat_image_f in tqdm(sat_images):
         rgb = cv2.imread(sat_image_f)
 
         out_path = os.path.dirname(sat_image_f)

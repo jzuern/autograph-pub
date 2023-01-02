@@ -50,19 +50,32 @@ class RegressorDataset(torch.utils.data.Dataset):
 
 
     def random_rotate(self, return_dict):
+
+
+        # TODO: DEBBUG THIS
+
         # random rotation
-        #angle = np.random.choice([0, 90, 180, 270])
-        angle = np.random.choice([0])
+        k = np.random.choice([0, 1, 2, 3])
+        #k = np.random.choice([1])
 
-        return_dict['rgb'] = torch.rot90(return_dict['rgb'], int(angle / 90), [1, 2])
-        return_dict['sdf'] = torch.rot90(return_dict['sdf'], int(angle / 90), [0, 1])
 
-        return_dict['angles_x'] = torch.rot90(return_dict['angles_x'], int(angle / 90), [0, 1])
-        return_dict['angles_y'] = torch.rot90(return_dict['angles_y'], int(angle / 90), [0, 1])
+        return_dict['rgb_unrotated'] = return_dict['rgb']
 
-        return_dict['angles_x'] += torch.cos(torch.tensor(angle / 180 * np.pi))
-        return_dict['angles_y'] += torch.sin(torch.tensor(angle / 180 * np.pi))
+        return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
+        return_dict['sdf'] = torch.rot90(return_dict['sdf'], k, [0, 1])
 
+        return_dict['angles_x'] = torch.rot90(return_dict['angles_x'], k, [0, 1])
+        return_dict['angles_y'] = torch.rot90(return_dict['angles_y'], k, [0, 1])
+
+
+        # return_dict['angles_x'] += torch.cos(torch.tensor(k * np.pi / 2))
+        # return_dict['angles_y'] += torch.sin(torch.tensor(k * np.pi / 2))
+        #
+        # return_dict['angles_x'][return_dict['angles_x'] > np.pi] -= 2*np.pi
+        # return_dict['angles_x'][return_dict['angles_x'] < -np.pi] += 2*np.pi
+        #
+        # return_dict['angles_y'][return_dict['angles_y'] > np.pi] -= 2*np.pi
+        # return_dict['angles_y'][return_dict['angles_y'] < -np.pi] += 2*np.pi
 
         return return_dict
 

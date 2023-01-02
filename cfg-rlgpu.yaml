@@ -18,6 +18,7 @@ preprocessing:
     k_waypoints: 1
     visualize: False
     ego_regressor_num_channels: 4
+    augment: False
 model:
     dataparallel: True
     device: cuda
