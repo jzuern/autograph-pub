@@ -8,12 +8,10 @@ import numpy as np
 import time
 import torch
 import torch.utils.data
-import torch_geometric.data
+from torch.utils.data import DataLoader
+from torch.nn import DataParallel
 import matplotlib.pyplot as plt
 import cv2
-
-from torch_geometric.nn import DataParallel
-from torch_geometric.loader import DataListLoader
 
 from regressors.build_net import build_network
 from data.datasets import RegressorDataset
@@ -58,10 +56,15 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-
             #data = self.one_sample_data
 
             self.optimizer.zero_grad()
+
+            if self.params.model.dataparallel:
+                data = [item.to(self.device) for item in data]
+            else:
+                data = data.to(self.device)
+
 
             # loss and optim
             sdf_target = data["sdf"].cuda()
@@ -237,7 +240,7 @@ def main():
         wandb.init(
             entity='jannik-zuern',
             project='self_supervised_graph',
-            notes='sdf',
+            notes='regressor',
             settings=wandb.Settings(start_method="fork"),
         )
         wandb.config.update(params.paths)
@@ -275,19 +278,14 @@ def main():
     dataset_train = RegressorDataset(path=train_path, split='train')
     dataset_val = RegressorDataset(path=val_path, split='val')
 
-    if params.model.dataparallel:
-        dataloader_obj = DataListLoader
-    else:
-        dataloader_obj = torch_geometric.loader.DataLoader
-
-    dataloader_train = dataloader_obj(dataset_train,
-                                      batch_size=params.model.batch_size_reg,
-                                      num_workers=params.model.loader_workers,
-                                      shuffle=True)
-    dataloader_val = dataloader_obj(dataset_val,
-                                     batch_size=1,
-                                     num_workers=1,
-                                     shuffle=False)
+    dataloader_train = DataLoader(dataset_train,
+                                  batch_size=params.model.batch_size_reg,
+                                  num_workers=params.model.loader_workers,
+                                  shuffle=True)
+    dataloader_val = DataLoader(dataset_val,
+                                 batch_size=1,
+                                 num_workers=1,
+                                 shuffle=False)
 
     trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
 
