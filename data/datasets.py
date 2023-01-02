@@ -77,6 +77,8 @@ class RegressorDataset(torch.utils.data.Dataset):
         # convert from angles to unit circle xy coordinates
         # to hsv to get hue
         angles = cv2.cvtColor(angles, cv2.COLOR_BGR2HSV)
+        angles_mask = (angles[:, :, 1] > 0).astype(np.uint8)
+
         angles = angles[:, :, 0] / 255.0 * 2 * np.pi - np.pi
 
         angles_x = np.cos(angles)
@@ -86,10 +88,12 @@ class RegressorDataset(torch.utils.data.Dataset):
         sdf = torch.from_numpy(sdf).float() / 255.0
         angles_x = torch.from_numpy(angles_x).float()
         angles_y = torch.from_numpy(angles_y).float()
+        angles_mask = torch.from_numpy(angles_mask).float()
         rgb = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
 
         return_dict = {
             'sdf': sdf,
+            'angles_mask': angles_mask,
             'angles_x': angles_x,
             'angles_y': angles_y,
             'rgb': rgb
@@ -116,7 +120,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
 
         self.pth_files = sorted(glob(path + '/*.pth')) + sorted(glob(path + '/*.pt'))
         print("Found {} files".format(len(self.pth_files)))
-        self.check_files()
+        #self.check_files()
 
     def __len__(self):
         return len(self.pth_files)
@@ -191,8 +195,8 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
                                          sdf=torch.FloatTensor(sdf),
                                          )
 
-        if self.params.preprocessing.augment and self.split == 'train':
-            data = self.random_rotate(data)
+        #if self.params.preprocessing.augment and self.split == 'train':
+        #    data = self.random_rotate(data)
 
         return data
 

@@ -9,7 +9,7 @@ paths:
     dataroot: /data/autograph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    config_name: pittsburgh
+    config_name: '*' # either city name or *
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
@@ -19,12 +19,12 @@ preprocessing:
     k_waypoints: 1
     visualize: False
     ego_regressor_num_channels: 4
-    augment: True
+    augment: False
 model:
     dataparallel: False
     device: cuda
     batch_size: 1
-    batch_size_reg: 4
+    batch_size_reg: 16
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
@@ -37,7 +37,7 @@ model:
     msg_dim: 32
     edge_geo_dim: 16
     # end_of_archs
-    in_channels: 4  # number of channels of image
+    in_channels: 3  # number of channels of image (RGB [+ sdf [+ angle]])
     loader_workers: 4
     weight_decay: 1e-4
     ignore_low_scores: False

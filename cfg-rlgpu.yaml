@@ -10,7 +10,7 @@ paths:
     #dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/buechner/zuern/self-supervised-graph/checkpoints/
     split: train
-    config_name: av2-continuous  # av2 or ind
+    config_name: '*' # either city name or *
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson

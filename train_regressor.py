@@ -21,6 +21,10 @@ from data.datasets import RegressorDataset
 from lanegnn.utils import ParamLib
 
 
+def weighted_mse_loss(input, target, weight):
+    return torch.mean(weight * (input - target) ** 2)
+
+
 
 class Trainer():
 
@@ -47,16 +51,23 @@ class Trainer():
 
     def train(self, epoch):
 
+        print("Training...")
+
+
         self.model.train()
 
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
+
+
+            #data = self.one_sample_data
 
             self.optimizer.zero_grad()
 
             # loss and optim
             sdf_target = data["sdf"].cuda()
             rgb = data["rgb"].cuda()
+            angle_mask_target = data["angles_mask"].cuda()
             angle_x_target = data["angles_x"].cuda()
             angle_y_target = data["angles_y"].cuda()
 
@@ -98,9 +109,12 @@ class Trainer():
                 target_sdf = sdf_target.unsqueeze(1)
                 target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
 
+                loss_weight = target_sdf > 0.5
+                loss_weight = loss_weight.float()
+
                 loss_dict = {
                     'loss_sdf': torch.nn.BCELoss()(pred_sdf, target_sdf),
-                    'loss_angles': torch.nn.MSELoss()(pred_angle, target_angle),
+                    'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
                 }
 
             loss = sum(loss_dict.values())
@@ -123,15 +137,19 @@ class Trainer():
                     target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), sdf_target[0].cpu().numpy())
                 elif self.params.model.target == "both":
                     mask_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
-                    mask_target = sdf_target[0].cpu().detach().numpy()
+                    mask_target = angle_mask_target[0].cpu().detach().numpy()
 
                     pred_viz = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=mask_pred)
+                    pred_viz_nomask = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=None)
                     target_viz = visualize_angles(angle_x_target[0].cpu().numpy(), angle_y_target[0].cpu().numpy(), mask=mask_target)
 
                     cv2.imshow("mask_pred", mask_pred)
+                    cv2.imshow("mask_target", mask_target)
 
-                cv2.imshow("target", target_viz)
-                cv2.imshow("pred", pred_viz)
+
+                cv2.imshow("angle target", target_viz)
+                cv2.imshow("angle pred", pred_viz)
+                cv2.imshow("angle pred nomask", pred_viz_nomask)
 
                 cv2.waitKey(1)
 
@@ -147,9 +165,11 @@ class Trainer():
 
     def eval(self, epoch):
 
+        print("Evaluating...")
+
         self.model.eval()
 
-        angle_accuaries = []
+        val_losses = []
 
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
@@ -162,23 +182,33 @@ class Trainer():
             angle_x_target = data["angles_x"].cuda()
             angle_y_target = data["angles_y"].cuda()
 
+
             pred = self.model(rgb)
-            pred = torch.nn.Tanh()(pred)
+            pred_angle = torch.nn.Tanh()(pred[:, :2])
+            pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
 
-            if self.params.model.target == "sdf":
-                target = sdf_target.unsqueeze(1)
-            elif self.params.model.target == "angle":
-                target = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
 
-            angle_accuracy = torch.nn.functional.cosine_similarity(pred, target, dim=1).mean()
-            angle_accuaries.append(angle_accuracy.item())
+            target_sdf = sdf_target.unsqueeze(1)
+            target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
 
-        angle_accuracy = np.nanmean(angle_accuaries)
+            loss_weight = target_sdf > 0.5
+            loss_weight = loss_weight.float()
 
-        print("angle_accuracy", angle_accuracy)
+            loss_dict = {
+                'loss_sdf': torch.nn.BCELoss()(pred_sdf, target_sdf),
+                'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
+            }
+
+            loss = sum(loss_dict.values())
+
+            val_losses.append(loss.item())
+
+        val_loss = np.nanmean(val_losses)
+
+        print("eval/loss", val_loss)
 
         if not self.params.main.disable_wandb:
-            wandb.log({"eval/angle_accuracy": angle_accuracy})
+            wandb.log({"eval/loss": val_loss})
 
 
 def main():
@@ -237,7 +267,7 @@ def main():
     weights = [w for w in model.parameters() if w.requires_grad]
 
     optimizer = torch.optim.Adam(weights,
-                                 lr=float(params.model.lr),
+                                 lr=1e-4,
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
@@ -263,10 +293,13 @@ def main():
     trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
 
     for epoch in range(params.model.num_epochs):
+
+        # Evaluate
+        trainer.eval(epoch)
         trainer.train(epoch)
 
         #if not params.main.disable_wandb:
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
             try:
                 wandb_run_name = wandb.run.name
             except:
@@ -278,8 +311,6 @@ def main():
 
             torch.save(model.state_dict(), checkpoint_path)
 
-        # Evaluate
-        #trainer.eval(epoch)
 
 
 if __name__ == '__main__':

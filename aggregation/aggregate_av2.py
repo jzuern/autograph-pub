@@ -42,7 +42,6 @@ def visualize_angles(a_x, a_y, mask):
     if mask is None:
         mask = np.ones_like(a_x, dtype=np.uint8)
 
-
     angle = np.arctan2(a_y, a_x)
     angle = (angle + np.pi) / (2 * np.pi)
 
@@ -86,8 +85,8 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_x
     rgb = sat_image_[roi_xxyy[0] : roi_xxyy[1],
                      roi_xxyy[2] : roi_xxyy[3]]
 
-    centerline_context = centerline_image_[roi_xxyy[0] - margin:roi_xxyy[1] + margin,
-                                           roi_xxyy[2] - margin:roi_xxyy[3] + margin].copy().astype(np.float32)
+    #centerline_context = centerline_image_[roi_xxyy[0] - margin:roi_xxyy[1] + margin,
+    #                                       roi_xxyy[2] - margin:roi_xxyy[3] + margin].copy().astype(np.float32)
 
 
     for edge_idx, edge in enumerate(G_gt_nx.edges):
@@ -104,12 +103,13 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_x
         center = np.array([mid_x + margin, mid_y + margin])
 
         crop_img_rgb = get_oriented_crop(edge_angle, center[0], center[1], rgb_context)
-        crop_centerline = get_oriented_crop(edge_angle, center[0], center[1], centerline_context)
+        #crop_centerline = get_oriented_crop(edge_angle, center[0], center[1], centerline_context)
 
         crop_img_rgb_ = transform2vgg(crop_img_rgb).unsqueeze(0).numpy()
-        crop_centerline_ = transform2vgg(crop_centerline).unsqueeze(0).numpy()
+        #crop_centerline_ = transform2vgg(crop_centerline).unsqueeze(0).numpy()
 
-        feats = np.concatenate([crop_img_rgb_, crop_centerline_], axis=1)
+        #feats = np.concatenate([crop_img_rgb_, crop_centerline_], axis=1)
+        feats = crop_img_rgb_
 
         edge_img_feats.append(torch.ByteTensor(feats * 255.))
 
@@ -145,7 +145,7 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_x
     edge_img_feats = torch.ByteTensor(torch.cat(edge_img_feats, dim=0))
     edge_gt_score = torch.tensor(edge_gt_score)
 
-
+    out_file = os.path.join(out_path, "{}.pth".format(sample_id))
     torch.save({
         "rgb": torch.FloatTensor(rgb),
         "sdf": torch.FloatTensor(sdf),
@@ -157,7 +157,9 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_x
         "edge_scores": edge_gt_score,
         "node_scores": node_gt_score,
         "graph": G_gt_nx,
-    }, os.path.join(out_path, "{}.pth".format(sample_id)))
+    }, out_file)
+
+    print("Saving to {}".format(out_file))
 
 
 
@@ -323,7 +325,7 @@ def dijkstra_trajectories(G, trajectories, imsize):
             cv2.line(sdf, (x1, y1), (x2, y2), 1, 1)
 
             angle = np.arctan2(y2 - y1, x2 - x1)
-            cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=8)
+            cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=12)
             cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
 
         f = 15  # distance function scale
@@ -385,8 +387,22 @@ def resample_trajectory(trajectory, dist=5):
 
 def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
 
+    trajectories_centers = [np.mean(t, axis=0) for t in trajectories_]
+
     for roi_xxyy in tqdm(roi_xxyy_list):
+
+        if roi_xxyy[0] < 16000:
+            out_path = os.path.join(out_path_root, "val")
+        else:
+            out_path = os.path.join(out_path_root, "train")
+
         sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
+
+        if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
+            continue
+
+
+
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
         #centerline_image = centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
 
@@ -394,9 +410,15 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
         if sat_image.shape[0] != sat_image.shape[1]:
             continue
 
+        trajectories_relevant = []
+        for i in range(len(trajectories_)):
+            if np.linalg.norm(trajectories_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 300:
+                trajectories_relevant.append(trajectories_[i])
+
+
         trajectories = []
-        for t in range(len(trajectories_)):
-            trajectory = trajectories_[t]
+        for t in range(len(trajectories_relevant)):
+            trajectory = trajectories_relevant[t]
 
             trajectory = trajectory - np.array([roi_xxyy[2], roi_xxyy[0]])
 
@@ -430,7 +452,7 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
             continue
 
         min_distance_from_center = min([np.min(np.linalg.norm(trajectory - np.array(sat_image.shape[:2]) / 2, axis=1)) for trajectory in trajectories])
-        if min_distance_from_center > 20:
+        if min_distance_from_center > 30:
             continue
 
         G = initialize_graph(roi_xxyy, r_min=r_min)
@@ -475,10 +497,8 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
         for i, n in enumerate(G.nodes):
             G.nodes[n]["p"] = node_probabilities[i]
 
-        if roi_xxyy[0] < 16000:
-            out_path = os.path.join(out_path_root, "val")
-        else:
-            out_path = os.path.join(out_path_root, "train")
+
+
 
         print("Saving to {}/{}-rgb.png".format(out_path, sample_id))
 
@@ -574,8 +594,8 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 2
-    r_min = 5  # minimum radius of the circle for poisson disc sampling
+    num_cpus = 4
+    r_min = 8  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'train'), exist_ok=True)
@@ -677,7 +697,6 @@ if __name__ == "__main__":
         # trajectories_ = np.array(ts)
 
     print("Number of trajectories: {}".format(len(trajectories_)))
-    roi_xxyy_list = roi_xxyy_list[::10]
 
     # plot
     # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
