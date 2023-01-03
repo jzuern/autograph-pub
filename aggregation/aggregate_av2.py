@@ -25,10 +25,10 @@ from av2.datasets.motion_forecasting import scenario_serialization
 
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, get_oriented_crop, transform2vgg
 from data.av2.settings import get_transform_params
-
+from lanegnn.utils import visualize_angles
 
 # random shuffle seed
-random.seed(0)
+#random.seed(0)
 
 
 def edge_feature_encoder(out_features=64, in_channels=3):
@@ -335,11 +335,9 @@ def dijkstra_trajectories(G, trajectories, imsize):
         for i in range(len(path)):
             G.nodes[path[i]]["log_odds_dijkstra"] += 1
 
-
     angles_viz = visualize_angles(np.cos(global_angle),
                                   np.sin(global_angle),
                                   mask=global_mask[:, :, 0])
-
 
     return G, global_sdf, global_angle, angles_viz
 
@@ -369,6 +367,11 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
 
     for roi_xxyy in tqdm(roi_xxyy_list):
 
+        if centerline_image_ is not None:
+            if np.sum(centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]]) == 0:
+                # no centerlines (and therefore no tracklets to be evaluated) in this roi
+                continue
+
         if roi_xxyy[0] < 16000:
             out_path = os.path.join(out_path_root, "val")
         else:
@@ -379,24 +382,19 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
         if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
             continue
 
-
-
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
-        #centerline_image = centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
 
         # Filter non-square sat_images:
         if sat_image.shape[0] != sat_image.shape[1]:
             continue
 
-        trajectories_relevant = []
+        trajectories_candidates = []
         for i in range(len(trajectories_)):
             if np.linalg.norm(trajectories_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 300:
-                trajectories_relevant.append(trajectories_[i])
-
+                trajectories_candidates.append(trajectories_[i])
 
         trajectories = []
-        for t in range(len(trajectories_relevant)):
-            trajectory = trajectories_relevant[t]
+        for trajectory in trajectories_candidates:
 
             trajectory = trajectory - np.array([roi_xxyy[2], roi_xxyy[0]])
 
@@ -450,7 +448,6 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
 
         # perform angle kernel density estimation and peak detection
         G = angle_kde(G)
-
 
         # assign edge probabilities according to dijstra-approximated trajectories
         G, sdf, angles, angles_viz = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
@@ -572,7 +569,7 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 4
+    num_cpus = 2
     r_min = 8  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
@@ -585,7 +582,7 @@ if __name__ == "__main__":
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
     sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name))).astype(np.uint8)
-    #centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
+    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
     #centerline_image_ = centerline_image_ / 255.0
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
@@ -666,14 +663,6 @@ if __name__ == "__main__":
         trajectories_ = np.load("trajectories_{}.npy".format(city_name), allow_pickle=True)
         lanes_ = np.load("lanes_{}.npy".format(city_name), allow_pickle=True)
 
-
-        # ts = []
-        # for trajectory in trajectories_:
-        #     if np.mean(trajectory[:, 0]) < meta_roi[3] and np.mean(trajectory[:, 1]) < meta_roi[1] and \
-        #             np.mean(trajectory[:, 0]) > meta_roi[2] and np.mean(trajectory[:, 1]) > meta_roi[0]:
-        #         ts.append(trajectory)
-        # trajectories_ = np.array(ts)
-
     print("Number of trajectories: {}".format(len(trajectories_)))
 
     # plot
@@ -691,7 +680,7 @@ if __name__ == "__main__":
                       lanes_,
                       sat_image_,
                       out_path_root,
-                      #centerline_image_
+                      centerline_image_,
                       )
 
     else:
@@ -712,7 +701,7 @@ if __name__ == "__main__":
                         repeat(lanes_),
                         repeat(sat_image_),
                         repeat(out_path_root),
-                        #repeat(centerline_image_),
+                        repeat(centerline_image_),
                         )
 
         Pool(num_cpus).starmap(process_chunk, arguments)

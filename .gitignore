@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 wandb/
+viz/
 
 *.pth
 *.npy
@@ -137,3 +138,4 @@ dmypy.json
 
 
 checkpoints/
+/viz/

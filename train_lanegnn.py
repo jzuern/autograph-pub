@@ -159,7 +159,7 @@ class Trainer():
         figure_log.canvas.draw()
         figure_log.canvas.flush_events()
 
-        imname = "/home/zuern/Desktop/self-supervised-graph-viz/{:05d}.png".format(self.total_step)
+        imname = "viz/{:05d}.png".format(self.total_step)
         try:
             plt.savefig(imname)
             print("Saved logging image to {}".format(imname))
@@ -178,9 +178,13 @@ class Trainer():
     def train(self, epoch):
 
         self.model.train()
+        epoch_start = 0
 
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
+
+            if step == 1:
+                epoch_start = time.time()
 
             t_start = time.time()
             self.optimizer.zero_grad()
@@ -232,9 +236,10 @@ class Trainer():
                 self.do_logging(data, edge_scores, node_scores, 'train/Images')
 
             t_end = time.time()
+            avg_time_per_sample = (t_end - epoch_start) / (step + 1) / self.params.model.batch_size
 
-            text = 'Epoch {} / {}, it {} / {}, it glob {}, train loss = {:03f} | Batch time: {:.3f}'.\
-                format(epoch, self.params.model.num_epochs, step+1, len(self.dataloader_train), epoch * len(self.dataloader_train) + step+1, loss.item(), t_end-t_start)
+            text = 'Epoch {} / {}, it {} / {}, it glob {}, train loss = {:03f} | Batch time  {:.3f} | Avg sample time: {:.3f}'.\
+                format(epoch, self.params.model.num_epochs, step+1, len(self.dataloader_train), epoch * len(self.dataloader_train) + step+1, loss.item(), t_end-t_start, avg_time_per_sample)
             train_progress.set_description(text)
 
             self.total_step += 1
