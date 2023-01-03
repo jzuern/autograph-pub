@@ -133,7 +133,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
 
         self.pth_files = sorted(glob(path + '/*.pth')) + sorted(glob(path + '/*.pt'))
         print("Found {} files".format(len(self.pth_files)))
-        #self.check_files()
+        self.check_files()
 
     def __len__(self):
         return len(self.pth_files)
@@ -143,7 +143,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
 
         for i, pth_file in tqdm(enumerate(self.pth_files)):
             try:
-                data = torch.load(pth_file)
+                _ = torch.load(pth_file)
                 valid_files.append(pth_file)
             except:
                 print("Error loading file {}".format(pth_file))

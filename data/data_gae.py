@@ -127,7 +127,7 @@ def get_t_intersections(n_graphs):
 
 
         # rotate graph around origin
-        theta = np.random.uniform(0, 0.0 * np.pi)
+        theta = np.random.uniform(0, 2 * np.pi)
         R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
         for i in range(len(lane_0) + len(lane_1)):
             graph.nodes[i]["pos"] = np.matmul(R, graph.nodes[i]["pos"])

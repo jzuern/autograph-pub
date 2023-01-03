@@ -375,7 +375,7 @@ def main():
         wandb.login()
         wandb.init(
             entity='jannik-zuern',
-            project='self_supervised_graph',
+            project='autograph-lanegnn',
             notes='v0.1',
             settings=wandb.Settings(start_method="fork"),
         )
@@ -418,8 +418,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, 'train')
-    val_path = os.path.join(params.paths.dataroot, 'preprocessed', params.paths.config_name, 'val')
+    train_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'train')
+    val_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'val')
     dataset_train = PreprocessedDataset(path=train_path)
     dataset_val = PreprocessedDataset(path=val_path)
 

@@ -260,8 +260,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'preprocessed', "*", "train")
-    val_path =   os.path.join(params.paths.dataroot, 'preprocessed', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, '*', "*", "train")
+    val_path =   os.path.join(params.paths.dataroot, '*', "*", "val")
     dataset_train = RegressorDataset(path=train_path, split='train')
     dataset_val = RegressorDataset(path=val_path, split='val')
 

@@ -28,14 +28,7 @@ from data.av2.settings import get_transform_params
 from lanegnn.utils import visualize_angles
 
 # random shuffle seed
-#random.seed(0)
-
-
-def edge_feature_encoder(out_features=64, in_channels=3):
-    model = resnet18(pretrained=True)
-    model.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-    model.fc = nn.Linear(model.fc.in_features, out_features)
-    return model
+random.seed(0)
 
 
 def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_xxyy, sample_id, out_path):
@@ -361,15 +354,14 @@ def resample_trajectory(trajectory, dist=5):
     return np.array(new_trajectory)
 
 
-def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
+
+def process_chunk_v2(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
 
     trajectories_centers = [np.mean(t, axis=0) for t in trajectories_]
 
     for roi_xxyy in tqdm(roi_xxyy_list):
-
         if centerline_image_ is not None:
             if np.sum(centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]]) == 0:
-                # no centerlines (and therefore no tracklets to be evaluated) in this roi
                 continue
 
         if roi_xxyy[0] < 16000:
@@ -433,6 +425,131 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
 
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
+        plt.imshow(sat_image)
+        for trajectory in trajectories:
+            plt.plot(trajectory[:, 0], trajectory[:, 1], linewidth=2)
+        plt.show()
+
+
+
+def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
+
+    trajectories_centers = [np.mean(t, axis=0) for t in trajectories_]
+
+    for roi_xxyy in tqdm(roi_xxyy_list):
+
+        if centerline_image_ is not None:
+            if np.sum(centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]]) == 0:
+                # no centerlines (and therefore no tracklets to be evaluated) in this roi
+                continue
+
+        if roi_xxyy[0] < 16000:
+            out_path = os.path.join(out_path_root, "val")
+        else:
+            out_path = os.path.join(out_path_root, "train")
+
+        sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
+
+        if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
+            continue
+
+        sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
+
+        # Filter non-square sat_images:
+        if sat_image.shape[0] != sat_image.shape[1]:
+            continue
+
+        trajectories_candidates = []
+        for i in range(len(trajectories_)):
+            if np.linalg.norm(trajectories_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 300:
+                trajectories_candidates.append(trajectories_[i])
+
+        trajectories = []
+        for trajectory in trajectories_candidates:
+
+            trajectory = trajectory - np.array([roi_xxyy[2], roi_xxyy[0]])
+
+            # filter trajectories according to current roi_xxyy
+            is_in_roi = np.logical_and(trajectory[:, 0] > 0, trajectory[:, 0] < sat_image.shape[1])
+            if not np.any(is_in_roi):
+                continue
+            is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] > 0)
+            if not np.any(is_in_roi):
+                continue
+            is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] < sat_image.shape[0])
+            if not np.any(is_in_roi):
+                continue
+
+            trajectory = trajectory[is_in_roi]
+
+            # resample trajectory to have equally distant points
+            trajectory = resample_trajectory(trajectory, dist=5)
+
+            # filter based on number of points
+            if len(trajectory) < 15:
+                continue
+
+            # and on physical length of trajectory
+            total_length = np.sum(np.linalg.norm(trajectory[1:] - trajectory[:-1], axis=1))
+            if total_length < 50:
+                continue
+
+            trajectories.append(trajectory)
+
+        if len(trajectories) < 1:
+            continue
+
+        min_distance_from_center = min([np.min(np.linalg.norm(trajectory - np.array(sat_image.shape[:2]) / 2, axis=1)) for trajectory in trajectories])
+        if min_distance_from_center > 30:
+            continue
+
+        def get_sdf(t):
+            sdf = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+            for i in range(len(t) - 1):
+                x1 = int(t[i][0])
+                y1 = int(t[i][1])
+                x2 = int(t[i + 1][0])
+                y2 = int(t[i + 1][1])
+                cv2.line(sdf, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
+            f = 15  # distance function scale
+            sdf = skfmm.distance(1 - sdf)
+            sdf[sdf > f] = f
+            sdf = sdf / f
+            sdf = 1 - sdf
+
+            return sdf
+
+        # Filter out redundant trajectories:
+        filtered_trajectories = []
+        global_sdf = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+
+        for t in trajectories:
+            if len(filtered_trajectories) == 0:
+                filtered_trajectories.append(t)
+            t_sdf = get_sdf(t)
+
+            # get overlap between t_sdf and global_sdf
+            overlap = np.sum(np.logical_and(t_sdf > 0.1, global_sdf > 0.1)) + 1
+            t_sdf_sum = np.sum(t_sdf > 0.1)
+
+            #print(overlap, t_sdf_sum, t_sdf_sum / overlap)
+            # fig, axarr = plt.subplots(1, 2)
+            # axarr[0].imshow(sat_image)
+            # axarr[1].imshow(sat_image)
+            # axarr[0].imshow(t_sdf, alpha=0.5)
+            # axarr[1].imshow(global_sdf, alpha=0.5)
+            # plt.show()
+
+            if t_sdf_sum / overlap > 2:
+                filtered_trajectories.append(t)
+                global_sdf += t_sdf
+            else:
+                continue
+
+        trajectories = filtered_trajectories
+
+        G = initialize_graph(roi_xxyy, r_min=r_min)
+
         for trajectory in trajectories:
 
             # check length of trajectory
@@ -465,15 +582,15 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
         node_probabilities = (node_probabilities - np.min(node_probabilities)) / (np.max(node_probabilities) - np.min(node_probabilities))
         edge_probabilities = (edge_probabilities - np.min(edge_probabilities)) / (np.max(edge_probabilities) - np.min(edge_probabilities))
 
+        node_probabilities = (node_probabilities > 0.1).astype(np.float32)
+        edge_probabilities = (edge_probabilities > 0.1).astype(np.float32)
+
         # assign probabilities to edges
         for i, e in enumerate(G.edges):
             G.edges[e]["p"] = edge_probabilities[i]
         # assign probabilities to nodes
         for i, n in enumerate(G.nodes):
             G.nodes[n]["p"] = node_probabilities[i]
-
-
-
 
         print("Saving to {}/{}-rgb.png".format(out_path, sample_id))
 
@@ -483,12 +600,20 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
 
         if export_final:
 
+            sdf_regressor = cv2.imread(
+                os.path.join(out_path.replace("-post", "-pre"), "{}-sdf-reg.png".format(sample_id)))[:,:,0] / 255.
+
+            #plt.imshow(sat_image)
+            #plt.imshow(sdf_regressor, alpha=0.5)
+            #plt.show()
+
             # Filter graph according to predicted sdf
             G_ = G.copy()
             for n in G_.nodes:
                 pos = G.nodes[n]["pos"]
-                if sdf[int(pos[1]), int(pos[0])] < 0.2:
+                if sdf_regressor[int(pos[1]), int(pos[0])] < 0.2:
                     G.remove_node(n)
+
             # remap node ids and edges
             node_ids = list(G.nodes)
             node_id_map = {node_ids[i]: i for i in range(len(node_ids))}
@@ -498,7 +623,6 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
             edge_probabilities = np.array([G.edges[e]["p"] for e in G.edges])
 
             if np.any(np.isnan(node_probabilities)) or np.any(np.isnan(edge_probabilities)):
-                print("nan in node or edge probabilities. skipping")
                 continue
 
             print("Processing {}...".format(sample_id))
@@ -507,12 +631,10 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
             norm = plt.Normalize(vmin=0.0, vmax=1.0)
             node_colors = cmap(norm(node_probabilities))
 
-
             fig, ax = plt.subplots(figsize=(10, 10))
             plt.tight_layout()
             ax.set_aspect('equal')
             ax.imshow(sat_image)
-
 
             # draw edges
             for t in trajectories:
@@ -570,20 +692,17 @@ if __name__ == "__main__":
 
     # parameters
     num_cpus = 2
-    r_min = 8  # minimum radius of the circle for poisson disc sampling
+    r_min = 7  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'train'), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'val'), exist_ok=True)
 
-    sample_no = 0
-    imsize = 0
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
     sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name))).astype(np.uint8)
     centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
-    #centerline_image_ = centerline_image_ / 255.0
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -594,6 +713,9 @@ if __name__ == "__main__":
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
+    roi_xxyy_list = roi_xxyy_list[:10000]
+    print("Careful! Using reduced list of rois")
+
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/aggregation/scenario_files.txt", dtype=str).tolist()
 
@@ -674,6 +796,14 @@ if __name__ == "__main__":
 
     # single core
     if num_cpus <= 1:
+        # process_chunk(roi_xxyy_list,
+        #               export_final,
+        #               trajectories_,
+        #               lanes_,
+        #               sat_image_,
+        #               out_path_root,
+        #               centerline_image_,
+        #               )
         process_chunk(roi_xxyy_list,
                       export_final,
                       trajectories_,
@@ -682,7 +812,6 @@ if __name__ == "__main__":
                       out_path_root,
                       centerline_image_,
                       )
-
     else:
 
         # multi core

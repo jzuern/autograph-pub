@@ -6,6 +6,8 @@ __pycache__/
 *$py.class
 wandb/
 viz/
+gae/checkpoints/
+gae/wandb/
 
 *.pth
 *.npy

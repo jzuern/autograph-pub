@@ -85,8 +85,6 @@ class Trainer(object):
 
         train_progress = tqdm(self.dataloader, desc="Training", total=len(self.dataloader))
 
-
-
         for data in train_progress:
 
             self.optimizer.zero_grad()
@@ -148,11 +146,12 @@ class Trainer(object):
             acc = self.get_acc(self.adj_recovered, adj_label).item()
             self.train_accs.append(acc)
 
+            if self.global_step % 20 == 0:
             if not args.disable_wandb:
                 wandb.log({"train_loss": cur_loss,
                            "train_acc": acc, })
 
-            if self.global_step % 100 == 0:
+            if self.global_step % 200 == 0:
                 self.visualize()
 
             self.global_step += 1
@@ -237,7 +236,7 @@ class Trainer(object):
             plt.pause(0.01)
 
     def save_model(self):
-        self.save_path = 'model-{epoch:04d}.ckpt'.format(epoch=self.epoch)
+        self.save_path = 'checkpoints/gae-{epoch:04d}.ckpt'.format(epoch=self.epoch)
         print("Saving model as " + self.save_path)
         torch.save(self.model.state_dict(), self.save_path)
 
@@ -263,7 +262,7 @@ if __name__ == '__main__':
     if not args.disable_wandb:
         wandb.init(
             entity='jannik-zuern',
-            project='self_supervised_graph',
+            project='autograph-gvae',
             notes='gvae',
             settings=wandb.Settings(start_method="fork"),
         )
@@ -275,7 +274,6 @@ if __name__ == '__main__':
 
     dataset = ToyDataset()
     #dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
-
 
     trainer = Trainer(args, dataset)
 
