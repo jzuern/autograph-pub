@@ -14,12 +14,43 @@ import matplotlib.pyplot as plt
 import cv2
 
 from regressors.build_net import build_network
+from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
+import torchvision.models as models
+from torchmetrics import JaccardIndex, Precision, Recall, F1Score
+
 from data.datasets import RegressorDataset
 from lanegnn.utils import ParamLib, visualize_angles
 
 
 def weighted_mse_loss(input, target, weight):
     return torch.mean(weight * (input - target) ** 2)
+
+# Calculate metrics according to torchmetrics
+precision = Precision(task="binary", average='none', mdmc_average='global')
+recall = Recall(task="binary", average='none', mdmc_average='global')
+iou = JaccardIndex(task="binary", reduction='none', num_classes=2, ignore_index=0)
+f1 = F1Score(average='none', mdmc_average='global', num_classes=2, ignore_index=0)
+
+
+def calc_torchmetrics(seg_preds, seg_gts, name):
+
+    seg_preds = torch.tensor(seg_preds)
+    seg_gts = torch.tensor(seg_gts)
+
+    p = precision(seg_preds, seg_gts).numpy()
+    r = recall(seg_preds, seg_gts).numpy()
+    i = iou(seg_preds, seg_gts).numpy()
+    f = f1(seg_preds, seg_gts).numpy()
+
+    metrics = {
+        'eval/precision_{}'.format(name): p.item(),
+        'eval/recall_{}'.format(name): r.item(),
+        'eval/iou_{}'.format(name): i.item(),
+        'eval/f1_{}'.format(name): f[1],
+    }
+
+    return metrics
+
 
 
 
@@ -34,6 +65,12 @@ class Trainer():
         self.optimizer = optimizer
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.total_step = 0
+        self.threshold_sdf = 0.3
+        self.threshold_angle = np.pi / 4.
+
+        if self.params.stego:
+            print("Using STEGO Loss")
+
 
         self.figure, self.axarr = plt.subplots(1, 2)
 
@@ -87,7 +124,10 @@ class Trainer():
 
             elif self.params.model.target == "both":
 
-                pred = self.model(rgb)
+                (pred, features) = self.model(rgb)
+                pred = torch.nn.functional.interpolate(pred, size=target_sdf.shape[2:], mode='bilinear', align_corners=True)
+
+                #pred = self.model(rgb)
                 pred_angle = torch.nn.Tanh()(pred[:, :2])
                 pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
 
@@ -102,6 +142,9 @@ class Trainer():
             else:
                 raise Exception("unknown target")
 
+            if self.params.stego:
+                loss_dict["stego"] = stego_loss(features, target_sdf)
+
             loss = sum(loss_dict.values())
             loss.backward()
 
@@ -113,7 +156,6 @@ class Trainer():
             # Visualization
             if self.total_step % 10 == 0 and self.params.visualize:
                 cv2.imshow("rgb", rgb[0].cpu().numpy().transpose(1, 2, 0))
-                #cv2.imshow("rgb_unrotated", data["rgb_unrotated"][0].cpu().numpy().transpose(1, 2, 0))
 
                 if self.params.model.target == "sdf":
                     pred_viz = pred[0].detach().cpu().detach().numpy()
@@ -155,6 +197,9 @@ class Trainer():
         self.model.eval()
 
         val_losses = []
+        seg_sdf_preds = []
+        seg_sdf_gts = []
+        frac_correct_list = []
 
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
@@ -167,11 +212,11 @@ class Trainer():
             angle_x_target = data["angles_x"].cuda()
             angle_y_target = data["angles_y"].cuda()
 
+            (pred, features) = self.model(rgb)
+            pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[1:], mode='bilinear', align_corners=True)
 
-            pred = self.model(rgb)
             pred_angle = torch.nn.Tanh()(pred[:, :2])
             pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
-
 
             target_sdf = sdf_target.unsqueeze(1)
             target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
@@ -184,18 +229,103 @@ class Trainer():
                 'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
             }
 
-            loss = sum(loss_dict.values())
+            seg_sdf_preds.append((pred_sdf[0] > self.threshold_sdf).cpu().numpy().astype(np.uint8)[0])
+            seg_sdf_gts.append((target_sdf[0] > self.threshold_sdf).cpu().numpy().astype(np.uint8).squeeze())
 
+            target_angle = torch.arctan2(angle_y_target, angle_x_target)
+            pred_angle = torch.arctan2(pred_angle[0, 1], pred_angle[0, 0])
+
+            correct_angles = (torch.abs(pred_angle - target_angle)[0] < self.threshold_angle)
+            correct_angles = (correct_angles * (target_sdf[0, 0] > self.threshold_sdf)).cpu().numpy().astype(np.uint8)
+            sdf_thresholded = (target_sdf[0, 0].cpu().numpy() > self.threshold_sdf).astype(np.uint8)
+
+            frac_correct_angles = np.sum(correct_angles) / np.sum(sdf_thresholded)
+            frac_correct_list.append(frac_correct_angles)
+
+            loss = sum(loss_dict.values())
             val_losses.append(loss.item())
+
 
         val_loss = np.nanmean(val_losses)
 
         print("eval/loss", val_loss)
 
+        metrics_sdf = calc_torchmetrics(seg_sdf_preds, seg_sdf_gts, name="sdf")
+
+        frac_correct_angle = np.nanmean(frac_correct_list)
+        print("eval/frac_correct_angle", frac_correct_angle)
+
+        print(metrics_sdf)
+
         if not self.params.main.disable_wandb:
-            wandb.log({"eval/loss": val_loss})
+            wandb.log({"eval/loss": val_loss,
+                       "eval/frac_correct_angle": frac_correct_angle})
+            wandb.log(metrics_sdf)
 
         return val_loss
+
+
+def stego_loss(features, target):
+
+
+    # Downsample target segmentation to match the size of the feature map
+    target = torch.nn.functional.interpolate(target.float(), size=features.shape[2:], mode='nearest')[:, 0, :, :]
+
+    # Downsample again due to VRAM constrints
+    target = target[:, ::2, ::2]
+    features = features[:, :, ::2, ::2]
+
+
+    # 0: hw
+    # 1: ij
+
+    features_0 = features[0]
+    features_1 = features[1]
+    target_0 = target[0]
+    target_1 = target[1]
+
+    feat_height = features_0.size()[1]
+    feat_width = features_0.size()[2]
+    feat_depth = features_0.size()[0]
+
+    # We exemplarily compare only image 0 and 1 in batch
+
+    # Segmentation mask where L_hwik == 1 if l_hw == 1
+    features_0 = features_0.unsqueeze(1).unsqueeze(1)
+    features_1 = features_1.unsqueeze(3).unsqueeze(3)
+
+    target_0 = target_0.unsqueeze(0).unsqueeze(0)
+    target_1 = target_1.unsqueeze(0).unsqueeze(0)
+
+    features_0 = features_0.repeat(1, feat_height, feat_width, 1, 1)
+    features_1 = features_1.repeat(1, 1, 1, feat_height, feat_width)
+
+    target_0 = target_0.repeat(feat_height, feat_width, 1, 1)
+    target_1 = target_1.repeat(1, 1, feat_height, feat_width)
+
+    # reshape to feat_depth x -1
+    features_0 = features_0.view(feat_depth, -1)
+    features_1 = features_1.view(feat_depth, -1)
+
+    target_0 = target_0.view(1, -1)
+    target_1 = target_1.view(1, -1)
+
+    F_hwij = torch.nn.CosineSimilarity(dim=0, eps=1e-6)(features_0, features_1)
+    F_hwij = F_hwij.view(feat_height, feat_width, feat_height, feat_width)
+
+    L_hwij = (target_0 == target_1).int()
+    L_hwij = L_hwij.view(feat_height, feat_width, feat_height, feat_width)
+
+    # Option1: Punish F_hwij high values for L_hwij == 0
+    # Option2: Encourage F_hwij low values for L_hwij != 0
+
+    cost = 0
+    cost += torch.mean((1 - F_hwij) * L_hwij)  # minimize cosine dissimiarity in places where classes are equal
+    cost += torch.mean(F_hwij * (1 - L_hwij))  # minimize cosine similarity in places where classes are NOT equal
+
+    return cost
+
+
 
 
 def main():
@@ -209,6 +339,7 @@ def main():
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
     parser.add_argument('--target', type=str, choices=["sdf", "angle", "both"], help="define the target that is used")
+    parser.add_argument('--stego', action="store_true", default=False, help="If True, applies stego loss")
     parser.add_argument('--visualize', action='store_true', help="visualize the dataset")
 
     opt = parser.parse_args()
@@ -219,6 +350,7 @@ def main():
     params.model.overwrite(opt)
     params.model.target = opt.target
     params.visualize = opt.visualize
+    params.stego = opt.stego
 
     print("Batch size summed over all GPUs: ", params.model.batch_size_reg)
     
@@ -226,7 +358,7 @@ def main():
         wandb.login()
         wandb.init(
             entity='jannik-zuern',
-            project='self_supervised_graph',
+            project='autograph-regressor',
             notes='regressor',
             settings=wandb.Settings(start_method="fork"),
         )
@@ -242,8 +374,8 @@ def main():
     elif params.model.target == "angle":
         model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=2).to(params.model.device)
     elif params.model.target == "both":
-        model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=3).to(params.model.device)
-
+        #model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=3).to(params.model.device)
+        model = DeepLabv3Plus(models.resnet101(pretrained=True), num_classes=3).to(params.model.device)
 
     # Make model parallel if available
     if params.model.dataparallel:
@@ -260,8 +392,9 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '*', "*", "train")
-    val_path =   os.path.join(params.paths.dataroot, '*', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, 'dense', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, 'dense', "*", "val")
+
     dataset_train = RegressorDataset(path=train_path, split='train')
     dataset_val = RegressorDataset(path=val_path, split='val')
 
@@ -282,7 +415,7 @@ def main():
         trainer.train(epoch)
 
         #if not params.main.disable_wandb:
-        if epoch % 10 == 0:
+        if epoch % 2 == 0:
 
             eval_loss = trainer.eval(epoch)
 

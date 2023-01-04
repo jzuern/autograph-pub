@@ -16,8 +16,8 @@ class RegressorDataset(torch.utils.data.Dataset):
 
         print("Looking for files in", path)
 
-        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets.png')))
-        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets.png')))
+        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense.png')))
+        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
 
         def get_id(filename):
@@ -112,14 +112,9 @@ class RegressorDataset(torch.utils.data.Dataset):
             'rgb': rgb
         }
 
-        return_dict = self.random_rotate(return_dict)
+        #return_dict = self.random_rotate(return_dict)
 
         return return_dict
-
-
-
-
-
 
 
 class PreprocessedDataset(torch_geometric.data.Dataset):
@@ -132,17 +127,17 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         self.split = split
         self.in_layers = in_layers
 
-        self.pth_files = sorted(glob(path + '/*.pth')) + sorted(glob(path + '/*.pt'))
+        self.pth_files = sorted(glob(path + '/*-sparse.pth'))
         print("Found {} files".format(len(self.pth_files)))
 
         self.pth_files = self.pth_files[:num_samples]
         print("Using {} files".format(len(self.pth_files)))
 
         if "sdf" in in_layers:
-            self.sdf_files = [f.replace("-post", "-pre").replace(".pth", "-sdf-tracklets.png") for f in self.pth_files]
+            self.sdf_files = [f.replace("-post", "-pre").replace("-sparse.pth", "-sdf-tracklets-sparse.png") for f in self.pth_files]
             assert all([os.path.exists(f) for f in self.sdf_files])
         if "angle" in in_layers:
-            self.angle_files = [f.replace("-post", "-pre").replace(".pth", "-angles-tracklets.png") for f in self.pth_files]
+            self.angle_files = [f.replace("-post", "-pre").replace("-sparse.pth", "-angles-tracklets-sparse.png") for f in self.pth_files]
             assert all([os.path.exists(f) for f in self.angle_files])
 
         self.check_files()

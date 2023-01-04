@@ -45,7 +45,7 @@ def visualize_angles(a_x, a_y, mask):
     angle_rgb = cv2.cvtColor(angle_hsv, cv2.COLOR_HSV2RGB)
 
     mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
-    mask = (mask > 0.5).astype(np.uint8)
+    mask = (mask > 0.3).astype(np.uint8)
 
     angle_rgb = angle_rgb * mask
 

@@ -29,7 +29,8 @@ from lanegnn.utils import visualize_angles
 random.seed(0)
 
 
-def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, angles_viz, roi_xxyy, sample_id, out_path):
+def preprocess_sample(G_gt_nx, sat_image_, sdf, sdf_regressor, angles, angles_viz, angles_regressor, roi_xxyy,
+                      sample_id, out_path, output_name):
 
     margin = 200
 
@@ -54,8 +55,14 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, angles_viz, roi_xxyy, sa
     rgb = sat_image_[roi_xxyy[0] : roi_xxyy[1],
                      roi_xxyy[2] : roi_xxyy[3]]
 
-    sdf_context = (np.pad(sdf, margin, mode="constant", constant_values=0) * 255).astype(np.uint8)
-    angles_viz_context = (np.asarray([np.pad(angles_viz[..., i], margin, mode="constant", constant_values=0)
+    # From raw tracklets
+    # sdf_context = (np.pad(sdf, margin, mode="constant", constant_values=0) * 255).astype(np.uint8)
+    # angles_viz_context = (np.asarray([np.pad(angles_viz[..., i], margin, mode="constant", constant_values=0)
+    #                                  for i in range(3)]).transpose(1, 2, 0)).astype(np.uint8)
+
+    # From regressor
+    sdf_context = (np.pad(sdf_regressor, margin, mode="constant", constant_values=0) * 255).astype(np.uint8)
+    angles_viz_context = (np.asarray([np.pad(angles_regressor[..., i], margin, mode="constant", constant_values=0)
                                      for i in range(3)]).transpose(1, 2, 0)).astype(np.uint8)
 
     # fig, axarr = plt.subplots(1, 3, figsize=(15, 5))
@@ -122,7 +129,7 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, angles_viz, roi_xxyy, sa
     edge_img_feats = torch.ByteTensor(torch.cat(edge_img_feats, dim=0))
     edge_gt_score = torch.tensor(edge_gt_score)
 
-    out_file = os.path.join(out_path, "{}.pth".format(sample_id))
+    out_file = os.path.join(out_path, "{}-{}.pth".format(sample_id, output_name))
     torch.save({
         "rgb": torch.FloatTensor(rgb),
         "sdf": torch.FloatTensor(sdf),
@@ -361,7 +368,7 @@ def resample_trajectory(trajectory, dist=5):
 
 
 
-def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
+def process_chunk(sparse, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
 
     trajectories_centers = [np.mean(t, axis=0) for t in trajectories_]
 
@@ -461,21 +468,18 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
             overlap = np.sum(np.logical_and(t_sdf > 0.1, global_sdf > 0.1)) + 1
             t_sdf_sum = np.sum(t_sdf > 0.1)
 
-            #print(overlap, t_sdf_sum, t_sdf_sum / overlap)
-            # fig, axarr = plt.subplots(1, 2)
-            # axarr[0].imshow(sat_image)
-            # axarr[1].imshow(sat_image)
-            # axarr[0].imshow(t_sdf, alpha=0.5)
-            # axarr[1].imshow(global_sdf, alpha=0.5)
-            # plt.show()
-
             if t_sdf_sum / overlap > 2:
                 filtered_trajectories.append(t)
                 global_sdf += t_sdf
             else:
                 continue
 
-        trajectories = filtered_trajectories
+        # Whether to export sparse or dense trajectory annotations
+        if sparse:
+            trajectories = filtered_trajectories
+            output_name = "sparse"
+        else:
+            output_name = "dense"
 
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
@@ -524,23 +528,21 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
         print("Saving to {}/{}-rgb.png".format(out_path, sample_id))
 
         Image.fromarray(sat_image).save("{}/{}-rgb.png".format(out_path, sample_id))
-        Image.fromarray(angles_viz).save("{}/{}-angles-tracklets.png".format(out_path, sample_id))
-        Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets.png".format(out_path, sample_id))
+        Image.fromarray(angles_viz).save("{}/{}-angles-tracklets-{}.png".format(out_path, sample_id, output_name))
+        Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets-{}.png".format(out_path, sample_id, output_name))
 
         if export_final:
 
             sdf_regressor = cv2.imread(
                 os.path.join(out_path.replace("-post", "-pre"), "{}-sdf-reg.png".format(sample_id)))[:,:,0] / 255.
-
-            #plt.imshow(sat_image)
-            #plt.imshow(sdf_regressor, alpha=0.5)
-            #plt.show()
+            angles_regressor = cv2.imread(
+                os.path.join(out_path.replace("-post", "-pre"), "{}-angles-reg.png".format(sample_id)))
 
             # Filter graph according to predicted sdf
             G_ = G.copy()
             for n in G_.nodes:
                 pos = G.nodes[n]["pos"]
-                if sdf_regressor[int(pos[1]), int(pos[0])] < 0.2:
+                if sdf_regressor[int(pos[1]), int(pos[0])] < 0.3:
                     G.remove_node(n)
 
             # remap node ids and edges
@@ -597,11 +599,14 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
             preprocess_sample(G,
                               sat_image_=sat_image_,
                               sdf=sdf,
+                              sdf_regressor=sdf_regressor,
                               angles=angles,
                               angles_viz=angles_viz,
+                              angles_regressor=angles_regressor,
                               roi_xxyy=roi_xxyy,
                               sample_id=sample_id,
-                              out_path=out_path)
+                              out_path=out_path,
+                              output_name=output_name)
 
 
 if __name__ == "__main__":
@@ -611,6 +616,7 @@ if __name__ == "__main__":
     parser.add_argument("--export_final", action="store_true")
     parser.add_argument("--city_name", type=str, default="data")
     parser.add_argument("--out_path_root", type=str, default="data")
+    parser.add_argument("--sparse", action="store_true")
     args = parser.parse_args()
 
     out_path_root = args.out_path_root
@@ -620,13 +626,12 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 2
-    r_min = 7  # minimum radius of the circle for poisson disc sampling
+    num_cpus = 1
+    r_min = 10  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'train'), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'val'), exist_ok=True)
-
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
@@ -642,9 +647,13 @@ if __name__ == "__main__":
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
-    roi_xxyy_list = roi_xxyy_list[:1000]
-    print("Careful! Using reduced list of rois")
+    roi_xxyy_list = roi_xxyy_list[0:10000]
+    print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
 
+    if args.sparse:
+        print("Exporting SPARSE tracklet annotations!")
+    else:
+        print("Exporting DENSE tracklet annotations!")
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/aggregation/scenario_files.txt", dtype=str).tolist()
 
@@ -718,7 +727,8 @@ if __name__ == "__main__":
 
     # single core
     if num_cpus <= 1:
-        process_chunk(roi_xxyy_list,
+        process_chunk(args.sparse,
+                      roi_xxyy_list,
                       export_final,
                       trajectories_,
                       lanes_,
@@ -738,7 +748,8 @@ if __name__ == "__main__":
         num_chunks = int(np.ceil(num_samples / num_cpus))
         roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
 
-        arguments = zip(roi_chunks,
+        arguments = zip(repeat(args.sparse),
+                        roi_chunks,
                         repeat(export_final),
                         repeat(trajectories_),
                         repeat(lanes_),

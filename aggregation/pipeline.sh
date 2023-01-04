@@ -6,9 +6,13 @@ city_names=(pittsburgh)
 
 
 for city_name in "${city_names[@]}"; do
-    echo "!!!!!!!!!!Processing $city_name!!!!!!!!!!!!!!!"
+    echo "Processing $city_name !"
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-pre --sparse
     ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-pre
-    ~/anaconda3/envs/geometric/bin/python infer_regressor.py --out_path_root /data/autograph/sparse/$city_name-pre --checkpoint ../checkpoints/pit/regressor_local_run_0520-0.42925.pth
+
+    ~/anaconda3/envs/geometric/bin/python infer_regressor.py --out_path_root /data/autograph/sparse/$city_name-pre --checkpoint ../checkpoints/pit/regressor_cosmic-sponge-2_0040-0.41017.pth
+
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-post --export_final --sparse
     ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-post --export_final
 done
 

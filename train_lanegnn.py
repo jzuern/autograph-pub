@@ -83,15 +83,7 @@ class Trainer():
         edge_scores_pred = edge_scores_pred.cpu()
         data = data.cpu()
 
-
         # Calculate node and edge score accuracies
-        acc_node = Accuracy(num_classes=1)(node_scores_pred, torch.round(data.node_scores).int())
-        acc_edge = Accuracy(num_classes=1)(edge_scores_pred, torch.round(data.edge_scores).int())
-        recall_node = Recall(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores).int())
-        recall_edge = Recall(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores).int())
-        precision_node = Precision(task="binary")(torch.round(node_scores_pred), torch.round(data.node_scores).int())
-        precision_edge = Precision(task="binary")(torch.round(edge_scores_pred), torch.round(data.edge_scores).int())
-
         node_scores_pred = node_scores_pred[data.batch.cpu() == 0].detach().cpu().numpy()
         edge_scores_pred = edge_scores_pred[:num_edges_in_batch].detach().cpu().numpy()
 
@@ -297,18 +289,24 @@ class Trainer():
             node_losses.append(node_loss.item())
             edge_losses.append(edge_loss.item())
 
-            node_scores = node_scores.cpu()
-            edge_scores = edge_scores.cpu()
+            node_scores = torch.round(node_scores.cpu()).int()
+            edge_scores = torch.round(edge_scores.cpu()).int()
             data = data.cpu()
+            data.edge_scores = torch.round(data.edge_scores).int()
+            data.node_scores = torch.round(data.node_scores).int()
 
-            acc_node = Accuracy(num_classes=1)(node_scores, torch.round(data.node_scores).int())
-            acc_edge = Accuracy(num_classes=1)(edge_scores, torch.round(data.edge_scores).int())
-            recall_node = Recall(task="binary")(torch.round(node_scores), torch.round(data.node_scores).int())
-            recall_edge = Recall(task="binary")(torch.round(edge_scores), torch.round(data.edge_scores).int())
-            precision_node = Precision(task="binary")(torch.round(node_scores),
-                                                      torch.round(data.node_scores).int())
-            precision_edge = Precision(task="binary")(torch.round(edge_scores),
-                                                      torch.round(data.edge_scores).int())
+            acc_node = Accuracy(num_classes=1, multiclass=False)(node_scores,
+                                                                 data.node_scores)
+            acc_edge = Accuracy(num_classes=1, multiclass=False)(edge_scores,
+                                                                 data.edge_scores)
+            recall_node = Recall(task="binary")(node_scores,
+                                                data.node_scores)
+            recall_edge = Recall(task="binary")(edge_scores,
+                                                data.edge_scores)
+            precision_node = Precision(task="binary")(node_scores,
+                                                      data.node_scores)
+            precision_edge = Precision(task="binary")(edge_scores,
+                                                      data.edge_scores)
 
             recall_edge_list.append(recall_edge.item())
             recall_node_list.append(recall_node.item())
@@ -385,6 +383,7 @@ def main():
 
     # -------  Model, optimizer and data initialization ------
     in_layers = params.model.in_layers
+    print("Using the following input layers: ", in_layers)
     in_channels = 0
     if "rgb" in in_layers:
         in_channels += 3

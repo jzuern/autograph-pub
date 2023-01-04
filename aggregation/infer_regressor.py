@@ -8,6 +8,8 @@ from glob import glob
 from PIL import Image
 import argparse
 from tqdm import tqdm
+from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
+import torchvision.models as models
 
 
 def get_id(filename):
@@ -19,12 +21,9 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default='../checkpoints/regressor-newest.pth')
     args = parser.parse_args()
 
-    regressor = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=3).cuda()
+    regressor = DeepLabv3Plus(models.resnet101(pretrained=True), num_classes=3).cuda()
 
     state_dict = torch.load(args.checkpoint)
-    for key in list(state_dict.keys()):
-        state_dict[key.replace('module.', '')] = state_dict[key]
-        del state_dict[key]
 
     regressor.load_state_dict(state_dict)
     regressor.eval()
@@ -34,12 +33,15 @@ if __name__ == '__main__':
 
     for sat_image_f in tqdm(sat_images):
         rgb = cv2.imread(sat_image_f)
+        rgb_tensor = torch.FloatTensor(rgb).permute(2, 0, 1).unsqueeze(0).cuda() / 255.
 
         out_path = os.path.dirname(sat_image_f)
         sample_id = get_id(sat_image_f)
 
-        #rgb = cv2.cvtColor(sat_image, cv2.COLOR_RGB2BGR)
-        pred = regressor(torch.FloatTensor(rgb).permute(2, 0, 1).unsqueeze(0).cuda() / 255.)
+        (pred, features) = regressor(rgb_tensor)
+
+        pred = torch.nn.functional.interpolate(pred, size=rgb_tensor.shape[2:], mode='bilinear', align_corners=True)
+
         sdf = torch.nn.Sigmoid()(pred[0, 2]).detach().cpu().numpy()
         angles = torch.nn.Tanh()(pred[0, 0:2]).detach().cpu().numpy()
 

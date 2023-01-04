@@ -24,6 +24,7 @@ class LaneGNN(torch.nn.Module):
 
         self.edge_geo_dim = edge_geo_dim
         self.depth = gnn_depth
+        self.in_channels = in_channels
 
         self.edge_encoder = nn.Sequential(
             nn.Linear(4, int(edge_geo_dim / 2)),
