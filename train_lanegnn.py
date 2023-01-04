@@ -159,12 +159,12 @@ class Trainer():
         figure_log.canvas.draw()
         figure_log.canvas.flush_events()
 
-        imname = "viz/{:05d}.png".format(self.total_step)
+        imname = "viz/{}-{:05d}.png".format(plot_text.replace("/", "-"), self.total_step)
         try:
             plt.savefig(imname)
             print("Saved logging image to {}".format(imname))
         except Exception as e:
-            pass
+            print(e)
 
         if not self.params.main.disable_wandb:
             wandb.log({plot_text: figure_log})
@@ -172,7 +172,6 @@ class Trainer():
         del figure_log
         del axarr_log
         plt.close()
-
 
 
     def train(self, epoch):
@@ -229,7 +228,7 @@ class Trainer():
                            "train/node_loss": loss_dict['node_loss'].item()}
                           )
 
-            # # Visualization
+            # Visualization
             if self.total_step % 500 == 0:
                 if self.params.model.dataparallel:
                     data = data_orig
@@ -385,6 +384,14 @@ def main():
 
 
     # -------  Model, optimizer and data initialization ------
+    in_layers = params.model.in_layers
+    in_channels = 0
+    if "rgb" in in_layers:
+        in_channels += 3
+    if "sdf" in in_layers:
+        in_channels += 1
+    if "angle" in in_layers:
+        in_channels += 3
 
     model = LaneGNN(gnn_depth=params.model.gnn_depth,
                     edge_geo_dim=params.model.edge_geo_dim,
@@ -392,11 +399,8 @@ def main():
                     edge_dim=params.model.edge_dim,
                     node_dim=params.model.node_dim,
                     msg_dim=params.model.msg_dim,
-                    in_channels=params.model.in_channels,
-                    )
-
-
-    model = model.to(params.model.device)
+                    in_channels=in_channels,
+                    ).to(params.model.device)
 
     # Make model parallel if available
     if params.model.dataparallel:
@@ -410,7 +414,6 @@ def main():
     # model.load_state_dict(torch.load(model_path))
     #print('Model loaded from {}'.format(model_path))
 
-
     weights = [w for w in model.parameters() if w.requires_grad]
 
     optimizer = torch.optim.Adam(weights,
@@ -420,8 +423,8 @@ def main():
 
     train_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'train')
     val_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'val')
-    dataset_train = PreprocessedDataset(path=train_path)
-    dataset_val = PreprocessedDataset(path=val_path)
+    dataset_train = PreprocessedDataset(path=train_path, num_samples=10, in_layers=in_layers)
+    dataset_val = PreprocessedDataset(path=val_path, num_samples=10, in_layers=in_layers)
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader
@@ -442,8 +445,11 @@ def main():
     for epoch in range(params.model.num_epochs):
         trainer.train(epoch)
 
-        #if not params.main.disable_wandb:
         if epoch % 100 == 0:
+
+            # Evaluate
+            trainer.eval()
+
             try:
                 wandb_run_name = wandb.run.name
             except:
@@ -454,9 +460,6 @@ def main():
             print("Saving checkpoint to {}".format(checkpoint_path))
 
             torch.save(model.state_dict(), checkpoint_path)
-
-        # Evaluate
-        trainer.eval()
 
 
 if __name__ == '__main__':

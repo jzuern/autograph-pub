@@ -31,7 +31,7 @@ class LaneGNN(torch.nn.Module):
             nn.Linear(int(edge_geo_dim / 2), edge_geo_dim),
         )
 
-        self.map_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=in_channels)  # default: 64
+        self.bev_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=in_channels)  # default: 64
 
         self.fuse_edge = nn.Sequential(
             nn.Linear(edge_geo_dim + map_feat_dim, edge_dim * 2),
@@ -79,20 +79,22 @@ class LaneGNN(torch.nn.Module):
             data.edge_pos_feats,
             data.edge_indices,
         )
+        node_feats = node_feats / 256.
 
         if edge_index.shape[1] == 2:
             edge_index = edge_index.t().contiguous()
 
-        node_feats = node_feats / 256.
-
         x = self.pose_encoder(node_feats.float())  # N x D
         initial_x = x
 
+        # remove input edge_img_feats according to settings of input layers
+        edge_img_feats = edge_img_feats[:, :self.in_channels]
+
         edge_attr = self.edge_encoder(edge_attr.float())  # E x D_E1
-        map_attr = self.map_encoder(edge_img_feats)  # E x D_E2
+        bev_attr = self.bev_encoder(edge_img_feats)  # E x D_E2
 
         # Combine encoded edge data and oriented BEV feature
-        fused_edge_attr = torch.cat([edge_attr, map_attr], dim=1)  # E x (D_E1+D_E2)
+        fused_edge_attr = torch.cat([edge_attr, bev_attr], dim=1)  # E x (D_E1+D_E2)
 
         edge_attr = self.fuse_edge(fused_edge_attr)  # E x (D_E)
 

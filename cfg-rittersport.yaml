@@ -2,7 +2,7 @@ main:
     project: 'self_supervised_graph'
     dataset: 'paloalto'
     version: 'none'
-    disable_wandb: True
+    disable_wandb: False
 paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
@@ -37,7 +37,7 @@ model:
     msg_dim: 32
     edge_geo_dim: 16
     # end_of_archs
-    in_channels: 3  # number of channels of image (RGB [+ sdf [+ angle]])
+    in_layers: rgb  # which inputs to use for LaneGNN map encoder (i.e. rgb | rgb,sdf | rgb,sdf,angle)
     loader_workers: 4
     weight_decay: 1e-4
     ignore_low_scores: False

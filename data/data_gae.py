@@ -13,6 +13,7 @@ def random_func(x):
 
 def get_successor_graphs(n_graphs):
     json_files = sorted(glob("/data/lanegraph/data_sep/all/010922-large/pao/test/*.json"))
+    print(len(json_files))
     graphs = []
 
     for json_file in json_files:
@@ -144,8 +145,8 @@ class ToyDataset(torch_geometric.data.dataset.Dataset):
 
         #self.graphs = get_random_circles(n_graphs)
         #self.graphs = get_func_graphs(n_graphs)
-        self.graphs = get_t_intersections(n_graphs)
-        #self.graphs = get_successor_graphs(100)
+        #self.graphs = get_t_intersections(n_graphs)
+        self.graphs = get_successor_graphs(1001)
 
 
     def shuffle_samples(self):

@@ -124,15 +124,27 @@ class RegressorDataset(torch.utils.data.Dataset):
 
 class PreprocessedDataset(torch_geometric.data.Dataset):
 
-    def __init__(self, path, split='train'):
+    def __init__(self, path, split='train', num_samples=1000000, in_layers=""):
         super(PreprocessedDataset, self).__init__(path)
         print("Loading preprocessed dataset from {}".format(path))
 
         self.path = path
         self.split = split
+        self.in_layers = in_layers
 
         self.pth_files = sorted(glob(path + '/*.pth')) + sorted(glob(path + '/*.pt'))
         print("Found {} files".format(len(self.pth_files)))
+
+        self.pth_files = self.pth_files[:num_samples]
+        print("Using {} files".format(len(self.pth_files)))
+
+        if "sdf" in in_layers:
+            self.sdf_files = [f.replace("-post", "-pre").replace(".pth", "-sdf-tracklets.png") for f in self.pth_files]
+            assert all([os.path.exists(f) for f in self.sdf_files])
+        if "angle" in in_layers:
+            self.angle_files = [f.replace("-post", "-pre").replace(".pth", "-angles-tracklets.png") for f in self.pth_files]
+            assert all([os.path.exists(f) for f in self.angle_files])
+
         self.check_files()
 
     def __len__(self):

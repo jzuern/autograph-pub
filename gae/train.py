@@ -122,7 +122,6 @@ class Trainer(object):
             # mu: mean of the latent variable
             # logvar: log variance of the latent variable
 
-
             loss = loss_function(preds=self.adj_recovered,
                                  labels=adj_label,
                                  mu=mu,
@@ -147,11 +146,11 @@ class Trainer(object):
             self.train_accs.append(acc)
 
             if self.global_step % 20 == 0:
-            if not args.disable_wandb:
-                wandb.log({"train_loss": cur_loss,
-                           "train_acc": acc, })
+                if not args.disable_wandb:
+                    wandb.log({"train_loss": cur_loss,
+                               "train_acc": acc, })
 
-            if self.global_step % 200 == 0:
+            if self.global_step % 1000 == 0:
                 self.visualize()
 
             self.global_step += 1
@@ -163,6 +162,7 @@ class Trainer(object):
         # print('Test AP score: ' + str(ap_score))
 
     def visualize(self):
+        print("Visualizing...")
 
         # visualize adjacency matrix
         adj_pred = torch.sigmoid(self.adj_recovered).cpu().detach().numpy()
@@ -234,6 +234,9 @@ class Trainer(object):
             self.ax[3].plot(np.array(np.convolve(self.train_accs, np.ones(n_avg), 'valid') / n_avg))
 
             plt.pause(0.01)
+
+            if not args.disable_wandb:
+                wandb.log({"chart": wandb.Image(self.fig)})
 
     def save_model(self):
         self.save_path = 'checkpoints/gae-{epoch:04d}.ckpt'.format(epoch=self.epoch)

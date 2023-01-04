@@ -11,8 +11,6 @@ from scipy.spatial.distance import cdist
 import torch
 from sklearn.neighbors import KernelDensity
 from scipy.signal import find_peaks
-from torchvision.models import resnet18
-import torch.nn as nn
 from itertools import repeat
 from ray.util.multiprocessing import Pool
 import cv2
@@ -31,7 +29,7 @@ from lanegnn.utils import visualize_angles
 random.seed(0)
 
 
-def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_xxyy, sample_id, out_path):
+def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, angles_viz, roi_xxyy, sample_id, out_path):
 
     margin = 200
 
@@ -56,9 +54,15 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_x
     rgb = sat_image_[roi_xxyy[0] : roi_xxyy[1],
                      roi_xxyy[2] : roi_xxyy[3]]
 
-    #centerline_context = centerline_image_[roi_xxyy[0] - margin:roi_xxyy[1] + margin,
-    #                                       roi_xxyy[2] - margin:roi_xxyy[3] + margin].copy().astype(np.float32)
+    sdf_context = (np.pad(sdf, margin, mode="constant", constant_values=0) * 255).astype(np.uint8)
+    angles_viz_context = (np.asarray([np.pad(angles_viz[..., i], margin, mode="constant", constant_values=0)
+                                     for i in range(3)]).transpose(1, 2, 0)).astype(np.uint8)
 
+    # fig, axarr = plt.subplots(1, 3, figsize=(15, 5))
+    # axarr[0].imshow(rgb_context)
+    # axarr[1].imshow(sdf_context)
+    # axarr[2].imshow(angles_viz_context)
+    # plt.show()
 
     for edge_idx, edge in enumerate(G_gt_nx.edges):
         i, j = edge
@@ -74,13 +78,15 @@ def preprocess_sample(G_gt_nx, sat_image_, sdf, angles, centerline_image_, roi_x
         center = np.array([mid_x + margin, mid_y + margin])
 
         crop_img_rgb = get_oriented_crop(edge_angle, center[0], center[1], rgb_context)
-        #crop_centerline = get_oriented_crop(edge_angle, center[0], center[1], centerline_context)
+        crop_sdf = get_oriented_crop(edge_angle, center[0], center[1], sdf_context)
+        crop_angles_viz = get_oriented_crop(edge_angle, center[0], center[1], angles_viz_context)
 
         crop_img_rgb_ = transform2vgg(crop_img_rgb).unsqueeze(0).numpy()
-        #crop_centerline_ = transform2vgg(crop_centerline).unsqueeze(0).numpy()
+        crop_sdf_ = transform2vgg(crop_sdf).unsqueeze(0).numpy()
+        crop_angles_viz_ = transform2vgg(crop_angles_viz).unsqueeze(0).numpy()
 
-        #feats = np.concatenate([crop_img_rgb_, crop_centerline_], axis=1)
-        feats = crop_img_rgb_
+        feats = np.concatenate([crop_img_rgb_, crop_sdf_, crop_angles_viz_], axis=1)
+        #feats = crop_img_rgb_
 
         edge_img_feats.append(torch.ByteTensor(feats * 255.))
 
@@ -355,83 +361,6 @@ def resample_trajectory(trajectory, dist=5):
 
 
 
-def process_chunk_v2(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
-
-    trajectories_centers = [np.mean(t, axis=0) for t in trajectories_]
-
-    for roi_xxyy in tqdm(roi_xxyy_list):
-        if centerline_image_ is not None:
-            if np.sum(centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]]) == 0:
-                continue
-
-        if roi_xxyy[0] < 16000:
-            out_path = os.path.join(out_path_root, "val")
-        else:
-            out_path = os.path.join(out_path_root, "train")
-
-        sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
-
-        if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
-            continue
-
-        sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
-
-        # Filter non-square sat_images:
-        if sat_image.shape[0] != sat_image.shape[1]:
-            continue
-
-        trajectories_candidates = []
-        for i in range(len(trajectories_)):
-            if np.linalg.norm(trajectories_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 300:
-                trajectories_candidates.append(trajectories_[i])
-
-        trajectories = []
-        for trajectory in trajectories_candidates:
-
-            trajectory = trajectory - np.array([roi_xxyy[2], roi_xxyy[0]])
-
-            # filter trajectories according to current roi_xxyy
-            is_in_roi = np.logical_and(trajectory[:, 0] > 0, trajectory[:, 0] < sat_image.shape[1])
-            if not np.any(is_in_roi):
-                continue
-            is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] > 0)
-            if not np.any(is_in_roi):
-                continue
-            is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] < sat_image.shape[0])
-            if not np.any(is_in_roi):
-                continue
-
-            trajectory = trajectory[is_in_roi]
-
-            # resample trajectory to have equally distant points
-            if len(trajectory) < 5:
-                continue
-
-            trajectory = resample_trajectory(trajectory, dist=5)
-
-            # total length of trajectory
-            total_length = np.sum(np.linalg.norm(trajectory[1:] - trajectory[:-1], axis=1))
-            if total_length < 50:
-                continue
-
-            trajectories.append(trajectory)
-
-        if len(trajectories) < 1:
-            continue
-
-        min_distance_from_center = min([np.min(np.linalg.norm(trajectory - np.array(sat_image.shape[:2]) / 2, axis=1)) for trajectory in trajectories])
-        if min_distance_from_center > 30:
-            continue
-
-        G = initialize_graph(roi_xxyy, r_min=r_min)
-
-        plt.imshow(sat_image)
-        for trajectory in trajectories:
-            plt.plot(trajectory[:, 0], trajectory[:, 1], linewidth=2)
-        plt.show()
-
-
-
 def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
 
     trajectories_centers = [np.mean(t, axis=0) for t in trajectories_]
@@ -669,7 +598,7 @@ def process_chunk(roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_
                               sat_image_=sat_image_,
                               sdf=sdf,
                               angles=angles,
-                              centerline_image_=centerline_image_,
+                              angles_viz=angles_viz,
                               roi_xxyy=roi_xxyy,
                               sample_id=sample_id,
                               out_path=out_path)
@@ -713,7 +642,7 @@ if __name__ == "__main__":
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
-    roi_xxyy_list = roi_xxyy_list[:10000]
+    roi_xxyy_list = roi_xxyy_list[:1000]
     print("Careful! Using reduced list of rois")
 
 
@@ -787,23 +716,8 @@ if __name__ == "__main__":
 
     print("Number of trajectories: {}".format(len(trajectories_)))
 
-    # plot
-    # fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    # ax.set_aspect('equal')
-    # for trajectory in trajectories_[0:10000]:
-    #     ax.plot(trajectory[:, 0], trajectory[:, 1], c="r")
-    # plt.show()
-
     # single core
     if num_cpus <= 1:
-        # process_chunk(roi_xxyy_list,
-        #               export_final,
-        #               trajectories_,
-        #               lanes_,
-        #               sat_image_,
-        #               out_path_root,
-        #               centerline_image_,
-        #               )
         process_chunk(roi_xxyy_list,
                       export_final,
                       trajectories_,
