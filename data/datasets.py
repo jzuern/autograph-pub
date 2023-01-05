@@ -127,6 +127,8 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         self.split = split
         self.in_layers = in_layers
         self.target = target
+        if num_samples is None:
+            num_samples = 100000000
 
         self.pth_files = sorted(glob(path + '/*-{}.pth'.format(self.target)))
         print("Found {} files".format(len(self.pth_files)))
@@ -141,12 +143,13 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
             self.angle_files = [f.replace("-post", "-pre").replace("-{}.pth".format(self.target), "-angles-tracklets-{}.png".format(self.target)) for f in self.pth_files]
             assert all([os.path.exists(f) for f in self.angle_files])
 
-        self.check_files()
+        #self.check_files()
 
     def __len__(self):
         return len(self.pth_files)
 
     def check_files(self):
+        print("Checking files...")
         valid_files = []
 
         for i, pth_file in tqdm(enumerate(self.pth_files)):

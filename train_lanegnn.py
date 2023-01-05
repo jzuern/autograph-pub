@@ -424,11 +424,11 @@ def main():
     val_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'val')
 
     dataset_train = PreprocessedDataset(path=train_path,
-                                        num_samples=100,
+                                        num_samples=None,
                                         in_layers=in_layers,
                                         target=opt.target,)
     dataset_val = PreprocessedDataset(path=val_path,
-                                      num_samples=10,
+                                      num_samples=None,
                                       in_layers=in_layers,
                                       target=opt.target)
 
