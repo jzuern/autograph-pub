@@ -288,24 +288,25 @@ class Trainer():
             node_losses.append(node_loss.item())
             edge_losses.append(edge_loss.item())
 
-            node_scores = torch.round(node_scores.cpu()).int()
-            edge_scores = torch.round(edge_scores.cpu()).int()
             data = data.cpu()
-            data.edge_scores = torch.round(data.edge_scores).int()
-            data.node_scores = torch.round(data.node_scores).int()
 
-            acc_node = Accuracy(num_classes=1, multiclass=False)(node_scores,
-                                                                 data.node_scores)
-            acc_edge = Accuracy(num_classes=1, multiclass=False)(edge_scores,
-                                                                 data.edge_scores)
-            recall_node = Recall(task="binary")(node_scores,
-                                                data.node_scores)
-            recall_edge = Recall(task="binary")(edge_scores,
-                                                data.edge_scores)
-            precision_node = Precision(task="binary")(node_scores,
-                                                      data.node_scores)
-            precision_edge = Precision(task="binary")(edge_scores,
-                                                      data.edge_scores)
+            node_scores_ = torch.round(node_scores.cpu()).int()
+            edge_scores_ = torch.round(edge_scores.cpu()).int()
+            data.edge_scores_ = torch.round(data.edge_scores).int()
+            data.node_scores_ = torch.round(data.node_scores).int()
+
+            acc_node = Accuracy(num_classes=1, multiclass=False)(node_scores_,
+                                                                 data.node_scores_)
+            acc_edge = Accuracy(num_classes=1, multiclass=False)(edge_scores_,
+                                                                 data.edge_scores_)
+            recall_node = Recall(task="binary")(node_scores_,
+                                                data.node_scores_)
+            recall_edge = Recall(task="binary")(edge_scores_,
+                                                data.edge_scores_)
+            precision_node = Precision(task="binary")(node_scores_,
+                                                      data.node_scores_)
+            precision_edge = Precision(task="binary")(edge_scores_,
+                                                      data.edge_scores_)
 
             recall_edge_list.append(recall_edge.item())
             recall_node_list.append(recall_node.item())
