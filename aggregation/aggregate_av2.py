@@ -313,7 +313,10 @@ def dijkstra_trajectories(G, trajectories, imsize):
             cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
 
         f = 15  # distance function scale
-        sdf = skfmm.distance(1 - sdf)
+        try:
+            sdf = skfmm.distance(1 - sdf)
+        except:
+            continue
         sdf[sdf > f] = f
         sdf = sdf / f
 
@@ -368,9 +371,22 @@ def resample_trajectory(trajectory, dist=5):
 
 
 
-def process_chunk(sparse, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
+def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
+    #
+    # for l in lanes_[::5]:
+    #     plt.plot(l[:, 0], l[:, 1], linewidth=0.5)
+    # for t in trajectories_[::5]:
+    #     plt.plot(t[:, 0], t[:, 1], linewidth=2.0)
+    # plt.show()
 
-    trajectories_centers = [np.mean(t, axis=0) for t in trajectories_]
+    if "tracklets" in source:
+        annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
+        annot_ = trajectories_
+    elif "lanes" in source:
+        annotations_centers = [np.mean(t, axis=0) for t in lanes_]
+        annot_ = lanes_
+    else:
+        raise ValueError("Invalid source")
 
     for roi_xxyy in tqdm(roi_xxyy_list):
 
@@ -395,47 +411,51 @@ def process_chunk(sparse, roi_xxyy_list, export_final, trajectories_, lanes_, sa
         if sat_image.shape[0] != sat_image.shape[1]:
             continue
 
-        trajectories_candidates = []
-        for i in range(len(trajectories_)):
-            if np.linalg.norm(trajectories_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 300:
-                trajectories_candidates.append(trajectories_[i])
+        annot_candidates = []
+        for i in range(len(annot_)):
+            if np.linalg.norm(annotations_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 500:
+                annot_candidates.append(annot_[i])
 
-        trajectories = []
-        for trajectory in trajectories_candidates:
+        annots = []
+        for annot in annot_candidates:
 
-            trajectory = trajectory - np.array([roi_xxyy[2], roi_xxyy[0]])
+            annot = annot - np.array([roi_xxyy[2], roi_xxyy[0]])
 
-            # filter trajectories according to current roi_xxyy
-            is_in_roi = np.logical_and(trajectory[:, 0] > 0, trajectory[:, 0] < sat_image.shape[1])
+            # # filter trajectories according to current roi_xxyy
+            is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image.shape[1])
             if not np.any(is_in_roi):
                 continue
-            is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] > 0)
-            if not np.any(is_in_roi):
-                continue
-            is_in_roi = np.logical_and(is_in_roi, trajectory[:, 1] < sat_image.shape[0])
+            is_in_roi = np.logical_and(is_in_roi, annot[:, 1] > 0)
             if not np.any(is_in_roi):
                 continue
 
-            trajectory = trajectory[is_in_roi]
+            is_in_roi = np.logical_and(is_in_roi, annot[:, 1] < sat_image.shape[0])
+            if not np.any(is_in_roi):
+                continue
+
+
+            annot = annot[is_in_roi]
 
             # resample trajectory to have equally distant points
-            trajectory = resample_trajectory(trajectory, dist=5)
+            annot = resample_trajectory(annot, dist=5)
 
             # filter based on number of points
-            if len(trajectory) < 15:
-                continue
+            if "tracklets" in source:
+                if len(annot) < 15:
+                    continue
 
             # and on physical length of trajectory
-            total_length = np.sum(np.linalg.norm(trajectory[1:] - trajectory[:-1], axis=1))
-            if total_length < 50:
-                continue
+            if "tracklets" in source:
+                total_length = np.sum(np.linalg.norm(annot[1:] - annot[:-1], axis=1))
+                if total_length < 50:
+                    continue
 
-            trajectories.append(trajectory)
+            annots.append(annot)
 
-        if len(trajectories) < 1:
+        if len(annots) < 1:
             continue
 
-        min_distance_from_center = min([np.min(np.linalg.norm(trajectory - np.array(sat_image.shape[:2]) / 2, axis=1)) for trajectory in trajectories])
+        min_distance_from_center = min([np.min(np.linalg.norm(trajectory - np.array(sat_image.shape[:2]) / 2, axis=1)) for trajectory in annots])
         if min_distance_from_center > 30:
             continue
 
@@ -455,39 +475,50 @@ def process_chunk(sparse, roi_xxyy_list, export_final, trajectories_, lanes_, sa
 
             return sdf
 
-        # Filter out redundant trajectories:
-        filtered_trajectories = []
-        global_sdf = np.zeros(sat_image.shape[0:2], dtype=np.float32)
 
-        for t in trajectories:
-            if len(filtered_trajectories) == 0:
-                filtered_trajectories.append(t)
-            t_sdf = get_sdf(t)
+        if "tracklets" in source:
+            # Filter out redundant trajectories:
+            filtered_annots = []
+            global_sdf = np.zeros(sat_image.shape[0:2], dtype=np.float32)
 
-            # get overlap between t_sdf and global_sdf
-            overlap = np.sum(np.logical_and(t_sdf > 0.1, global_sdf > 0.1)) + 1
-            t_sdf_sum = np.sum(t_sdf > 0.1)
+            for t in annots:
+                if len(filtered_annots) == 0:
+                    filtered_annots.append(t)
+                t_sdf = get_sdf(t)
 
-            if t_sdf_sum / overlap > 2:
-                filtered_trajectories.append(t)
-                global_sdf += t_sdf
-            else:
-                continue
+                # get overlap between t_sdf and global_sdf
+                overlap = np.sum(np.logical_and(t_sdf > 0.1, global_sdf > 0.1)) + 1
+                t_sdf_sum = np.sum(t_sdf > 0.1)
+
+                if t_sdf_sum / overlap > 2:
+                    filtered_annots.append(t)
+                    global_sdf += t_sdf
+                else:
+                    continue
 
         # Whether to export sparse or dense trajectory annotations
-        if sparse:
-            trajectories = filtered_trajectories
+        if source == "tracklets_sparse":
+            trajectories = filtered_annots
             output_name = "sparse"
-        else:
+        elif source == "tracklets_dense":
             output_name = "dense"
+            trajectories = annots
+        elif source == "lanes":
+            output_name = "lanes"
+            trajectories = annots
+        else:
+            raise ValueError("Invalid source")
+
 
         G = initialize_graph(roi_xxyy, r_min=r_min)
 
         for trajectory in trajectories:
 
             # check length of trajectory
-            if np.linalg.norm(trajectory[0] - trajectory[-1]) < 50:
-                continue
+            if "tracklets" in source:
+                if np.linalg.norm(trajectory[0] - trajectory[-1]) < 50:
+                    print("skipping trajectory with length < 50")
+                    continue
 
             # Now we update the angular gridmap
             for i in range(len(trajectory) - 1):
@@ -508,8 +539,10 @@ def process_chunk(sparse, roi_xxyy_list, export_final, trajectories_, lanes_, sa
         node_probabilities = np.exp(log_odds_n) / (1 + np.exp(log_odds_n))
         edge_probabilities = np.exp(log_odds_e) / (1 + np.exp(log_odds_e))
 
-        if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 20:
+        if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 10:
+            print("Only {} edges with probability > 0.5".format(np.count_nonzero(edge_probabilities[edge_probabilities > 0.5])))
             continue
+
 
         # rescale probabilities
         node_probabilities = (node_probabilities - np.min(node_probabilities)) / (np.max(node_probabilities) - np.min(node_probabilities))
@@ -593,7 +626,7 @@ def process_chunk(sparse, roi_xxyy_list, export_final, trajectories_, lanes_, sa
                              width=1,
                              )
 
-            plt.savefig("{}/{}.png".format(out_path, sample_id), dpi=400)
+            plt.savefig("{}/{}-{}.png".format(out_path, sample_id, output_name), dpi=400)
 
             # preprocess sample into pth file
             preprocess_sample(G,
@@ -616,7 +649,7 @@ if __name__ == "__main__":
     parser.add_argument("--export_final", action="store_true")
     parser.add_argument("--city_name", type=str, default="data")
     parser.add_argument("--out_path_root", type=str, default="data")
-    parser.add_argument("--sparse", action="store_true")
+    parser.add_argument("--source", type=str, default="tracklets_sparse", choices=["tracklets_sparse", "tracklets_dense", "lanes"])
     args = parser.parse_args()
 
     out_path_root = args.out_path_root
@@ -626,7 +659,7 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 1
+    num_cpus = 4
     r_min = 10  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
@@ -650,10 +683,14 @@ if __name__ == "__main__":
     roi_xxyy_list = roi_xxyy_list[0:10000]
     print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
 
-    if args.sparse:
+    if args.source == "tracklets_sparse":
         print("Exporting SPARSE tracklet annotations!")
-    else:
+    elif args.source == "tracklets_dense":
         print("Exporting DENSE tracklet annotations!")
+    elif args.source == "lanes":
+        print("Exporting LANE annotations!")
+    else:
+        raise ValueError("Invalid source!")
 
     all_scenario_files = np.loadtxt("/home/zuern/self-supervised-graph/aggregation/scenario_files.txt", dtype=str).tolist()
 
@@ -727,7 +764,7 @@ if __name__ == "__main__":
 
     # single core
     if num_cpus <= 1:
-        process_chunk(args.sparse,
+        process_chunk(args.source,
                       roi_xxyy_list,
                       export_final,
                       trajectories_,
@@ -748,7 +785,7 @@ if __name__ == "__main__":
         num_chunks = int(np.ceil(num_samples / num_cpus))
         roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
 
-        arguments = zip(repeat(args.sparse),
+        arguments = zip(repeat(args.source),
                         roi_chunks,
                         repeat(export_final),
                         repeat(trajectories_),

@@ -1,21 +1,21 @@
 export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 
 # iterate over all cities
-#city_names=(pittsburgh miami washington paloalto austin detroit)
-city_names=(pittsburgh)
+#CITIES=(pittsburgh miami washington paloalto austin detroit)
+CITIES=(pittsburgh)
+
+EXP="exp-05-01-23"
 
 
-for city_name in "${city_names[@]}"; do
-    echo "Processing $city_name !"
-    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-pre --sparse
-    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-pre
+for CITY in "${CITIES[@]}"; do
+    echo "Processing $CITY !"
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /data/autograph/$EXP/$CITY-pre --source tracklets_sparse
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY  --out_path_root /data/autograph/$EXP/$CITY-pre --source tracklets_dense
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY  --out_path_root /data/autograph/$EXP/$CITY-pre --source lanes
 
-    ~/anaconda3/envs/geometric/bin/python infer_regressor.py --out_path_root /data/autograph/sparse/$city_name-pre --checkpoint ../checkpoints/pit/regressor_cosmic-sponge-2_0040-0.41017.pth
+    ~/anaconda3/envs/geometric/bin/python infer_regressor.py --out_path_root /data/autograph/$EXP/$CITY-pre --checkpoint ../checkpoints/pit/regressor_cosmic-sponge-2_0040-0.41017.pth
 
-    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-post --export_final --sparse
-    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $city_name --out_path_root /data/autograph/sparse/$city_name-post --export_final
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY  --out_path_root /data/autograph/$EXP/$CITY-post --export_final --source tracklets_sparse
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY  --out_path_root /data/autograph/$EXP/$CITY-post --export_final --source tracklets_dense
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY  --out_path_root /data/autograph/$EXP/$CITY-post --export_final --source lanes
 done
-
-
-# train the model
-#~/anaconda3/envs/geometric/bin/python train_lanegnn.py --config cfg-rittersport.yaml
