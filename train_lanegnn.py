@@ -23,7 +23,6 @@ from data.datasets import PreprocessedDataset
 from metrics.metrics import calc_all_metrics
 
 
-
 class Trainer():
 
     def __init__(self, params, model, dataloader_train, dataloader_val, optimizer):
@@ -358,6 +357,7 @@ def main():
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
+    parser.add_argument('--target', type=str, choices=['sparse', "dense", "lanes"], help="define the target that is used")
 
     opt = parser.parse_args()
 
@@ -422,8 +422,15 @@ def main():
 
     train_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'train')
     val_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'val')
-    dataset_train = PreprocessedDataset(path=train_path, num_samples=10, in_layers=in_layers)
-    dataset_val = PreprocessedDataset(path=val_path, num_samples=10, in_layers=in_layers)
+
+    dataset_train = PreprocessedDataset(path=train_path,
+                                        num_samples=100,
+                                        in_layers=in_layers,
+                                        target=opt.target,)
+    dataset_val = PreprocessedDataset(path=val_path,
+                                      num_samples=10,
+                                      in_layers=in_layers,
+                                      target=opt.target)
 
     if params.model.dataparallel:
         dataloader_obj = DataListLoader

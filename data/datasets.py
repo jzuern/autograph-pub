@@ -119,25 +119,26 @@ class RegressorDataset(torch.utils.data.Dataset):
 
 class PreprocessedDataset(torch_geometric.data.Dataset):
 
-    def __init__(self, path, split='train', num_samples=1000000, in_layers=""):
+    def __init__(self, path, split='train', target=None, num_samples=1000000, in_layers=""):
         super(PreprocessedDataset, self).__init__(path)
         print("Loading preprocessed dataset from {}".format(path))
 
         self.path = path
         self.split = split
         self.in_layers = in_layers
+        self.target = target
 
-        self.pth_files = sorted(glob(path + '/*-sparse.pth'))
+        self.pth_files = sorted(glob(path + '/*-{}.pth'.format(self.target)))
         print("Found {} files".format(len(self.pth_files)))
 
         self.pth_files = self.pth_files[:num_samples]
         print("Using {} files".format(len(self.pth_files)))
 
         if "sdf" in in_layers:
-            self.sdf_files = [f.replace("-post", "-pre").replace("-sparse.pth", "-sdf-tracklets-sparse.png") for f in self.pth_files]
+            self.sdf_files = [f.replace("-post", "-pre").replace("-{}.pth".format(self.target), "-sdf-tracklets-{}.png".format(self.target)) for f in self.pth_files]
             assert all([os.path.exists(f) for f in self.sdf_files])
         if "angle" in in_layers:
-            self.angle_files = [f.replace("-post", "-pre").replace("-sparse.pth", "-angles-tracklets-sparse.png") for f in self.pth_files]
+            self.angle_files = [f.replace("-post", "-pre").replace("-{}.pth".format(self.target), "-angles-tracklets-{}.png".format(self.target)) for f in self.pth_files]
             assert all([os.path.exists(f) for f in self.angle_files])
 
         self.check_files()
