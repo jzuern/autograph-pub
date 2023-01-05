@@ -26,8 +26,8 @@ def weighted_mse_loss(input, target, weight):
     return torch.mean(weight * (input - target) ** 2)
 
 # Calculate metrics according to torchmetrics
-precision = Precision(task="binary", average='none', mdmc_average='global')
-recall = Recall(task="binary", average='none', mdmc_average='global')
+#precision = Precision(task="binary", average='none', mdmc_average='global')
+#recall = Recall(task="binary", average='none', mdmc_average='global')
 iou = JaccardIndex(task="binary", reduction='none', num_classes=2, ignore_index=0)
 f1 = F1Score(average='none', mdmc_average='global', num_classes=2, ignore_index=0)
 
@@ -37,14 +37,14 @@ def calc_torchmetrics(seg_preds, seg_gts, name):
     seg_preds = torch.tensor(seg_preds)
     seg_gts = torch.tensor(seg_gts)
 
-    p = precision(seg_preds, seg_gts).numpy()
-    r = recall(seg_preds, seg_gts).numpy()
+    #p = precision(seg_preds, seg_gts).numpy()
+    #r = recall(seg_preds, seg_gts).numpy()
     i = iou(seg_preds, seg_gts).numpy()
     f = f1(seg_preds, seg_gts).numpy()
 
     metrics = {
-        'eval/precision_{}'.format(name): p.item(),
-        'eval/recall_{}'.format(name): r.item(),
+        #'eval/precision_{}'.format(name): p.item(),
+        #'eval/recall_{}'.format(name): r.item(),
         'eval/iou_{}'.format(name): i.item(),
         'eval/f1_{}'.format(name): f[1],
     }
@@ -70,7 +70,6 @@ class Trainer():
 
         if self.params.stego:
             print("Using STEGO Loss")
-
 
         self.figure, self.axarr = plt.subplots(1, 2)
 
@@ -104,7 +103,6 @@ class Trainer():
 
             target_sdf = sdf_target.unsqueeze(1)
             target_angle = torch.cat([target_angle_x.unsqueeze(1), target_angle_y.unsqueeze(1)], dim=1)
-
 
             if self.params.model.target == "sdf":
                 pred = self.model(rgb)
@@ -232,8 +230,8 @@ class Trainer():
             seg_sdf_preds.append((pred_sdf[0] > self.threshold_sdf).cpu().numpy().astype(np.uint8)[0])
             seg_sdf_gts.append((target_sdf[0] > self.threshold_sdf).cpu().numpy().astype(np.uint8).squeeze())
 
-            target_angle = torch.arctan2(angle_y_target, angle_x_target)
-            pred_angle = torch.arctan2(pred_angle[0, 1], pred_angle[0, 0])
+            target_angle = torch.atan2(angle_y_target, angle_x_target)
+            pred_angle = torch.atan2(pred_angle[0, 1], pred_angle[0, 0])
 
             correct_angles = (torch.abs(pred_angle - target_angle)[0] < self.threshold_angle)
             correct_angles = (correct_angles * (target_sdf[0, 0] > self.threshold_sdf)).cpu().numpy().astype(np.uint8)
@@ -392,8 +390,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'dense', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, 'dense', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, 'exp-05-01-23', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, 'exp-05-01-23', "*", "val")
 
     dataset_train = RegressorDataset(path=train_path, split='train')
     dataset_val = RegressorDataset(path=val_path, split='val')
