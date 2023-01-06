@@ -452,7 +452,7 @@ def main():
     for epoch in range(params.model.num_epochs):
         trainer.train(epoch)
 
-        if epoch % 100 == 0:
+        if epoch % 10 == 0:
 
             # Evaluate
             trainer.eval()

@@ -371,8 +371,8 @@ def resample_trajectory(trajectory, dist=5):
 
 
 
-def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None):
-    #
+def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None, city_name=None):
+
     # for l in lanes_[::5]:
     #     plt.plot(l[:, 0], l[:, 1], linewidth=0.5)
     # for t in trajectories_[::5]:
@@ -388,7 +388,7 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
     else:
         raise ValueError("Invalid source")
 
-    for roi_xxyy in tqdm(roi_xxyy_list):
+    for roi_num, roi_xxyy in tqdm(enumerate(roi_xxyy_list), total=len(roi_xxyy_list)):
 
         if centerline_image_ is not None:
             if np.sum(centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]]) == 0:
@@ -540,9 +540,11 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
         edge_probabilities = np.exp(log_odds_e) / (1 + np.exp(log_odds_e))
 
         if np.count_nonzero(edge_probabilities[edge_probabilities > 0.5]) < 10:
-            print("Only {} edges with probability > 0.5".format(np.count_nonzero(edge_probabilities[edge_probabilities > 0.5])))
+            #print("Only {} edges with probability > 0.5".format(np.count_nonzero(edge_probabilities[edge_probabilities > 0.5])))
             continue
 
+        #roi_usable[roi_num] = True
+        #continue
 
         # rescale probabilities
         node_probabilities = (node_probabilities - np.min(node_probabilities)) / (np.max(node_probabilities) - np.min(node_probabilities))
@@ -563,6 +565,7 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
         Image.fromarray(sat_image).save("{}/{}-rgb.png".format(out_path, sample_id))
         Image.fromarray(angles_viz).save("{}/{}-angles-tracklets-{}.png".format(out_path, sample_id, output_name))
         Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets-{}.png".format(out_path, sample_id, output_name))
+
 
         if export_final:
 
@@ -641,6 +644,8 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
                               out_path=out_path,
                               output_name=output_name)
 
+    #np.save("roi_usable_{}.npy".format(city_name), roi_usable)
+
 
 if __name__ == "__main__":
 
@@ -648,6 +653,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--export_final", action="store_true")
     parser.add_argument("--city_name", type=str, default="data")
+    parser.add_argument("--sat_image_root", type=str, default="/data/lanegraph/woven-data/")
     parser.add_argument("--out_path_root", type=str, default="data")
     parser.add_argument("--source", type=str, default="tracklets_sparse", choices=["tracklets_sparse", "tracklets_dense", "lanes"])
     args = parser.parse_args()
@@ -659,7 +665,7 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 4
+    num_cpus = 1
     r_min = 10  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
@@ -668,8 +674,8 @@ if __name__ == "__main__":
 
     '''find /data/argoverse2/motion-forecasting -type f -wholename '/data/argoverse2/motion-forecasting/val/*/*.parquet' > scenario_files.txt '''
 
-    sat_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}.png".format(city_name))).astype(np.uint8)
-    centerline_image_ = np.asarray(Image.open("/data/lanegraph/woven-data/{}_centerlines.png".format(city_name)))
+    sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
+    centerline_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_centerlines.png".format(city_name))))
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -680,8 +686,19 @@ if __name__ == "__main__":
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
-    roi_xxyy_list = roi_xxyy_list[0:10000]
-    print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
+    #roi_xxyy_list = roi_xxyy_list[0:1000]
+    #print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
+
+
+    roi_fname = "roi_usable_{}.npy".format(city_name)
+    if os.path.exists(roi_fname):
+        roi_usable = np.load(roi_fname)
+    else:
+        roi_usable = np.zeros(len(roi_xxyy_list), dtype=np.bool)
+
+    roi_xxyy_list = [roi_xxyy_list[i] for i in range(len(roi_xxyy_list)) if roi_usable[i]]
+
+
 
     if args.source == "tracklets_sparse":
         print("Exporting SPARSE tracklet annotations!")
@@ -772,6 +789,7 @@ if __name__ == "__main__":
                       sat_image_,
                       out_path_root,
                       centerline_image_,
+                      city_name,
                       )
     else:
 
@@ -793,6 +811,7 @@ if __name__ == "__main__":
                         repeat(sat_image_),
                         repeat(out_path_root),
                         repeat(centerline_image_),
+                        repeat(city_name),
                         )
 
         Pool(num_cpus).starmap(process_chunk, arguments)
