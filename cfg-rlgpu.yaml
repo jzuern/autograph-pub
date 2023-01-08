@@ -6,10 +6,9 @@ main:
 paths:
     home: /home/buechner/zuern/
     package: /home/buechner/zuern/self-supervised-graph/
-    #dataroot: /data3/buechner/autograph/
     dataroot: /home/buechner/zuern/autograph/
     checkpoints: /home/buechner/zuern/self-supervised-graph/checkpoints/
-    config_name: exp-05-01-23/* # preprocessed/city_name or preprocessed/*
+    config_name: exp-06-01-23-large/* # preprocessed/city_name or preprocessed/*
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
@@ -28,7 +27,7 @@ model:
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
-    num_epochs: 10000
+    num_epochs: 150
     gnn_depth: 1
     # lane_mpnn
     map_feat_dim: 64

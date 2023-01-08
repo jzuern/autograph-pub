@@ -9,8 +9,7 @@ paths:
     dataroot: /home/zuern/datasets/self-supervised-graph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    split: train
-    config_name: av2  # av2 or ind
+    config_name: exp-06-01-23-large/* # name/city_name or name/*
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
@@ -20,14 +19,16 @@ preprocessing:
     k_waypoints: 1
     visualize: False
     ego_regressor_num_channels: 4
+    augment: False
 model:
     dataparallel: True
     device: cuda
     batch_size: 4
+    batch_size_reg: 16
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
-    num_epochs: 10000
+    num_epochs: 150
     gnn_depth: 1
     # lane_mpnn
     map_feat_dim: 64
@@ -36,8 +37,8 @@ model:
     msg_dim: 32
     edge_geo_dim: 16
     # end_of_archs
-    in_channels: 4  # number of channels of image
-    loader_workers: 4
+    in_layers: rgb,sdf,angle  # which inputs to use for LaneGNN map encoder
+    loader_workers: 16
     weight_decay: 1e-4 #0.0001
     ignore_low_scores: False
     checkpoint:

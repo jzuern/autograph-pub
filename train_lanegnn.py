@@ -359,6 +359,8 @@ def main():
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
     parser.add_argument('--target', type=str, choices=['sparse', "dense", "lanes"], help="define the target that is used")
+    parser.add_argument('--in_layers', type=str, choices=['rgb', "sdf", "angles"], help="define the map feature encoder input layers")
+    parser.add_argument('--gnn_depth', type=int, help="define the depth of the GNN (number of MP steps)")
 
     opt = parser.parse_args()
 
@@ -374,7 +376,7 @@ def main():
         wandb.init(
             entity='jannik-zuern',
             project='autograph-lanegnn',
-            notes='v0.1',
+            notes='v0.2',
             settings=wandb.Settings(start_method="fork"),
         )
         wandb.config.update(params.paths)
@@ -383,7 +385,7 @@ def main():
 
 
     # -------  Model, optimizer and data initialization ------
-    in_layers = params.model.in_layers
+    in_layers = opt.in_layers
     print("Using the following input layers: ", in_layers)
     in_channels = 0
     if "rgb" in in_layers:
