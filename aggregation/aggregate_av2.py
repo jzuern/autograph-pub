@@ -348,7 +348,13 @@ def dijkstra_trajectories(G, trajectories, imsize):
                                   np.sin(global_angle),
                                   mask=global_mask[:, :, 0])
 
-    return G, global_sdf, global_angle, angles_viz
+
+    intersections = np.zeros_like(global_angle, dtype=np.uint8)
+    for n in G.nodes:
+        if len(G.nodes[n]["angle_peaks"]) > 1:
+            cv2.circle(intersections, (int(G.nodes[n]["pos"][0]), int(G.nodes[n]["pos"][1])), 5, 1, -1)
+
+    return G, global_sdf, global_angle, angles_viz, intersections
 
 
 def resample_trajectory(trajectory, dist=5):
@@ -531,7 +537,7 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
         G = angle_kde(G)
 
         # assign edge probabilities according to dijstra-approximated trajectories
-        G, sdf, angles, angles_viz = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
+        G, sdf, angles, angles_viz, intersections = dijkstra_trajectories(G, trajectories, imsize=sat_image.shape[:2])
 
         log_odds_e = np.array([G.edges[e]["log_odds_dijkstra"] for e in G.edges])
         log_odds_n = np.array([G.nodes[n]["log_odds_dijkstra"] for n in G.nodes])
@@ -560,11 +566,12 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
         for i, n in enumerate(G.nodes):
             G.nodes[n]["p"] = node_probabilities[i]
 
-        print("Saving to {}/{}-rgb.png".format(out_path, sample_id))
+        print("Saving to {}-{}".format(sample_id, output_name))
 
         Image.fromarray(sat_image).save("{}/{}-rgb.png".format(out_path, sample_id))
         Image.fromarray(angles_viz).save("{}/{}-angles-tracklets-{}.png".format(out_path, sample_id, output_name))
         Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets-{}.png".format(out_path, sample_id, output_name))
+        Image.fromarray(intersections * 255.).convert("L").save("{}/{}-intersection-tracklets-{}.png".format(out_path, sample_id, output_name))
 
 
         if export_final:

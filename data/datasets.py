@@ -37,7 +37,6 @@ class RegressorDataset(torch.utils.data.Dataset):
         self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
         self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
 
-
         # check if all files are present
         assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files)
 
@@ -89,10 +88,11 @@ class RegressorDataset(torch.utils.data.Dataset):
 
         # convert from angles to unit circle xy coordinates
         # to hsv to get hue
-        angles = cv2.cvtColor(angles, cv2.COLOR_BGR2HSV)
+        angles_loaded = cv2.cvtColor(angles, cv2.COLOR_BGR2HSV)
         angles_mask = (angles[:, :, 1] > 0).astype(np.uint8)
 
-        angles = angles[:, :, 0] / 255.0 * 2 * np.pi - np.pi
+        #angles = angles_loaded[:, :, 0] / 255.0 * 2 * np.pi - np.pi
+        angles = angles_loaded[:, :, 0] / 255.0
 
         angles_x = np.cos(angles)
         angles_y = np.sin(angles)
@@ -102,6 +102,7 @@ class RegressorDataset(torch.utils.data.Dataset):
         angles_x = torch.from_numpy(angles_x).float()
         angles_y = torch.from_numpy(angles_y).float()
         angles_mask = torch.from_numpy(angles_mask).float()
+        angles = torch.from_numpy(angles).float()
         rgb = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
 
         return_dict = {
@@ -109,6 +110,7 @@ class RegressorDataset(torch.utils.data.Dataset):
             'angles_mask': angles_mask,
             'angles_x': angles_x,
             'angles_y': angles_y,
+            'angles': angles,
             'rgb': rgb
         }
 

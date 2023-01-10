@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 from shapely.geometry import LineString
 
 
-from metrics.apls import compute_apls_metric, make_graphs
-from metrics.geo_topo import Evaluator as GeoTopoEvaluator
+#from metrics.apls import compute_apls_metric, make_graphs
+#from metrics.geo_topo import Evaluator as GeoTopoEvaluator
 
 
 def calc_all_metrics(graph_gt, graph_pred, split, imsize=[256, 256]):
@@ -23,39 +23,39 @@ def calc_all_metrics(graph_gt, graph_pred, split, imsize=[256, 256]):
 
     iou = calc_iou(graph_gt, graph_pred, imsize)
 
-    # # Try to calculate APLS metric
-    try:
-        apls = calc_apls(graph_gt, graph_pred)
-    except Exception as e:
-        print("APLS metric calculation failed: ", e)  #  File "networkx/classes/graph.py", line 1004, in remove_edge
-        apls = 0.0
-
-    # Try to calculate GEO and TOPO metrics
-    try:
-        graph_gt_ = nx_to_geo_topo_format(graph_gt)
-        graph_pred_ = nx_to_geo_topo_format(graph_pred)
-        geo_topo_evaluator = GeoTopoEvaluator(graph_gt_, graph_pred_)
-        geo_precision, geo_recall, topo_precision, topo_recall = geo_topo_evaluator.topoMetric()
-    except Exception as e:
-        geo_precision = 0.0
-        geo_recall = 0.0
-        topo_precision = 0.0
-        topo_recall = 0.0
-        print("Error calculating GEO and TOPO metrics: {}. Continuing".format(e))
-    if np.any(np.isnan([geo_precision, geo_recall, topo_precision, topo_recall])):
-        geo_precision = 0.0
-        geo_recall = 0.0
-        topo_precision = 0.0
-        topo_recall = 0.0
+    # # # Try to calculate APLS metric
+    # try:
+    #     apls = calc_apls(graph_gt, graph_pred)
+    # except Exception as e:
+    #     print("APLS metric calculation failed: ", e)  #  File "networkx/classes/graph.py", line 1004, in remove_edge
+    #     apls = 0.0
+    #
+    # # Try to calculate GEO and TOPO metrics
+    # try:
+    #     graph_gt_ = nx_to_geo_topo_format(graph_gt)
+    #     graph_pred_ = nx_to_geo_topo_format(graph_pred)
+    #     geo_topo_evaluator = GeoTopoEvaluator(graph_gt_, graph_pred_)
+    #     geo_precision, geo_recall, topo_precision, topo_recall = geo_topo_evaluator.topoMetric()
+    # except Exception as e:
+    #     geo_precision = 0.0
+    #     geo_recall = 0.0
+    #     topo_precision = 0.0
+    #     topo_recall = 0.0
+    #     print("Error calculating GEO and TOPO metrics: {}. Continuing".format(e))
+    # if np.any(np.isnan([geo_precision, geo_recall, topo_precision, topo_recall])):
+    #     geo_precision = 0.0
+    #     geo_recall = 0.0
+    #     topo_precision = 0.0
+    #     topo_recall = 0.0
 
 
     metrics_dict = {
         '{}/iou'.format(split): iou,
-        '{}/apls'.format(split): apls,
-        '{}/geo_precision'.format(split): geo_precision,
-        '{}/geo_recall'.format(split): geo_recall,
-        '{}/topo_precision'.format(split): topo_precision,
-        '{}/topo_recall'.format(split): topo_recall,
+        # '{}/apls'.format(split): apls,
+        # '{}/geo_precision'.format(split): geo_precision,
+        # '{}/geo_recall'.format(split): geo_recall,
+        # '{}/topo_precision'.format(split): topo_precision,
+        # '{}/topo_recall'.format(split): topo_recall,
     }
 
     return metrics_dict

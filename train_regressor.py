@@ -25,6 +25,7 @@ from lanegnn.utils import ParamLib, visualize_angles
 def weighted_mse_loss(input, target, weight):
     return torch.mean(weight * (input - target) ** 2)
 
+
 # Calculate metrics according to torchmetrics
 #precision = Precision(task="binary", average='none', mdmc_average='global')
 #recall = Recall(task="binary", average='none', mdmc_average='global')
@@ -101,8 +102,10 @@ class Trainer():
             target_angle_x = data["angles_x"].cuda()
             target_angle_y = data["angles_y"].cuda()
 
+            target_angle = data["angles"].cuda().unsqueeze(1)
+
             target_sdf = sdf_target.unsqueeze(1)
-            target_angle = torch.cat([target_angle_x.unsqueeze(1), target_angle_y.unsqueeze(1)], dim=1)
+            #target_angle = torch.cat([target_angle_x.unsqueeze(1), target_angle_y.unsqueeze(1)], dim=1)
 
             if self.params.model.target == "sdf":
                 pred = self.model(rgb)
@@ -125,16 +128,18 @@ class Trainer():
                 (pred, features) = self.model(rgb)
                 pred = torch.nn.functional.interpolate(pred, size=target_sdf.shape[2:], mode='bilinear', align_corners=True)
 
-                #pred = self.model(rgb)
-                pred_angle = torch.nn.Tanh()(pred[:, :2])
-                pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
+                #red_angle = torch.nn.Tanh()(pred[:, :2])
+                #pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
+                pred_angle = torch.nn.Sigmoid()(pred[:, :1])
+                pred_sdf = torch.nn.Sigmoid()(pred[:, 1:])
 
                 loss_weight = target_sdf > 0.5
                 loss_weight = loss_weight.float()
 
                 loss_dict = {
                     'loss_sdf': torch.nn.BCELoss()(pred_sdf, target_sdf),
-                    'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
+                    #'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
+                    'loss_angles': torch.nn.BCELoss(weight=loss_weight)(pred_angle, target_angle),
                 }
 
             else:
@@ -164,17 +169,29 @@ class Trainer():
                 elif self.params.model.target == "both":
                     mask_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
                     mask_target = angle_mask_target[0].cpu().detach().numpy()
+                    pred_angle = pred_angle[0, 0].cpu().detach().numpy()
+                    target_angle = target_angle[0, 0].cpu().detach().numpy()
 
-                    pred_viz = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=mask_pred)
-                    pred_viz_nomask = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=None)
-                    target_viz = visualize_angles(target_angle_x[0].cpu().numpy(), target_angle_y[0].cpu().numpy(), mask=mask_target)
+                    print("pred", pred_angle.min(), pred_angle.max())
+                    print("target", target_angle.min(), target_angle.max())
 
-                    cv2.imshow("mask_pred", mask_pred)
-                    cv2.imshow("mask_target", mask_target)
+                    mask_pred = np.concatenate([mask_pred[..., np.newaxis], mask_pred[..., np.newaxis], mask_pred[..., np.newaxis]], axis=2)
+                    mask_pred = (mask_pred > 0.3).astype(np.uint8)
+                    mask_target = np.concatenate([mask_target[..., np.newaxis], mask_target[..., np.newaxis], mask_target[..., np.newaxis]], axis=2)
+                    mask_target = (mask_target > 0.3).astype(np.uint8)
+
+                    pred_viz = cv2.applyColorMap((pred_angle * 255).astype(np.uint8), cv2.COLORMAP_TURBO) * mask_pred
+                    target_viz = cv2.applyColorMap((target_angle * 255).astype(np.uint8), cv2.COLORMAP_TURBO) * mask_target
+
+                    #pred_viz_nomask = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=None)
+                    #target_viz = visualize_angles(target_angle_x[0].cpu().numpy(), target_angle_y[0].cpu().numpy(), mask=mask_target)
+
+                    cv2.imshow("mask_pred", mask_pred * 255)
+                    cv2.imshow("mask_target", mask_target * 255)
 
                 cv2.imshow("angle target", target_viz)
                 cv2.imshow("angle pred", pred_viz)
-                cv2.imshow("angle pred nomask", pred_viz_nomask)
+                #cv2.imshow("angle pred nomask", pred_viz_nomask)
 
                 cv2.waitKey(1)
 
@@ -373,7 +390,7 @@ def main():
         model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=2).to(params.model.device)
     elif params.model.target == "both":
         #model = build_network(snapshot=None, backend='resnet101', num_channels=3, n_classes=3).to(params.model.device)
-        model = DeepLabv3Plus(models.resnet101(pretrained=True), num_classes=3).to(params.model.device)
+        model = DeepLabv3Plus(models.resnet101(pretrained=True), num_classes=2).to(params.model.device)
 
     # Make model parallel if available
     if params.model.dataparallel:
@@ -390,8 +407,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'exp-05-01-23', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, 'exp-05-01-23', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, 'exp-08-01-23', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, 'exp-08-01-23', "*", "val")
 
     dataset_train = RegressorDataset(path=train_path, split='train')
     dataset_val = RegressorDataset(path=val_path, split='val')
@@ -415,7 +432,8 @@ def main():
         #if not params.main.disable_wandb:
         if epoch % 2 == 0:
 
-            eval_loss = trainer.eval(epoch)
+            #eval_loss = trainer.eval(epoch)
+            eval_loss = 0.0
 
             try:
                 wandb_run_name = wandb.run.name

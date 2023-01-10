@@ -4,7 +4,7 @@ export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 #CITIES=(pittsburgh miami washington paloalto austin detroit)
 CITIES=(pittsburgh)
 
-EXP="exp-06-01-23-large"
+EXP="exp-09-01-23"
 OUT_DIR="/home/zuern/datasets/autograph"
 
 for CITY in "${CITIES[@]}"; do

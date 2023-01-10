@@ -22,6 +22,8 @@ from lanegnn.utils import ParamLib, assign_edge_lengths
 from data.datasets import PreprocessedDataset
 from metrics.metrics import calc_all_metrics
 
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 
 class Trainer():
 
@@ -330,6 +332,10 @@ class Trainer():
         nl = np.mean(node_losses)
         el = np.mean(edge_losses)
 
+
+        metrics_dict = calc_all_metrics(graph_gt_nx, graph_pred_nx, split=split)
+        metrics_dict_list.append(metrics_dict)
+
         # Calculate mean values for all metrics in metrics_dict
         # metrics_dict_mean = {}
         # for key in metrics_dict_list[0].keys():
@@ -359,7 +365,7 @@ def main():
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
     parser.add_argument('--target', type=str, choices=['sparse', "dense", "lanes"], help="define the target that is used")
-    parser.add_argument('--in_layers', type=str, choices=['rgb', "sdf", "angles"], help="define the map feature encoder input layers")
+    parser.add_argument('--in_layers', type=str, help="define the map feature encoder input layers")
     parser.add_argument('--gnn_depth', type=int, help="define the depth of the GNN (number of MP steps)")
 
     opt = parser.parse_args()

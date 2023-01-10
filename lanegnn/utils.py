@@ -37,22 +37,18 @@ def visualize_angles(a_x, a_y, mask):
     angle = np.arctan2(a_y, a_x)
     angle = (angle + np.pi) / (2 * np.pi)
 
-    # plot angle in hsv color space
-    angle_hsv = np.ones((angle.shape[0], angle.shape[1], 3), dtype=np.float32)
-    angle_hsv[..., 0] = angle
-    angle_hsv = (angle_hsv * 255).astype(np.uint8)
+    angle3 = np.zeros((angle.shape[0], angle.shape[1], 3), dtype=np.float32)
+    angle3[..., 0] = angle
+    angle3 = (angle3 * 255).astype(np.uint8)
+    mask = np.logical_and(a_x != 0, a_y != 0) * 255
+    angle3[..., 1] = mask
 
-    angle_rgb = cv2.cvtColor(angle_hsv, cv2.COLOR_HSV2RGB)
+    fig, axarr = plt.subplots(1, 2, figsize=(10, 5))
+    axarr[0].imshow(angle3)
+    axarr[1].imshow(mask)
+    plt.show()
 
-    mask = np.concatenate([mask[..., np.newaxis], mask[..., np.newaxis], mask[..., np.newaxis]], axis=2)
-    mask = (mask > 0.3).astype(np.uint8)
-
-    angle_rgb = angle_rgb * mask
-
-    return angle_rgb
-
-
-
+    return angle3
 
 def unbatch(src, batch, dim: int = 0):
     sizes = degree(batch, dtype=torch.long).tolist()
