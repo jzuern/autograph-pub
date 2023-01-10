@@ -672,7 +672,7 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 1
+    num_cpus = 12
     r_min = 10  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
@@ -693,8 +693,8 @@ if __name__ == "__main__":
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
-    #roi_xxyy_list = roi_xxyy_list[0:1000]
-    #print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
+    roi_xxyy_list = roi_xxyy_list[0:500]
+    print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
 
 
     roi_fname = "roi_usable_{}.npy".format(city_name)
@@ -704,7 +704,6 @@ if __name__ == "__main__":
         roi_usable = np.zeros(len(roi_xxyy_list), dtype=np.bool)
 
     roi_xxyy_list = [roi_xxyy_list[i] for i in range(len(roi_xxyy_list)) if roi_usable[i]]
-
 
 
     if args.source == "tracklets_sparse":
