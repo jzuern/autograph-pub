@@ -43,11 +43,6 @@ def visualize_angles(a_x, a_y, mask):
     mask = np.logical_and(a_x != 0, a_y != 0) * 255
     angle3[..., 1] = mask
 
-    fig, axarr = plt.subplots(1, 2, figsize=(10, 5))
-    axarr[0].imshow(angle3)
-    axarr[1].imshow(mask)
-    plt.show()
-
     return angle3
 
 def unbatch(src, batch, dim: int = 0):

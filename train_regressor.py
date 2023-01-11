@@ -97,22 +97,24 @@ class Trainer():
 
             # loss and optim
             sdf_target = data["sdf"].cuda()
+            intersection_target = data["intersection"].cuda()
             rgb = data["rgb"].cuda()
             angle_mask_target = data["angles_mask"].cuda()
             target_angle_x = data["angles_x"].cuda()
             target_angle_y = data["angles_y"].cuda()
 
             target_angle = data["angles"].cuda().unsqueeze(1)
-
-            target_sdf = sdf_target.unsqueeze(1)
             #target_angle = torch.cat([target_angle_x.unsqueeze(1), target_angle_y.unsqueeze(1)], dim=1)
+
+            #target = sdf_target.unsqueeze(1)
+            target = intersection_target.unsqueeze(1)
 
             if self.params.model.target == "sdf":
                 pred = self.model(rgb)
                 pred = torch.nn.Sigmoid()(pred)
 
                 loss_dict = {
-                    'loss_sdf': torch.nn.BCELoss()(pred, target_sdf),
+                    'loss_sdf': torch.nn.BCELoss()(pred, target),
                 }
 
             elif self.params.model.target == "angle":
@@ -126,27 +128,22 @@ class Trainer():
             elif self.params.model.target == "both":
 
                 (pred, features) = self.model(rgb)
-                pred = torch.nn.functional.interpolate(pred, size=target_sdf.shape[2:], mode='bilinear', align_corners=True)
-
-                #red_angle = torch.nn.Tanh()(pred[:, :2])
-                #pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
+                pred = torch.nn.functional.interpolate(pred, size=target.shape[2:], mode='bilinear', align_corners=True)
                 pred_angle = torch.nn.Sigmoid()(pred[:, :1])
                 pred_sdf = torch.nn.Sigmoid()(pred[:, 1:])
 
-                loss_weight = target_sdf > 0.5
-                loss_weight = loss_weight.float()
+                loss_weight = (target > 0.5).float()
 
                 loss_dict = {
-                    'loss_sdf': torch.nn.BCELoss()(pred_sdf, target_sdf),
-                    #'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
-                    'loss_angles': torch.nn.BCELoss(weight=loss_weight)(pred_angle, target_angle),
+                    'loss_sdf': torch.nn.BCELoss()(pred_sdf, target),
+                    #'loss_angles': torch.nn.BCELoss(weight=loss_weight)(pred_angle, target_angle),
                 }
 
             else:
                 raise Exception("unknown target")
 
             if self.params.stego:
-                loss_dict["stego"] = stego_loss(features, target_sdf)
+                loss_dict["stego"] = stego_loss(features, target)
 
             loss = sum(loss_dict.values())
             loss.backward()
@@ -168,15 +165,14 @@ class Trainer():
                     target_viz = visualize_angles(target_angle_x[0].cpu().numpy(), target_angle_y[0].cpu().numpy(), sdf_target[0].cpu().numpy())
                 elif self.params.model.target == "both":
                     mask_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
-                    mask_target = angle_mask_target[0].cpu().detach().numpy()
+                    #mask_target = angle_mask_target[0].cpu().detach().numpy()
+                    mask_target = intersection_target[0].cpu().detach().numpy()
+
                     pred_angle = pred_angle[0, 0].cpu().detach().numpy()
                     target_angle = target_angle[0, 0].cpu().detach().numpy()
 
-                    print("pred", pred_angle.min(), pred_angle.max())
-                    print("target", target_angle.min(), target_angle.max())
-
                     mask_pred = np.concatenate([mask_pred[..., np.newaxis], mask_pred[..., np.newaxis], mask_pred[..., np.newaxis]], axis=2)
-                    mask_pred = (mask_pred > 0.3).astype(np.uint8)
+                    #mask_pred = (mask_pred > 0.3).astype(np.uint8) * 255
                     mask_target = np.concatenate([mask_target[..., np.newaxis], mask_target[..., np.newaxis], mask_target[..., np.newaxis]], axis=2)
                     mask_target = (mask_target > 0.3).astype(np.uint8)
 
@@ -186,7 +182,7 @@ class Trainer():
                     #pred_viz_nomask = visualize_angles(pred_angle[0,0].detach().cpu().numpy(), pred_angle[0, 1].detach().cpu().numpy(), mask=None)
                     #target_viz = visualize_angles(target_angle_x[0].cpu().numpy(), target_angle_y[0].cpu().numpy(), mask=mask_target)
 
-                    cv2.imshow("mask_pred", mask_pred * 255)
+                    cv2.imshow("mask_pred", mask_pred)
                     cv2.imshow("mask_target", mask_target * 255)
 
                 cv2.imshow("angle target", target_viz)
@@ -407,8 +403,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'exp-08-01-23', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, 'exp-08-01-23', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, 'exp-tmp', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, 'exp-tmp', "*", "val")
 
     dataset_train = RegressorDataset(path=train_path, split='train')
     dataset_val = RegressorDataset(path=val_path, split='val')
@@ -416,7 +412,8 @@ def main():
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,
                                   num_workers=params.model.loader_workers,
-                                  shuffle=True)
+                                  shuffle=True,
+                                  drop_last=True)
     dataloader_val = DataLoader(dataset_val,
                                  batch_size=1,
                                  num_workers=1,
@@ -440,7 +437,7 @@ def main():
             except:
                 wandb_run_name = "local_run"
 
-            fname = 'regressor_{}_{:04d}-{:.5f}.pth'.format(wandb_run_name, epoch, eval_loss)
+            fname = 'regressor_intersection_{}_{:04d}-{:.5f}.pth'.format(wandb_run_name, epoch, eval_loss)
             checkpoint_path = os.path.join(params.paths.checkpoints, fname)
             print("Saving checkpoint to {}".format(checkpoint_path))
 

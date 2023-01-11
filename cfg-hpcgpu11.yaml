@@ -9,7 +9,7 @@ paths:
     dataroot: /home/zuern/datasets/self-supervised-graph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    config_name: exp-06-01-23-large/* # name/city_name or name/*
+    config_name: exp-11-01-23/* # name/city_name or name/*
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson

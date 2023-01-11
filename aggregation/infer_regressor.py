@@ -10,6 +10,8 @@ import argparse
 from tqdm import tqdm
 from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 import torchvision.models as models
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 def get_id(filename):
@@ -21,7 +23,8 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint', type=str, default='../checkpoints/regressor-newest.pth')
     args = parser.parse_args()
 
-    regressor = DeepLabv3Plus(models.resnet101(pretrained=True), num_classes=3).cuda()
+    #regressor = DeepLabv3Plus(models.resnet101(pretrained=True), num_classes=3).cuda()
+    regressor = DeepLabv3Plus(models.resnet101(pretrained=True), num_classes=2).cuda()
 
     state_dict = torch.load(args.checkpoint)
 
@@ -33,6 +36,7 @@ if __name__ == '__main__':
 
     for sat_image_f in tqdm(sat_images):
         rgb = cv2.imread(sat_image_f)
+        #rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
         rgb_tensor = torch.FloatTensor(rgb).permute(2, 0, 1).unsqueeze(0).cuda() / 255.
 
         out_path = os.path.dirname(sat_image_f)
@@ -42,10 +46,17 @@ if __name__ == '__main__':
 
         pred = torch.nn.functional.interpolate(pred, size=rgb_tensor.shape[2:], mode='bilinear', align_corners=True)
 
-        sdf = torch.nn.Sigmoid()(pred[0, 2]).detach().cpu().numpy()
-        angles = torch.nn.Tanh()(pred[0, 0:2]).detach().cpu().numpy()
+        #sdf = torch.nn.Sigmoid()(pred[0, 2]).detach().cpu().numpy()
+        sdf = torch.nn.Sigmoid()(pred[0, 0]).detach().cpu().numpy()
+        angles = torch.nn.Sigmoid()(pred[0, 1]).detach().cpu().numpy()
 
-        angles_viz = visualize_angles(angles[0], angles[1], mask=sdf)
+        angles_viz = visualize_angles(np.cos(angles),
+                                      np.sin(angles),
+                                      mask=sdf)
+
+        plt.imshow(rgb)
+        plt.imshow(sdf, alpha=0.5)
+        plt.show()
 
         Image.fromarray(angles_viz).save("{}/{}-angles-reg.png".format(out_path, sample_id))
         Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-reg.png".format(out_path, sample_id))

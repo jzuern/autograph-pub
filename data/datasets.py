@@ -10,6 +10,10 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 
+def get_id(filename):
+    return os.path.basename(filename).split('-')[1] + '-' + os.path.basename(filename).split('-')[2]
+
+
 class RegressorDataset(torch.utils.data.Dataset):
     def __init__(self, path, split):
         self.path = path
@@ -17,11 +21,9 @@ class RegressorDataset(torch.utils.data.Dataset):
         print("Looking for files in", path)
 
         self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense.png')))
+        self.intersection_files = sorted(glob(os.path.join(path, '*-intersection-gt.png')))
         self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
-
-        def get_id(filename):
-            return os.path.basename(filename).split('-')[1] + '-' + os.path.basename(filename).split('-')[2]
 
         # check if all sdf files have same resolution
         sdf_files = self.sdf_files
@@ -36,6 +38,7 @@ class RegressorDataset(torch.utils.data.Dataset):
         self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
         self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
         self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
+        self.intersection_files = [f for f in self.intersection_files if get_id(f) in file_ids]
 
         # check if all files are present
         assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files)
@@ -46,7 +49,6 @@ class RegressorDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.sdf_files)
-
 
     def random_rotate(self, return_dict):
 
@@ -78,27 +80,25 @@ class RegressorDataset(torch.utils.data.Dataset):
 
         return return_dict
 
-
-
     def __getitem__(self, idx):
         sdf = cv2.imread(self.sdf_files[idx], cv2.IMREAD_UNCHANGED)
-        angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_ANYCOLOR)
+        intersection = cv2.imread(self.intersection_files[idx], cv2.IMREAD_UNCHANGED)
+        angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_COLOR)
+        angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
         rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
 
 
         # convert from angles to unit circle xy coordinates
         # to hsv to get hue
-        angles_loaded = cv2.cvtColor(angles, cv2.COLOR_BGR2HSV)
         angles_mask = (angles[:, :, 1] > 0).astype(np.uint8)
-
-        #angles = angles_loaded[:, :, 0] / 255.0 * 2 * np.pi - np.pi
-        angles = angles_loaded[:, :, 0] / 255.0
+        angles = angles[:, :, 0] / 255.0
 
         angles_x = np.cos(angles)
         angles_y = np.sin(angles)
 
         # to tensor
         sdf = torch.from_numpy(sdf).float() / 255.0
+        intersection = torch.from_numpy(intersection).float() / 255.0
         angles_x = torch.from_numpy(angles_x).float()
         angles_y = torch.from_numpy(angles_y).float()
         angles_mask = torch.from_numpy(angles_mask).float()
@@ -107,6 +107,7 @@ class RegressorDataset(torch.utils.data.Dataset):
 
         return_dict = {
             'sdf': sdf,
+            'intersection': intersection,
             'angles_mask': angles_mask,
             'angles_x': angles_x,
             'angles_y': angles_y,
@@ -135,7 +136,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         self.pth_files = sorted(glob(path + '/*-{}.pth'.format(self.target)))
         print("Found {} files".format(len(self.pth_files)))
 
-        self.pth_files = self.pth_files[:num_samples]
+        self.pth_files = self.pth_files[0:num_samples]
         print("Using {} files".format(len(self.pth_files)))
 
         if "sdf" in in_layers:
@@ -144,6 +145,9 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         if "angle" in in_layers:
             self.angle_files = [f.replace("-post", "-pre").replace("-{}.pth".format(self.target), "-angles-tracklets-{}.png".format(self.target)) for f in self.pth_files]
             assert all([os.path.exists(f) for f in self.angle_files])
+
+        print("Split: {}".format(self.split))
+        print("File ids: {}".format([get_id(f) for f in self.pth_files]))
 
         #self.check_files()
 

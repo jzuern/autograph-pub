@@ -27,11 +27,12 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 
 class Trainer():
 
-    def __init__(self, params, model, dataloader_train, dataloader_val, optimizer):
+    def __init__(self, params, model, dataloader_train, dataloader_val, dataloader_trainoverfit, optimizer):
 
         self.model = model
         self.dataloader_train = dataloader_train
         self.dataloader_val = dataloader_val
+        self.dataloader_trainoverfit = dataloader_trainoverfit
         self.params = params
         self.optimizer = optimizer
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -59,7 +60,7 @@ class Trainer():
     def do_logging(self, data, edge_scores_pred, node_scores_pred, plot_text):
         
         print("\nLogging synchronously...")
-        figure_log, axarr_log = plt.subplots(1, 2, figsize=(15, 8))
+        figure_log, axarr_log = plt.subplots(1, 3, figsize=(24, 8))
         plt.tight_layout()
 
         if self.params.model.dataparallel:
@@ -118,13 +119,23 @@ class Trainer():
         color_node_pred = cmap(node_scores_pred)[:, 0:4]
         color_edge_pred[:, -1] = edge_scores_pred
 
+        threshold_positive = 0.3
+        edge_scores_pred_binary = np.where(edge_scores_pred > threshold_positive, 1, 0)
+        node_scores_pred_binary = np.where(node_scores_pred > threshold_positive, 1, 0)
+
+        color_edge_pred_binary = cmap(edge_scores_pred_binary)[:, 0:4]
+        color_node_pred_binary = cmap(node_scores_pred_binary)[:, 0:4]
+        color_edge_pred_binary[:, -1] = edge_scores_pred_binary
 
         axarr_log[0].cla()
         axarr_log[1].cla()
+        axarr_log[2].cla()
         axarr_log[0].imshow(rgb)
         axarr_log[1].imshow(rgb)
+        axarr_log[2].imshow(rgb)
         axarr_log[0].axis('off')
         axarr_log[1].axis('off')
+        axarr_log[2].axis('off')
         for i in range(len(axarr_log)):
             axarr_log[i].set_xlim([0, rgb.shape[1]])
             axarr_log[i].set_ylim([rgb.shape[0], 0])
@@ -136,7 +147,7 @@ class Trainer():
                          edge_color=color_edge_target,
                          node_color=color_node_target,
                          with_labels=False,
-                         width=2, arrowsize=4,
+                         width=2, arrowsize=8,
                          node_size=20)
 
         nx.draw_networkx(graph_pred,
@@ -145,7 +156,16 @@ class Trainer():
                          edge_color=color_edge_pred,
                          node_color=color_node_pred,
                          with_labels=False,
-                         width=2, arrowsize=4,
+                         width=2, arrowsize=8,
+                         node_size=20)
+
+        nx.draw_networkx(graph_pred,
+                         ax=axarr_log[2],
+                         pos=node_pos,
+                         edge_color=color_edge_pred_binary,
+                         node_color=color_node_pred_binary,
+                         with_labels=False,
+                         width=2, arrowsize=8,
                          node_size=20)
 
         # drawing updated values
@@ -206,8 +226,8 @@ class Trainer():
             #     node_weight[data.node_scores < 0.4] = 0.0
 
             loss_dict = {
-                'edge_loss': torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores),
-                'node_loss': torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores),
+                'edge_loss': torch.nn.BCELoss()(edge_scores, data.edge_scores),
+                'node_loss': torch.nn.BCELoss()(node_scores, data.node_scores),
             }
 
             loss = sum(loss_dict.values())
@@ -240,14 +260,17 @@ class Trainer():
             wandb.log({"train/epoch": epoch})
 
 
-    def eval(self):
+    def eval(self, split):
 
         self.model.eval()
         print('Evaluating...')
 
-        random_index = np.random.randint(0, len(self.dataloader_val))
-
-        dataloader_progress = tqdm(self.dataloader_val, desc='Evaluating...')
+        if split == 'val':
+            random_index = np.random.randint(0, len(self.dataloader_val))
+            dataloader_progress = tqdm(self.dataloader_val, desc='Evaluating on VAL...')
+        elif split == 'trainoverfit':
+            random_index = np.random.randint(0, len(self.dataloader_trainoverfit))
+            dataloader_progress = tqdm(self.dataloader_trainoverfit, desc='Evaluating on TRAINOVERFIT...')
 
         node_losses = []
         edge_losses = []
@@ -281,8 +304,8 @@ class Trainer():
             node_weight = torch.ones_like(data.node_scores)
 
             try:
-                edge_loss = torch.nn.BCELoss(weight=edge_weight)(edge_scores, data.edge_scores)
-                node_loss = torch.nn.BCELoss(weight=node_weight)(node_scores, data.node_scores)
+                edge_loss = torch.nn.BCELoss()(edge_scores, data.edge_scores)
+                node_loss = torch.nn.BCELoss()(node_scores, data.node_scores)
             except Exception as e:
                 print(e)
                 continue
@@ -292,10 +315,12 @@ class Trainer():
 
             data = data.cpu()
 
-            node_scores_ = torch.round(node_scores.cpu()).int()
-            edge_scores_ = torch.round(edge_scores.cpu()).int()
-            data.edge_scores_ = torch.round(data.edge_scores).int()
-            data.node_scores_ = torch.round(data.node_scores).int()
+            positive_threshold = 0.3
+
+            node_scores_ = (node_scores.cpu() > positive_threshold).int()
+            edge_scores_ = (edge_scores.cpu() > positive_threshold).int()
+            data.edge_scores_ = (data.edge_scores > positive_threshold).int()
+            data.node_scores_ = (data.node_scores > positive_threshold).int()
 
             acc_node = Accuracy(num_classes=1, multiclass=False)(node_scores_,
                                                                  data.node_scores_)
@@ -321,7 +346,7 @@ class Trainer():
             if i_val == random_index:
                 if self.params.model.dataparallel:
                     data = data_orig
-                self.do_logging(data, edge_scores, node_scores, plot_text='test/Images')
+                self.do_logging(data, edge_scores, node_scores, plot_text='{}/Images'.format(split))
 
         re = np.mean(recall_edge_list)
         rn = np.mean(recall_node_list)
@@ -333,8 +358,8 @@ class Trainer():
         el = np.mean(edge_losses)
 
 
-        metrics_dict = calc_all_metrics(graph_gt_nx, graph_pred_nx, split=split)
-        metrics_dict_list.append(metrics_dict)
+        # metrics_dict = calc_all_metrics(graph_gt_nx, graph_pred_nx, split=split)
+        # metrics_dict_list.append(metrics_dict)
 
         # Calculate mean values for all metrics in metrics_dict
         # metrics_dict_mean = {}
@@ -343,15 +368,15 @@ class Trainer():
         #     print('{}: {:.3f}'.format(key, metrics_dict_mean[key])
 
         if not self.params.main.disable_wandb:
-            wandb.log({"test/loss_total": nl + el,
-                       "test/edge_loss": el,
-                       "test/node_loss": nl,
-                       "test/acc_edge": ae,
-                       "test/acc_node": an,
-                       "test/recall_edge": re,
-                       "test/recall_node": rn,
-                       "test/precision_edge": pe,
-                       "test/precision_node": pn}
+            wandb.log({"{}/loss_total".format(split): nl + el,
+                       "{}/edge_loss".format(split): el,
+                       "{}/node_loss".format(split): nl,
+                       "{}/acc_edge".format(split): ae,
+                       "{}/acc_node".format(split): an,
+                       "{}/recall_edge".format(split): re,
+                       "{}/recall_node".format(split): rn,
+                       "{}/precision_edge".format(split): pe,
+                       "{}/precision_node".format(split): pn}
                       )
 
 def main():
@@ -431,13 +456,18 @@ def main():
 
     train_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'train')
     val_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'val')
+    trainoverfit_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'train')
 
     dataset_train = PreprocessedDataset(path=train_path,
-                                        num_samples=None,
+                                        num_samples=50,  # None for all
                                         in_layers=in_layers,
                                         target=opt.target,)
-    dataset_val = PreprocessedDataset(path=val_path,
-                                      num_samples=None,
+    dataset_val = PreprocessedDataset(path=val_path,  # TODO: change to val_path
+                                      num_samples=10,  # None for all
+                                      in_layers=in_layers,
+                                      target=opt.target)
+    dataset_trainoverfit = PreprocessedDataset(path=trainoverfit_path,
+                                      num_samples=10,  # None for all
                                       in_layers=in_layers,
                                       target=opt.target)
 
@@ -450,12 +480,18 @@ def main():
                                       batch_size=params.model.batch_size,
                                       num_workers=params.model.loader_workers,
                                       shuffle=True)
+
     dataloader_val = dataloader_obj(dataset_val,
                                      batch_size=1,
                                      num_workers=1,
                                      shuffle=False)
 
-    trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
+    dataloader_trainoverfit = dataloader_obj(dataset_trainoverfit,
+                                     batch_size=1,
+                                     num_workers=1,
+                                     shuffle=False)
+
+    trainer = Trainer(params, model, dataloader_train, dataloader_val, dataloader_trainoverfit, optimizer)
 
     for epoch in range(params.model.num_epochs):
         trainer.train(epoch)
@@ -463,7 +499,8 @@ def main():
         if epoch % 10 == 0:
 
             # Evaluate
-            trainer.eval()
+            trainer.eval("val")
+            trainer.eval("trainoverfit")
 
             try:
                 wandb_run_name = wandb.run.name

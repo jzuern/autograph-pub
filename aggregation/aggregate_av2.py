@@ -16,7 +16,7 @@ from ray.util.multiprocessing import Pool
 import cv2
 import skfmm
 import argparse
-
+import matplotlib.pyplot as plt
 from av2.geometry.interpolate import compute_midpoint_line
 from av2.map.map_api import ArgoverseStaticMap
 from av2.datasets.motion_forecasting import scenario_serialization
@@ -297,10 +297,15 @@ def dijkstra_trajectories(G, trajectories, imsize):
     for e in G.edges:
         G.edges[e]["log_odds_dijkstra"] = 0.0
 
+
+    angles_image_list = []
+
     for t in trajectories:
 
         # create sdf of trajectory
         sdf = np.zeros(imsize, dtype=np.float32)
+        traj_angle = np.zeros(imsize, dtype=np.float32)
+
         for i in range(len(t) - 1):
             x1 = int(t[i][0])
             y1 = int(t[i][1])
@@ -310,7 +315,9 @@ def dijkstra_trajectories(G, trajectories, imsize):
 
             angle = np.arctan2(y2 - y1, x2 - x1)
             cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=12)
+            cv2.line(traj_angle, (x1, y1), (x2, y2), angle, thickness=12)
             cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
+        angles_image_list.append(traj_angle)
 
         f = 15  # distance function scale
         try:
@@ -354,6 +361,20 @@ def dijkstra_trajectories(G, trajectories, imsize):
         if len(G.nodes[n]["angle_peaks"]) > 1:
             cv2.circle(intersections, (int(G.nodes[n]["pos"][0]), int(G.nodes[n]["pos"][1])), 5, 1, -1)
 
+
+    # now we build up the divergence map. for each angle image we compare with the other angle images and save the maximum angle difference
+    # this is a measure of how much the angle changes at each pixel
+
+    angle_diff_map = np.zeros_like(global_angle, dtype=np.float32)
+    for i in range(len(angles_image_list)):
+        for j in range(i+1, len(angles_image_list)):
+            angle_diff = np.abs(angles_image_list[i] - angles_image_list[j])
+            angle_diff[angles_image_list[i] * angles_image_list[j] == 0] = 0
+            angle_diff[angle_diff < np.pi / 4] = 0
+            angle_diff_map += angle_diff
+
+    intersections = (angle_diff_map > 10).astype(np.uint8)
+
     return G, global_sdf, global_angle, angles_viz, intersections
 
 
@@ -377,7 +398,7 @@ def resample_trajectory(trajectory, dist=5):
 
 
 
-def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None, city_name=None):
+def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, intersection_image_, out_path_root, centerline_image_=None, city_name=None):
 
     # for l in lanes_[::5]:
     #     plt.plot(l[:, 0], l[:, 1], linewidth=0.5)
@@ -412,6 +433,7 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
             continue
 
         sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
+        intersection_image = intersection_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]].copy()
 
         # Filter non-square sat_images:
         if sat_image.shape[0] != sat_image.shape[1]:
@@ -572,6 +594,7 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
         Image.fromarray(angles_viz).save("{}/{}-angles-tracklets-{}.png".format(out_path, sample_id, output_name))
         Image.fromarray(sdf * 255.).convert("L").save("{}/{}-sdf-tracklets-{}.png".format(out_path, sample_id, output_name))
         Image.fromarray(intersections * 255.).convert("L").save("{}/{}-intersection-tracklets-{}.png".format(out_path, sample_id, output_name))
+        Image.fromarray(intersection_image).convert("L").save("{}/{}-intersection-gt.png".format(out_path, sample_id))
 
 
         if export_final:
@@ -672,8 +695,8 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 12
-    r_min = 10  # minimum radius of the circle for poisson disc sampling
+    num_cpus = 4
+    r_min = 7  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'train'), exist_ok=True)
@@ -683,6 +706,9 @@ if __name__ == "__main__":
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
     centerline_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_centerlines.png".format(city_name))))
+    intersection_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_intersections.png".format(city_name))))
+    print(intersection_image_.shape)
+    print(sat_image_.shape)
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -693,8 +719,6 @@ if __name__ == "__main__":
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
-    roi_xxyy_list = roi_xxyy_list[0:500]
-    print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
 
 
     roi_fname = "roi_usable_{}.npy".format(city_name)
@@ -704,6 +728,11 @@ if __name__ == "__main__":
         roi_usable = np.zeros(len(roi_xxyy_list), dtype=np.bool)
 
     roi_xxyy_list = [roi_xxyy_list[i] for i in range(len(roi_xxyy_list)) if roi_usable[i]]
+
+    print(len(roi_xxyy_list))
+    roi_xxyy_list = roi_xxyy_list[0:500]
+    print(len(roi_xxyy_list))
+    print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
 
 
     if args.source == "tracklets_sparse":
@@ -785,6 +814,22 @@ if __name__ == "__main__":
 
     print("Number of trajectories: {}".format(len(trajectories_)))
 
+
+    # Visualize tracklets and intersections
+    sat_image_viz = sat_image_.copy()
+
+    # blend images
+    intersection_image_ = np.ascontiguousarray(np.stack([intersection_image_, intersection_image_, intersection_image_], axis=2))
+    sat_image_viz = cv2.addWeighted(sat_image_viz, 0.5, intersection_image_, 0.5, 0)
+    for t in trajectories_:
+        rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3].astype(np.uint8)
+        rc = (rc[0], rc[1], rc[2])
+        for i in range(len(t)-1):
+            cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1)
+    cv2.imwrite(os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name)), cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
+
+    exit()
+
     # single core
     if num_cpus <= 1:
         process_chunk(args.source,
@@ -793,6 +838,7 @@ if __name__ == "__main__":
                       trajectories_,
                       lanes_,
                       sat_image_,
+                      intersection_image_,
                       out_path_root,
                       centerline_image_,
                       city_name,
@@ -815,6 +861,7 @@ if __name__ == "__main__":
                         repeat(trajectories_),
                         repeat(lanes_),
                         repeat(sat_image_),
+                        repeat(intersection_image_),
                         repeat(out_path_root),
                         repeat(centerline_image_),
                         repeat(city_name),
