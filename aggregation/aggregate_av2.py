@@ -397,6 +397,178 @@ def resample_trajectory(trajectory, dist=5):
     return np.array(new_trajectory)
 
 
+def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, intersection_image_, out_path_root, centerline_image_=None, city_name=None):
+
+    if "tracklets" in source:
+        annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
+        annot_ = trajectories_
+    elif "lanes" in source:
+        annotations_centers = [np.mean(t, axis=0) for t in lanes_]
+        annot_ = lanes_
+    else:
+        raise ValueError("Invalid source")
+
+    for roi_num, roi_xxyy in tqdm(enumerate(roi_xxyy_list), total=len(roi_xxyy_list)):
+
+        if centerline_image_ is not None:
+            if np.sum(centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]]) == 0:
+                continue
+
+        if roi_xxyy[0] < 16000:
+            out_path = os.path.join(out_path_root, "val")
+        else:
+            out_path = os.path.join(out_path_root, "train")
+
+        sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
+
+        sat_image = sat_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3], :].copy()
+
+        # Filter non-square sat_images:
+        if sat_image.shape[0] != sat_image.shape[1]:
+            continue
+
+        annot_candidates = []
+        for i in range(len(annot_)):
+            if np.linalg.norm(annotations_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 500:
+                annot_candidates.append(annot_[i])
+
+        annots = []
+        for annot in annot_candidates:
+            annot = annot - np.array([roi_xxyy[2], roi_xxyy[0]])
+
+            # # filter trajectories according to current roi_xxyy
+            is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image.shape[1])
+            if not np.any(is_in_roi):
+                continue
+            is_in_roi = np.logical_and(is_in_roi, annot[:, 1] > 0)
+            if not np.any(is_in_roi):
+                continue
+
+            is_in_roi = np.logical_and(is_in_roi, annot[:, 1] < sat_image.shape[0])
+            if not np.any(is_in_roi):
+                continue
+
+            annot = annot[is_in_roi]
+
+            # resample trajectory to have equally distant points
+            annot = resample_trajectory(annot, dist=5)
+
+            # filter based on number of points
+            if "tracklets" in source:
+                if len(annot) < 15:
+                    continue
+
+            # and on physical length of trajectory
+            if "tracklets" in source:
+                total_length = np.sum(np.linalg.norm(annot[1:] - annot[:-1], axis=1))
+                if total_length < 50:
+                    continue
+
+            annots.append(annot)
+
+        if len(annots) < 1:
+            continue
+
+        min_distance_from_center = min([np.min(np.linalg.norm(trajectory - np.array(sat_image.shape[:2]) / 2, axis=1)) for trajectory in annots])
+        if min_distance_from_center > 30:
+            continue
+
+        def get_sdf(t):
+            sdf = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+            for i in range(len(t) - 1):
+                x1 = int(t[i][0])
+                y1 = int(t[i][1])
+                x2 = int(t[i + 1][0])
+                y2 = int(t[i + 1][1])
+                cv2.line(sdf, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
+            f = 15  # distance function scale
+            sdf = skfmm.distance(1 - sdf)
+            sdf[sdf > f] = f
+            sdf = sdf / f
+            sdf = 1 - sdf
+
+            return sdf
+
+
+        if "tracklets" in source:
+            # Filter out redundant trajectories:
+            filtered_annots = []
+            global_sdf = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+
+            for t in annots:
+                if len(filtered_annots) == 0:
+                    filtered_annots.append(t)
+                t_sdf = get_sdf(t)
+
+                # get overlap between t_sdf and global_sdf
+                overlap = np.sum(np.logical_and(t_sdf > 0.1, global_sdf > 0.1)) + 1
+                t_sdf_sum = np.sum(t_sdf > 0.1)
+
+                if t_sdf_sum / overlap > 2:
+                    filtered_annots.append(t)
+                    global_sdf += t_sdf
+                else:
+                    continue
+
+        # Whether to export sparse or dense trajectory annotations
+        if source == "tracklets_sparse":
+            trajectories = filtered_annots
+            output_name = "sparse"
+        elif source == "tracklets_dense":
+            output_name = "dense"
+            trajectories = annots
+        elif source == "lanes":
+            output_name = "lanes"
+            trajectories = annots
+        else:
+            raise ValueError("Invalid source")
+
+
+
+        query_points = np.random.randint(0, sat_image.shape[0], size=(100, 2))
+
+        # plt.imshow(sat_image)
+        # for t in trajectories:
+        #     plt.plot(t[:, 0], t[:, 1])
+        # plt.scatter(query_points[:, 0], query_points[:, 1], c="r")
+        # plt.show()
+
+        for ii, q in enumerate(query_points):
+            found_trajectory = False
+            global_mask = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+            global_angle = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+
+            for t in trajectories:
+                min_distance_from_q = np.min(np.linalg.norm(t - q, axis=1))
+                if min_distance_from_q < 10:
+                    closest_index = np.argmin(np.linalg.norm(t - q, axis=1))
+
+                    for i in range(closest_index, len(t) - 1):
+                        found_trajectory = True
+                        x1 = int(t[i][0])
+                        y1 = int(t[i][1])
+                        x2 = int(t[i + 1][0])
+                        y2 = int(t[i + 1][1])
+
+                        angle = (np.arctan2(y2 - y1, x2 - x1) + np.pi) / (2 * np.pi)
+                        cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=5)
+                        cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
+
+            if found_trajectory:
+                pos_encoding = np.zeros(sat_image.shape, dtype=np.float32)
+                x, y = np.meshgrid(np.arange(sat_image.shape[1]), np.arange(sat_image.shape[0]))
+                pos_encoding[q[1], q[0], 0] = 1
+                pos_encoding[..., 1] = np.abs((x - q[0])) / sat_image.shape[1]
+                pos_encoding[..., 2] = np.abs((y - q[1])) / sat_image.shape[0]
+                pos_encoding = (pos_encoding * 255).astype(np.uint8)
+                print("Saving to {}-{}".format(sample_id, ii, output_name))
+
+                Image.fromarray(sat_image).save("{}/{}-{}-rgb.png".format(out_path, ii, sample_id))
+                Image.fromarray(global_angle * 255.).convert("L").save("{}/{}-{}-angles-tracklets-{}.png".format(out_path, ii, sample_id, output_name))
+                Image.fromarray(global_mask * 255.).convert("L").save("{}/{}-{}-sdf-tracklets-{}.png".format(out_path, ii, sample_id, output_name))
+                Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding-{}.png".format(out_path, ii, sample_id, output_name))
+
+
 
 def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, intersection_image_, out_path_root, centerline_image_=None, city_name=None):
 
@@ -695,7 +867,7 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 4
+    num_cpus = 1
     r_min = 7  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
@@ -707,8 +879,6 @@ if __name__ == "__main__":
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
     centerline_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_centerlines.png".format(city_name))))
     intersection_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_intersections.png".format(city_name))))
-    print(intersection_image_.shape)
-    print(sat_image_.shape)
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -719,7 +889,6 @@ if __name__ == "__main__":
             roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
 
     random.shuffle(roi_xxyy_list)
-
 
     roi_fname = "roi_usable_{}.npy".format(city_name)
     if os.path.exists(roi_fname):
@@ -815,24 +984,24 @@ if __name__ == "__main__":
     print("Number of trajectories: {}".format(len(trajectories_)))
 
 
-    # Visualize tracklets and intersections
-    sat_image_viz = sat_image_.copy()
-
-    # blend images
-    intersection_image_ = np.ascontiguousarray(np.stack([intersection_image_, intersection_image_, intersection_image_], axis=2))
-    sat_image_viz = cv2.addWeighted(sat_image_viz, 0.5, intersection_image_, 0.5, 0)
-    for t in trajectories_:
-        rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3].astype(np.uint8)
-        rc = (rc[0], rc[1], rc[2])
-        for i in range(len(t)-1):
-            cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1)
-    cv2.imwrite(os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name)), cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
-
-    exit()
+    # # Visualize tracklets and intersections
+    # sat_image_viz = sat_image_.copy()
+    #
+    # # blend images
+    # intersection_image_ = np.ascontiguousarray(np.stack([intersection_image_, intersection_image_, intersection_image_], axis=2))
+    # sat_image_viz = cv2.addWeighted(sat_image_viz, 0.5, intersection_image_, 0.5, 0)
+    # for t in trajectories_:
+    #     rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
+    #     rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+    #     for i in range(len(t)-1):
+    #         cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+    # cv2.imwrite(os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name)), cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
+    #
+    # exit()
 
     # single core
     if num_cpus <= 1:
-        process_chunk(args.source,
+        process_chunk_successors(args.source,
                       roi_xxyy_list,
                       export_final,
                       trajectories_,
@@ -843,6 +1012,17 @@ if __name__ == "__main__":
                       centerline_image_,
                       city_name,
                       )
+        # process_chunk(args.source,
+        #               roi_xxyy_list,
+        #               export_final,
+        #               trajectories_,
+        #               lanes_,
+        #               sat_image_,
+        #               intersection_image_,
+        #               out_path_root,
+        #               centerline_image_,
+        #               city_name,
+        #               )
     else:
 
         # multi core
@@ -867,7 +1047,8 @@ if __name__ == "__main__":
                         repeat(city_name),
                         )
 
-        Pool(num_cpus).starmap(process_chunk, arguments)
+        #Pool(num_cpus).starmap(process_chunk, arguments)
+        Pool(num_cpus).starmap(process_chunk_successors, arguments)
 
 
 

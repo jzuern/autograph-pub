@@ -8,7 +8,7 @@ paths:
     package: /home/buechner/zuern/self-supervised-graph/
     dataroot: /home/buechner/zuern/autograph/
     checkpoints: /home/buechner/zuern/self-supervised-graph/checkpoints/
-    config_name: exp-08-01-23/* # preprocessed/city_name or preprocessed/*
+    config_name: exp-11-01-23/* # preprocessed/city_name or preprocessed/*
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
@@ -37,7 +37,7 @@ model:
     edge_geo_dim: 16
     # end_of_archs
     in_layers: rgb,sdf,angle  # which inputs to use for LaneGNN map encoder
-    loader_workers: 16
+    loader_workers: 8
     weight_decay: 1e-4 #0.0001
     ignore_low_scores: False
     checkpoint:

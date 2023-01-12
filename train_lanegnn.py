@@ -459,15 +459,15 @@ def main():
     trainoverfit_path = os.path.join(params.paths.dataroot, params.paths.config_name, 'train')
 
     dataset_train = PreprocessedDataset(path=train_path,
-                                        num_samples=50,  # None for all
+                                        num_samples=200,  # None for all
                                         in_layers=in_layers,
                                         target=opt.target,)
     dataset_val = PreprocessedDataset(path=val_path,  # TODO: change to val_path
-                                      num_samples=10,  # None for all
+                                      num_samples=30,  # None for all
                                       in_layers=in_layers,
                                       target=opt.target)
     dataset_trainoverfit = PreprocessedDataset(path=trainoverfit_path,
-                                      num_samples=10,  # None for all
+                                      num_samples=30,  # None for all
                                       in_layers=in_layers,
                                       target=opt.target)
 

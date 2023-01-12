@@ -120,6 +120,80 @@ class RegressorDataset(torch.utils.data.Dataset):
         return return_dict
 
 
+class SuccessorRegressorDataset(torch.utils.data.Dataset):
+    def __init__(self, path, split):
+        self.path = path
+
+        print("Looking for files in", path)
+
+        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense.png')))
+        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
+        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-dense.png')))
+        self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
+
+        # check if all sdf files have same resolution
+        sdf_files = self.sdf_files
+        self.sdf_files = []
+        for sdf_file in sdf_files:
+            sdf_new = cv2.imread(sdf_file, cv2.IMREAD_UNCHANGED)
+            if sdf_new.shape[0] == sdf_new.shape[1]:
+                self.sdf_files.append(sdf_file)
+
+        # only use files for which we have all three modalities
+        file_ids = [get_id(f) for f in self.sdf_files]
+        self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
+        self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
+        self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
+        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
+
+        # check if all files are present
+        assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files)
+
+        self.split = split
+
+        print("Loaded {} {} files".format(len(self.sdf_files), self.split))
+
+    def __len__(self):
+        return len(self.sdf_files)
+
+    def __getitem__(self, idx):
+        sdf = cv2.imread(self.sdf_files[idx], cv2.IMREAD_UNCHANGED)
+        pos_enc = cv2.imread(self.pos_enc_files[idx], cv2.IMREAD_UNCHANGED)
+        angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_COLOR)
+        angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
+        rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
+
+        # convert from angles to unit circle xy coordinates
+        # to hsv to get hue
+        angles_mask = (angles[:, :, 1] > 0).astype(np.uint8)
+        angles = angles[:, :, 0] / 255.0
+
+        angles_x = np.cos(angles)
+        angles_y = np.sin(angles)
+
+        # to tensor
+        sdf = torch.from_numpy(sdf).float() / 255.0
+        angles_x = torch.from_numpy(angles_x).float()
+        angles_y = torch.from_numpy(angles_y).float()
+        angles_mask = torch.from_numpy(angles_mask).float()
+        angles = torch.from_numpy(angles).float()
+        rgb = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
+        pos_enc = torch.from_numpy(pos_enc).float().permute(2, 0, 1) / 255.0
+
+        return_dict = {
+            'sdf': sdf,
+            'pos_enc': pos_enc,
+            'angles_mask': angles_mask,
+            'angles_x': angles_x,
+            'angles_y': angles_y,
+            'angles': angles,
+            'rgb': rgb
+        }
+
+        return return_dict
+
+
+
 class PreprocessedDataset(torch_geometric.data.Dataset):
 
     def __init__(self, path, split='train', target=None, num_samples=1000000, in_layers=""):

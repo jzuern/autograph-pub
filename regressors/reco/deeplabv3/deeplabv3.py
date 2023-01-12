@@ -1,9 +1,10 @@
 from .aspp import *
 from functools import partial
+from torch import nn
 
 
 class DeepLabv3Plus(nn.Module):
-    def __init__(self, orig_resnet, dilate_scale=16, num_classes=2, output_dim=256):
+    def __init__(self, orig_resnet, num_in_channels=3, dilate_scale=16, num_classes=2, output_dim=256):
         super(DeepLabv3Plus, self).__init__()
         if dilate_scale == 8:
             orig_resnet.layer3.apply(partial(self._nostride_dilate, dilate=2))
@@ -16,6 +17,9 @@ class DeepLabv3Plus(nn.Module):
 
         # take pre-defined ResNet, except AvgPool and FC
         self.resnet_conv1 = orig_resnet.conv1
+        if num_in_channels != 3:
+            #self.resnet_conv1.in_channels = num_in_channels
+            self.resnet_conv1 = nn.Conv2d(num_in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.resnet_bn1 = orig_resnet.bn1
         self.resnet_relu1 = orig_resnet.relu
         self.resnet_maxpool = orig_resnet.maxpool
