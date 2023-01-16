@@ -29,6 +29,79 @@ from lanegnn.utils import visualize_angles
 random.seed(0)
 
 
+def to_graph(trajectory):
+    g = nx.DiGraph()
+    for i in range(len(trajectory) - 1):
+        angle = np.arctan2(trajectory[i+1][1] - trajectory[i][1], trajectory[i+1][0] - trajectory[i][0])
+        g.add_edge(trajectory[i], trajectory[i + 1], angle=angle)
+    return g
+
+
+
+
+def merge_successor_trajectories(q, trajectories_all, sat_image):
+    # Get all trajectories that go through query point
+    df = 1
+    dist_thrsh = 6 * df # in px
+    angle_thrsh = np.pi / 4  # in rad
+
+    sat_image_viz = sat_image.copy()
+
+    trajectories_close_q = []
+    for t in trajectories_all:
+        min_distance_from_q = np.min(np.linalg.norm(t - q, axis=1))
+        if min_distance_from_q < dist_thrsh:
+            closest_index = np.argmin(np.linalg.norm(t - q, axis=1))
+            trajectories_close_q.append(t[closest_index:])
+
+    for t in trajectories_all:
+        for i in range(len(t)-1):
+            cv2.arrowedLine(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1)
+
+    for t in trajectories_close_q:
+        for i in range(len(t)-1):
+            cv2.arrowedLine(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1)
+
+
+    # then get all trajectories that are close to any of the trajectories
+    trajectories_2 = []
+    for t0 in trajectories_close_q:
+        for t1 in trajectories_all:
+
+            if len(t0) < 3 or len(t1) < 3:
+                continue
+
+            angles0 = np.arctan2(t0[1:, 1] - t0[:-1, 1], t0[1:, 0] - t0[:-1, 0])
+            angles0 = np.concatenate([angles0, [angles0[-1]]])
+
+            angles1 = np.arctan2(t1[1:, 1] - t1[:-1, 1], t1[1:, 0] - t1[:-1, 0])
+            angles1 = np.concatenate([angles1, [angles1[-1]]])
+
+
+            # check if t1 is close to t0 at any point
+            min_dist = np.amin(cdist(t0, t1), axis=0)
+            min_angle = np.amin(cdist(angles0[:, np.newaxis], angles1[:, np.newaxis]), axis=0)
+
+            crit_angle = min_angle < angle_thrsh
+            crit_dist = min_dist < dist_thrsh
+
+            crit = crit_angle * crit_dist
+
+            if np.any(crit):
+                # if so, merge the trajectories
+                # find the first point where the criteria is met
+                first_crit = np.where(crit)[0][0]
+                t_add = t1[first_crit:]
+                if len(t_add) > 5:
+                    trajectories_2.append(t_add)
+
+    for t2 in trajectories_2:
+        for i in range(len(t2)-1):
+            cv2.arrowedLine(sat_image_viz, tuple(t2[i].astype(int)), tuple(t2[i+1].astype(int)), (255, 0, 0), 1)
+
+    return trajectories_close_q + trajectories_2
+
+
 def preprocess_sample(G_gt_nx, sat_image_, sdf, sdf_regressor, angles, angles_viz, angles_regressor, roi_xxyy,
                       sample_id, out_path, output_name):
 
@@ -397,7 +470,7 @@ def resample_trajectory(trajectory, dist=5):
     return np.array(new_trajectory)
 
 
-def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, intersection_image_, out_path_root, centerline_image_=None, city_name=None):
+def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None, city_name=None):
 
     if "tracklets" in source:
         annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
@@ -414,10 +487,19 @@ def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_,
             if np.sum(centerline_image_[roi_xxyy[0]:roi_xxyy[1], roi_xxyy[2]:roi_xxyy[3]]) == 0:
                 continue
 
-        if roi_xxyy[0] < 16000:
+        # Selecting specific ROI
+        #if roi_xxyy[0] < 18000 or roi_xxyy[2] < 18000 or roi_xxyy[1] > 22000 or roi_xxyy[3] > 22000:
+        #    continue
+
+        #if roi_xxyy[0] < 16000:
+        #    out_path = os.path.join(out_path_root, "val")
+        #else:
+        #    out_path = os.path.join(out_path_root, "train")
+        if np.random.rand() < 0.1:
             out_path = os.path.join(out_path_root, "val")
         else:
             out_path = os.path.join(out_path_root, "train")
+
 
         sample_id = "{}-{}-{}".format(city_name, roi_xxyy[0], roi_xxyy[2])
 
@@ -524,49 +606,56 @@ def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_,
             raise ValueError("Invalid source")
 
 
-
-        query_points = np.random.randint(0, sat_image.shape[0], size=(100, 2))
-
         # plt.imshow(sat_image)
         # for t in trajectories:
         #     plt.plot(t[:, 0], t[:, 1])
         # plt.scatter(query_points[:, 0], query_points[:, 1], c="r")
         # plt.show()
 
+        #trajectories = [to_graph(t) for t in trajectories]
+        query_points = np.random.randint(0, sat_image.shape[0], size=(200, 2))
+
+        #query_points = np.array([[128, 128]])
+
+
         for ii, q in enumerate(query_points):
-            found_trajectory = False
+
+            succ = merge_successor_trajectories(q, trajectories, sat_image)
+
+            if len(succ) == 0:
+                continue
+
             global_mask = np.zeros(sat_image.shape[0:2], dtype=np.float32)
             global_angle = np.zeros(sat_image.shape[0:2], dtype=np.float32)
 
-            for t in trajectories:
-                min_distance_from_q = np.min(np.linalg.norm(t - q, axis=1))
-                if min_distance_from_q < 10:
-                    closest_index = np.argmin(np.linalg.norm(t - q, axis=1))
+            for t in succ:
+                for i in range(0, len(t)-1):
+                    x1 = int(t[i][0])
+                    y1 = int(t[i][1])
+                    x2 = int(t[i + 1][0])
+                    y2 = int(t[i + 1][1])
 
-                    for i in range(closest_index, len(t) - 1):
-                        found_trajectory = True
-                        x1 = int(t[i][0])
-                        y1 = int(t[i][1])
-                        x2 = int(t[i + 1][0])
-                        y2 = int(t[i + 1][1])
+                    angle = (np.arctan2(y2 - y1, x2 - x1) + np.pi) / (2 * np.pi)
+                    cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=10)
+                    cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=10)
 
-                        angle = (np.arctan2(y2 - y1, x2 - x1) + np.pi) / (2 * np.pi)
-                        cv2.line(global_angle, (x1, y1), (x2, y2), angle, thickness=5)
-                        cv2.line(global_mask, (x1, y1), (x2, y2), (1, 1, 1), thickness=5)
+            # Minimum of X percent of pixels must be covered by the trajectory
+            if np.sum(global_mask) < 0.02 * np.prod(global_mask.shape):
+                continue
 
-            if found_trajectory:
-                pos_encoding = np.zeros(sat_image.shape, dtype=np.float32)
-                x, y = np.meshgrid(np.arange(sat_image.shape[1]), np.arange(sat_image.shape[0]))
-                pos_encoding[q[1], q[0], 0] = 1
-                pos_encoding[..., 1] = np.abs((x - q[0])) / sat_image.shape[1]
-                pos_encoding[..., 2] = np.abs((y - q[1])) / sat_image.shape[0]
-                pos_encoding = (pos_encoding * 255).astype(np.uint8)
-                print("Saving to {}-{}".format(sample_id, ii, output_name))
+            pos_encoding = np.zeros(sat_image.shape, dtype=np.float32)
+            x, y = np.meshgrid(np.arange(sat_image.shape[1]), np.arange(sat_image.shape[0]))
+            pos_encoding[q[1], q[0], 0] = 1
+            pos_encoding[..., 1] = np.abs((x - q[0])) / sat_image.shape[1]
+            pos_encoding[..., 2] = np.abs((y - q[1])) / sat_image.shape[0]
+            pos_encoding = (pos_encoding * 255).astype(np.uint8)
+            print(q)
+            print("Saving to {}-{}-{}-{}".format(out_path, ii, sample_id, output_name))
 
-                Image.fromarray(sat_image).save("{}/{}-{}-rgb.png".format(out_path, ii, sample_id))
-                Image.fromarray(global_angle * 255.).convert("L").save("{}/{}-{}-angles-tracklets-{}.png".format(out_path, ii, sample_id, output_name))
-                Image.fromarray(global_mask * 255.).convert("L").save("{}/{}-{}-sdf-tracklets-{}.png".format(out_path, ii, sample_id, output_name))
-                Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding-{}.png".format(out_path, ii, sample_id, output_name))
+            Image.fromarray(sat_image).save("{}/{}-{}-rgb.png".format(out_path, ii, sample_id))
+            Image.fromarray(global_angle * 255.).convert("L").save("{}/{}-{}-angles-tracklets-{}.png".format(out_path, ii, sample_id, output_name))
+            Image.fromarray(global_mask * 255.).convert("L").save("{}/{}-{}-sdf-tracklets-{}.png".format(out_path, ii, sample_id, output_name))
+            Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding-{}.png".format(out_path, ii, sample_id, output_name))
 
 
 
@@ -846,7 +935,7 @@ def process_chunk(source, roi_xxyy_list, export_final, trajectories_, lanes_, sa
                               out_path=out_path,
                               output_name=output_name)
 
-    #np.save("roi_usable_{}.npy".format(city_name), roi_usable)
+    np.save("data/roi_usable_{}.npy".format(city_name), roi_usable)
 
 
 if __name__ == "__main__":
@@ -867,7 +956,7 @@ if __name__ == "__main__":
     export_final = args.export_final
 
     # parameters
-    num_cpus = 1
+    num_cpus = 4
     r_min = 7  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
@@ -878,7 +967,7 @@ if __name__ == "__main__":
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
     centerline_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_centerlines.png".format(city_name))))
-    intersection_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_intersections.png".format(city_name))))
+    #intersection_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_intersections.png".format(city_name))))
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -890,7 +979,7 @@ if __name__ == "__main__":
 
     random.shuffle(roi_xxyy_list)
 
-    roi_fname = "roi_usable_{}.npy".format(city_name)
+    roi_fname = "data/roi_usable_{}.npy".format(city_name)
     if os.path.exists(roi_fname):
         roi_usable = np.load(roi_fname)
     else:
@@ -899,9 +988,9 @@ if __name__ == "__main__":
     roi_xxyy_list = [roi_xxyy_list[i] for i in range(len(roi_xxyy_list)) if roi_usable[i]]
 
     print(len(roi_xxyy_list))
-    roi_xxyy_list = roi_xxyy_list[0:500]
-    print(len(roi_xxyy_list))
-    print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
+    #roi_xxyy_list = roi_xxyy_list[0:500]
+    #print(len(roi_xxyy_list))
+    #print("Careful! Using reduced list of rois ({})".format(len(roi_xxyy_list)))
 
 
     if args.source == "tracklets_sparse":
@@ -917,7 +1006,7 @@ if __name__ == "__main__":
 
     [R, c, t] = get_transform_params(city_name.lower())
 
-    if not os.path.exists("lanes_{}.npy".format(city_name)) or not os.path.exists("trajectories_{}.npy".format(city_name)):
+    if not os.path.exists("data/lanes_{}.npy".format(city_name)) or not os.path.exists("data/trajectories_{}.npy".format(city_name)):
         print("Generating trajectories and gt-lanes")
         trajectories_ = []
         lanes_ = []
@@ -962,10 +1051,6 @@ if __name__ == "__main__":
                     tmp = t + c * R @ bb
                     actor_trajectory[i] = tmp[0:2]
 
-                # ignore standing vehicles
-                if np.linalg.norm(actor_trajectory[0] - actor_trajectory[-1]) < 5:
-                    continue
-
                 trajectories_.append(actor_trajectory)
 
             for lane in scenario_lanes:
@@ -975,21 +1060,34 @@ if __name__ == "__main__":
         lanes_ = np.array(lanes_)
 
         # save trajectories
-        np.save("trajectories_{}.npy".format(city_name), trajectories_)
-        np.save("lanes_{}.npy".format(city_name), lanes_)
+        np.save("data/trajectories_{}.npy".format(city_name), trajectories_)
+        np.save("data/lanes_{}.npy".format(city_name), lanes_)
     else:
-        trajectories_ = np.load("trajectories_{}.npy".format(city_name), allow_pickle=True)
-        lanes_ = np.load("lanes_{}.npy".format(city_name), allow_pickle=True)
+        trajectories_ = np.load("data/trajectories_{}.npy".format(city_name), allow_pickle=True)
+        lanes_ = np.load("data/lanes_{}.npy".format(city_name), allow_pickle=True)
 
-    print("Number of trajectories: {}".format(len(trajectories_)))
+    print("Number of trajectories BEFORE filter: {}".format(len(trajectories_)))
+    trajectories_list = []
+    # generate roi_xxyy list over full satellite image in sliding window fashion
+    for t in trajectories_:
+        # ignore too small end start difference (i.e. standing vehicles)
+        if np.linalg.norm(t[0] - t[-1]) < 50:  # in px
+            continue
+
+        # too few samples in trajectory
+        if len(t) < 20:
+            continue
+
+        trajectories_list.append(t)
+
+    trajectories_ = np.array(trajectories_list)
+    print("Number of trajectories AFTER filter: {}".format(len(trajectories_)))
 
 
     # # Visualize tracklets and intersections
     # sat_image_viz = sat_image_.copy()
     #
     # # blend images
-    # intersection_image_ = np.ascontiguousarray(np.stack([intersection_image_, intersection_image_, intersection_image_], axis=2))
-    # sat_image_viz = cv2.addWeighted(sat_image_viz, 0.5, intersection_image_, 0.5, 0)
     # for t in trajectories_:
     #     rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
     #     rc = (int(rc[0]), int(rc[1]), int(rc[2]))
@@ -1007,7 +1105,6 @@ if __name__ == "__main__":
                       trajectories_,
                       lanes_,
                       sat_image_,
-                      intersection_image_,
                       out_path_root,
                       centerline_image_,
                       city_name,
@@ -1018,7 +1115,6 @@ if __name__ == "__main__":
         #               trajectories_,
         #               lanes_,
         #               sat_image_,
-        #               intersection_image_,
         #               out_path_root,
         #               centerline_image_,
         #               city_name,
@@ -1041,7 +1137,6 @@ if __name__ == "__main__":
                         repeat(trajectories_),
                         repeat(lanes_),
                         repeat(sat_image_),
-                        repeat(intersection_image_),
                         repeat(out_path_root),
                         repeat(centerline_image_),
                         repeat(city_name),

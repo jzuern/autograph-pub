@@ -141,3 +141,5 @@ dmypy.json
 
 checkpoints/
 /viz/
+
+aggregation/sat_image.png

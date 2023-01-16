@@ -126,9 +126,12 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         print("Looking for files in", path)
 
-        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense.png')))
-        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
-        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-dense.png')))
+        # self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense.png')))
+        # self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
+        # self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-dense.png')))
+        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-lanes.png')))
+        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-lanes.png')))
+        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-lanes.png')))
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
 
         # check if all sdf files have same resolution
