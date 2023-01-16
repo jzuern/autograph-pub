@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 
 
 def random_func(x):
-    return np.random.choice([np.sin, np.cos])(x)
+    return np.random.choice([np.sin, np.cos, np.tan, np.exp])(x)
 
 
-def get_successor_graphs(n_graphs):
+def get_successor_graphs(n_graphs, noise=0.0):
     json_files = sorted(glob("/data/lanegraph/data_sep/all/010922-large/pao/test/*.json"))
     print(len(json_files))
     graphs = []
@@ -34,6 +34,15 @@ def get_successor_graphs(n_graphs):
             if not G_gt_nx.has_node(e[1]):
                 G_gt_nx.add_node(e[1], pos=waypoints[e[1]])
             G_gt_nx.add_edge(e[0], e[1])
+
+        # randomly remove edges
+        if noise > 0:
+            edges = list(G_gt_nx.edges)
+            for idx in np.random.choice(len(edges), int(len(edges) * noise)):
+                try:
+                    G_gt_nx.remove_edge(*edges[idx])
+                except:
+                    pass
 
         if max(list([G_gt_nx.out_degree(node) for node in G_gt_nx.nodes])) >= 2:
             graphs.append(G_gt_nx)
@@ -79,10 +88,12 @@ def get_random_circles(n_graphs, n_nodes=10):
     graphs = []
 
     for _ in range(n_graphs):
-        center = np.random.normal(loc=0, scale=0.01, size=2)
-        radius = np.random.normal(loc=0.5, scale=0.1)
+        center = np.random.normal(loc=0, scale=0.1, size=2)
+        radius = np.random.normal(loc=0.5, scale=0.3)
         graph = nx.Graph()
-        for i in range(0, n_nodes):
+
+        angles = np.random.uniform(0, 2 * np.pi, size=n_nodes)
+        for i, angle in enumerate(angles):
             angle = i * 0.6
             graph.add_node(i, pos=center + radius * np.array([np.cos(angle), np.sin(angle)]))
             if i > 0:
@@ -144,14 +155,12 @@ class ToyDataset(torch_geometric.data.dataset.Dataset):
         n_graphs = 10000
 
         #self.graphs = get_random_circles(n_graphs)
-        #self.graphs = get_func_graphs(n_graphs)
+        self.graphs = get_func_graphs(n_graphs)
         #self.graphs = get_t_intersections(n_graphs)
-        self.graphs = get_successor_graphs(1001)
-
+        #self.graphs = get_successor_graphs(1001, noise=0.0)
 
     def shuffle_samples(self):
         np.random.shuffle(self.graphs)
-
 
     def __len__(self):
         return len(self.graphs)

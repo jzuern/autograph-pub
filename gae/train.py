@@ -180,7 +180,7 @@ class Trainer(object):
         cv2.imshow("adj_viz", adj_viz)
         cv2.waitKey(1)
 
-        if self.epoch % 10 == 0:
+        if self.epoch % 2 == 0:
             cmap = plt.get_cmap('viridis')
             self.ax[0].clear()
             self.ax[1].clear()
@@ -233,7 +233,7 @@ class Trainer(object):
             self.ax[2].plot(np.array(np.convolve(self.train_losses, np.ones(n_avg), 'valid') / n_avg))
             self.ax[3].plot(np.array(np.convolve(self.train_accs, np.ones(n_avg), 'valid') / n_avg))
 
-            plt.pause(0.01)
+            plt.pause(0.1)
 
             if not args.disable_wandb:
                 wandb.log({"chart": wandb.Image(self.fig)})
@@ -241,7 +241,7 @@ class Trainer(object):
     def save_model(self):
         self.save_path = 'checkpoints/gae-{epoch:04d}.ckpt'.format(epoch=self.epoch)
         print("Saving model as " + self.save_path)
-        torch.save(self.model.state_dict(), self.save_path)
+        #torch.save(self.model.state_dict(), self.save_path)
 
 
 
