@@ -134,8 +134,6 @@ class Trainer():
                 sdf_target = np.concatenate([sdf_target[..., np.newaxis], sdf_target[..., np.newaxis], sdf_target[..., np.newaxis]], axis=2)
                 sdf_target = (sdf_target > 0.3).astype(np.uint8) * 255
 
-                print(sdf_pred.shape, sdf_target.shape)
-
                 cv2.imshow("sdf_target", sdf_target)
                 cv2.imshow("sdf_pred", sdf_pred)
 
@@ -229,16 +227,15 @@ class Trainer():
 
     def inference(self):
 
+        print("Inference...")
+
         # Load model
         model_path = "checkpoints/reg_succ_local_run.pth"
         self.model.load_state_dict(torch.load(model_path))
         self.model = self.model.eval()
 
-        base_image = "/data/autograph/exp-successors/pittsburgh-pre/val/3-Pittsburgh-10300-27100-rgb.png"
+        base_image = "/data/autograph/exp-successors-lanes/pittsburgh-pre/train/0-Pittsburgh-24100-15100-rgb.png"
         base_image = cv2.imread(base_image)
-
-        cv2.imshow("test", np.random.randint(0, 255, (1, 1, 3)).astype(np.uint8))
-        cv2.waitKey(1)
 
         # cv2 callback function for clicking on image
         def click(event, x, y, flags, param):
@@ -252,6 +249,7 @@ class Trainer():
                 pos_encoding[..., 1] = np.abs((x - q[1])) / base_image.shape[1]
                 pos_encoding[..., 2] = np.abs((y - q[0])) / base_image.shape[0]
                 pos_encoding = (pos_encoding * 255).astype(np.uint8)
+                pos_encoding = cv2.cvtColor(pos_encoding, cv2.COLOR_BGR2RGB)
 
                 cv2.imshow("base_image", base_image)
                 cv2.imshow("pos_encoding", pos_encoding)
@@ -261,12 +259,15 @@ class Trainer():
                 pos_enc = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
 
                 in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
 
                 (pred, features) = self.model(in_tensor)
                 pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
                 pred_sdf = torch.nn.Sigmoid()(pred)
 
+
                 pred_sdf = pred_sdf[0, 0].cpu().detach().numpy()
+
                 pred_sdf = (pred_sdf * 255).astype(np.uint8)
                 pred_sdf_viz = cv2.addWeighted(base_image, 0.5, cv2.applyColorMap(pred_sdf, cv2.COLORMAP_MAGMA), 0.5, 0)
                 cv2.imshow("pred_sdf_viz", pred_sdf_viz)
@@ -338,8 +339,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'exp-successors', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, 'exp-successors', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, 'exp-successors-lanes', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, 'exp-successors-lanes', "*", "val")
 
     dataset_train = SuccessorRegressorDataset(path=train_path, split='train')
     dataset_val = SuccessorRegressorDataset(path=val_path, split='val')
@@ -356,7 +357,7 @@ def main():
 
     trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
 
-    #trainer.inference()
+    trainer.inference()
 
     for epoch in range(params.model.num_epochs):
 
