@@ -230,17 +230,16 @@ class Trainer():
         print("Inference...")
 
         # Load model
-        model_path = "checkpoints/reg_succ_local_run.pth"
+        model_path = "checkpoints/reg_succ_lanes.pth"
         self.model.load_state_dict(torch.load(model_path))
         self.model = self.model.eval()
 
-        base_image = "/data/autograph/exp-successors-lanes/pittsburgh-pre/train/0-Pittsburgh-24100-15100-rgb.png"
+        base_image = "/data/autograph/exp-successors-lanes/pittsburgh-pre/val/171-Pittsburgh-25800-12900-rgb.png"
         base_image = cv2.imread(base_image)
 
         # cv2 callback function for clicking on image
         def click(event, x, y, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
-                print("clicked at", x, y)
                 q = [y, x]
 
                 pos_encoding = np.zeros(base_image.shape, dtype=np.float32)
@@ -264,7 +263,6 @@ class Trainer():
                 (pred, features) = self.model(in_tensor)
                 pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
                 pred_sdf = torch.nn.Sigmoid()(pred)
-
 
                 pred_sdf = pred_sdf[0, 0].cpu().detach().numpy()
 
