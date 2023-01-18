@@ -1,7 +1,7 @@
 
 # download sensor dataset
-s5cmd --no-sign-request -numworkers 128 cp --exclude "*/cameras/*" "s3://argoai-argoverse/av2/sensor/test/*" /data/argoverse2-full/sensor/test
-s5cmd --no-sign-request -numworkers 128 cp --exclude "*/cameras/*" "s3://argoai-argoverse/av2/sensor/val/*" /data/argoverse2-full/sensor/val
+#s5cmd --no-sign-request -numworkers 128 cp --exclude "*/cameras/*" "s3://argoai-argoverse/av2/sensor/test/*" /data/argoverse2-full/sensor/test
+#s5cmd --no-sign-request -numworkers 128 cp --exclude "*/cameras/*" "s3://argoai-argoverse/av2/sensor/val/*" /data/argoverse2-full/sensor/val
 s5cmd --no-sign-request -numworkers 128 cp --exclude "*/cameras/*" "s3://argoai-argoverse/av2/sensor/train/*" /data/argoverse2-full/sensor/train
 
 # download lidar dataset

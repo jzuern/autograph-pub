@@ -208,57 +208,13 @@ def parse_args():
         "--checkpoint", help="the dir to checkpoint which the model read from"
     )
     parser.add_argument("--hungarian", action='store_true')
-    parser.add_argument("--root", type=str, default="/data/nuscenes")
     parser.add_argument("--version", type=str, default='v1.0-mini')
     parser.add_argument("--max_age", type=int, default=3)
+    parser.add_argument("--av2_root", type=str)
 
     args = parser.parse_args()
 
     return args
-
-
-def save_first_frame():
-    args = parse_args()
-    nusc = NuScenes(version=args.version,
-                    dataroot=args.root,
-                    verbose=True)
-
-    if args.version == 'v1.0-trainval':
-        scenes = splits.val
-    elif args.version == 'v1.0-test':
-        scenes = splits.test
-    elif args.version == 'v1.0-mini':
-        scenes = splits.test
-    else:
-        raise ValueError("unknown")
-
-    frames = []
-    for sample in nusc.sample:
-        scene_name = nusc.get("scene", sample['scene_token'])['name']
-        if scene_name not in scenes:
-            continue
-
-        timestamp = sample["timestamp"] * 1e-6
-        token = sample["token"]
-        frame = {}
-        frame['token'] = token
-        frame['timestamp'] = timestamp
-
-        # start of a sequence
-        if sample['prev'] == '':
-            frame['first'] = True
-        else:
-            frame['first'] = False
-        frames.append(frame)
-
-    del nusc
-
-    res_dir = os.path.join(args.work_dir)
-    if not os.path.exists(res_dir):
-        os.makedirs(res_dir)
-
-    with open(os.path.join(args.work_dir, 'frames_meta.json'), "w") as f:
-        json.dump({'frames': frames}, f)
 
 
 
@@ -269,7 +225,8 @@ if __name__ == '__main__':
     tracker = Tracker(max_age=args.max_age,
                       hungarian=True)
 
-    predictions_files = sorted(glob("/data/argoverse2-full/sensor/val/*/detections.pickle"))
+
+    predictions_files = sorted(glob(args.av2_root + "/*/detections.pickle"))
 
 
     for predictions_file in predictions_files:
@@ -344,46 +301,5 @@ if __name__ == '__main__':
 
         with open(tracking_file, "wb") as f:
             pickle.dump(av2_annos, f)
-
-
-
-
-    #########################################################
-
-
-
-    # Visualize tracklets
-    predictions_files = sorted(glob("/data/argoverse2-full/sensor/val/*/tracking.pickle"))
-
-    fig, ax = plt.subplots()
-    ax.set_aspect('equal')
-
-
-    for p in predictions_files:
-        with open(p, "rb") as f:
-            av2_annos = pickle.load(f)
-
-        tracklets = {}
-
-        ego_pos = np.array([p.translation for p in av2_annos["ego_pos"]])
-        ax.plot(ego_pos[:, 0], ego_pos[:, 1], "k-")
-
-        if av2_annos["city_name"] == "PIT":
-
-            for counter, anno in enumerate(av2_annos["results"].keys()):
-                for t in av2_annos["results"][anno]:
-                    t_id = t["tracking_id"]
-                    t_trans = t["translation"]
-                    if t_id in tracklets.keys():
-                        tracklets[t_id].append(t_trans)
-                    else:
-                        tracklets[t_id] = [t_trans]
-
-            for tracklet in tracklets:
-                traj = np.array(tracklets[tracklet])
-                ax.plot(traj[:, 0], traj[:, 1])
-    plt.show()
-
-
 
 
