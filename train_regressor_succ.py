@@ -12,11 +12,10 @@ from torch.utils.data import DataLoader
 from torch.nn import DataParallel
 import matplotlib.pyplot as plt
 import cv2
-
-from regressors.build_net import build_network
 from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 import torchvision.models as models
 from torchmetrics import JaccardIndex, Precision, Recall, F1Score
+from collections import OrderedDict
 
 from data.datasets import SuccessorRegressorDataset
 from lanegnn.utils import ParamLib
@@ -230,11 +229,20 @@ class Trainer():
         print("Inference...")
 
         # Load model
-        model_path = "checkpoints/reg_succ_lanes.pth"
-        self.model.load_state_dict(torch.load(model_path))
+        #model_path = "checkpoints/reg_succ_lanes.pth"
+        #model_path = "checkpoints/reg_succ_traj.pth"
+        model_path = "checkpoints/reg_succ_traj_3.pth"
+
+        state_dict = torch.load(model_path)
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = k[7:]  # remove `module.`
+            new_state_dict[name] = v
+
+        self.model.load_state_dict(new_state_dict)
         self.model = self.model.eval()
 
-        base_image = "/data/autograph/exp-successors-lanes/pittsburgh-pre/val/171-Pittsburgh-25800-12900-rgb.png"
+        base_image = "/data/autograph/exp-successors-traj/pittsburgh-pre/val/0-Pittsburgh-25900-35700-rgb.png"
         base_image = cv2.imread(base_image)
 
         # cv2 callback function for clicking on image
