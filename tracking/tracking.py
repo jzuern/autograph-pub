@@ -228,7 +228,6 @@ if __name__ == '__main__':
 
     predictions_files = sorted(glob(args.av2_root + "/*/detections.pickle"))
 
-
     for predictions_file in predictions_files:
         print("Performing Tracking on predictions file {}".format(predictions_file))
 
@@ -239,7 +238,11 @@ if __name__ == '__main__':
             continue
 
         with open(predictions_file, "rb") as f:
-            predictions_dict = pickle.load(f)
+            try:
+                predictions_dict = pickle.load(f)
+            except Exception as e:
+                print(e)
+                continue
 
         av2_annos = {
             "results": {},

@@ -6,7 +6,7 @@ main:
 paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
-    dataroot: /home/zuern/datasets/self-supervised-graph/
+    dataroot: /home/zuern/datasets/autograph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
     config_name: exp-11-01-23/* # name/city_name or name/*
