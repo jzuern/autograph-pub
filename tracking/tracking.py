@@ -4,10 +4,8 @@ from __future__ import print_function
 
 import argparse
 import os
-from nuscenes import NuScenes
 import json
 import time
-from nuscenes.utils import splits
 import numpy as np
 import copy
 import pickle

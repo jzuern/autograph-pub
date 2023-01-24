@@ -6,18 +6,30 @@ from tqdm import tqdm
 from glob import glob
 import matplotlib.pyplot as plt
 from bezier import get_bezier_parameters
+from data.av2.settings import get_transform_params
+import shutil
+import os
 
 
-# Visualize tracklets
-predictions_files = sorted(glob("/data/argoverse2-full/*/*/*/tracking.pickle"))
+city_name_dict ={
+    "PIT": "pittsburgh",
+    "MIA": "miami",
+    "ATX": "austin"
+}
+
+
+# Get tracking file locations
+'''find /home/zuern/datasets/argoverse2-full -type f -wholename '/home/zuern/datasets/argoverse2-full/*/*/*/tracking.pickle' > tracking_files.txt '''
+tracking_files = np.loadtxt("tracking_files.txt", dtype=str).tolist()
+
 
 city_name = "PIT"
-
+[transform_R, transform_c, transform_t] = get_transform_params(city_name_dict[city_name])
 
 fig, ax = plt.subplots()
 ax.set_aspect('equal')
 
-for p in tqdm(predictions_files):
+for p in tqdm(tracking_files):
     with open(p, "rb") as f:
         try:
             av2_annos = pickle.load(f)
@@ -30,6 +42,12 @@ for p in tqdm(predictions_files):
     if av2_annos["city_name"] == city_name:
 
         ego_pos = np.array([p.translation for p in av2_annos["ego_pos"]])
+
+        # Coordinate transformation
+        bb = np.hstack([ego_pos[:, 0:2], np.zeros((len(ego_pos), 1))])
+        tmp = transform_t[np.newaxis, :] + transform_c * np.einsum('jk,ik', transform_R, bb)
+        ego_pos = tmp[:, 0:2]
+
         ax.plot(ego_pos[:, 0], ego_pos[:, 1], "k-")
 
         for counter, anno in enumerate(av2_annos["results"].keys()):
@@ -47,6 +65,7 @@ for p in tqdm(predictions_files):
 
         for c, tracklet in enumerate(tracklets):
             traj = np.array(tracklets[tracklet])
+            traj = traj[:, 0:2]
 
             # Based on overall length
             total_length = np.sum(np.linalg.norm(traj[1:] - traj[:-1], axis=1))
@@ -70,8 +89,15 @@ for p in tqdm(predictions_files):
             traj_filtered = traj
             #traj_filtered = np.asarray(get_bezier_parameters(traj[:, 0], traj[:, 1], degree=4))
 
+            # Coordinate transformation
+            bb = np.hstack([traj_filtered, np.zeros((len(traj_filtered),1))])
+            tmp = transform_t[np.newaxis, :] + transform_c * np.einsum('jk,ik', transform_R, bb)
+            traj_filtered = tmp[:, 0:2]
+
+
             tracklets_filtered.append(traj_filtered)
             tracklets_unfiltered.append(traj)
+
 
 
         for traj in tracklets_filtered:
