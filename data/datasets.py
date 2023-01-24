@@ -7,7 +7,6 @@ import os
 import cv2
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
 
 
 def get_id(filename):
@@ -196,7 +195,6 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         return return_dict
 
 
-
 class PreprocessedDataset(torch_geometric.data.Dataset):
 
     def __init__(self, path, split='train', target=None, num_samples=1000000, in_layers=""):
@@ -215,13 +213,6 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
 
         self.pth_files = self.pth_files[0:num_samples]
         print("Using {} files".format(len(self.pth_files)))
-
-        if "sdf" in in_layers:
-            self.sdf_files = [f.replace("-post", "-pre").replace("-{}.pth".format(self.target), "-sdf-tracklets-{}.png".format(self.target)) for f in self.pth_files]
-            assert all([os.path.exists(f) for f in self.sdf_files])
-        if "angle" in in_layers:
-            self.angle_files = [f.replace("-post", "-pre").replace("-{}.pth".format(self.target), "-angles-tracklets-{}.png".format(self.target)) for f in self.pth_files]
-            assert all([os.path.exists(f) for f in self.angle_files])
 
         print("Split: {}".format(self.split))
         print("File ids: {}".format([get_id(f) for f in self.pth_files]))
@@ -280,6 +271,7 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
 
         rgb = data['rgb']
         sdf = data['sdf'].float()
+        angles = data['angles'].float()
         edge_pos_feats = data['edge_pos_feats'].float()
         edge_img_feats = data['edge_img_feats'].float() / 255.
         edge_scores = data['edge_scores'].float()
