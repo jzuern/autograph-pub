@@ -18,13 +18,13 @@ def get_map_encoder(out_features=64, in_channels=3):
 
 
 class LaneGNN(torch.nn.Module):
-    def __init__(self, gnn_depth, edge_geo_dim, map_feat_dim, edge_dim, node_dim, msg_dim, in_channels=3,
+    def __init__(self, gnn_depth, edge_geo_dim, map_feat_dim, edge_dim, node_dim, msg_dim, layer_indices=[],
                  ego_regressor=None, context_regressor=None):
         super(LaneGNN, self).__init__()
 
         self.edge_geo_dim = edge_geo_dim
         self.depth = gnn_depth
-        self.in_channels = in_channels
+        self.layer_indices = layer_indices
 
         self.edge_encoder = nn.Sequential(
             nn.Linear(4, int(edge_geo_dim / 2)),
@@ -32,7 +32,7 @@ class LaneGNN(torch.nn.Module):
             nn.Linear(int(edge_geo_dim / 2), edge_geo_dim),
         )
 
-        self.bev_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=in_channels)  # default: 64
+        self.bev_encoder = get_map_encoder(out_features=map_feat_dim, in_channels=len(self.layer_indices))  # default: 64
 
         self.fuse_edge = nn.Sequential(
             nn.Linear(edge_geo_dim + map_feat_dim, edge_dim * 2),
@@ -82,14 +82,14 @@ class LaneGNN(torch.nn.Module):
         )
         node_feats = node_feats / 256.
 
+        # Filter node feats according to self.layer_indices
+        edge_img_feats = edge_img_feats[:, self.layer_indices]
+
         if edge_index.shape[1] == 2:
             edge_index = edge_index.t().contiguous()
 
         x = self.pose_encoder(node_feats.float())  # N x D
         initial_x = x
-
-        # remove input edge_img_feats according to settings of input layers
-        edge_img_feats = edge_img_feats[:, :self.in_channels]
 
         edge_attr = self.edge_encoder(edge_attr.float())  # E x D_E1
         bev_attr = self.bev_encoder(edge_img_feats)  # E x D_E2

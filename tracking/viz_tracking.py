@@ -22,9 +22,12 @@ city_name_dict ={
 '''find /home/zuern/datasets/argoverse2-full -type f -wholename '/home/zuern/datasets/argoverse2-full/*/*/*/tracking.pickle' > tracking_files.txt '''
 tracking_files = np.loadtxt("tracking_files.txt", dtype=str).tolist()
 
+# Visualize tracklets
+predictions_files = sorted(glob("/data/argoverse2-full/*/*/*/tracking.pickle"))
 
 city_name = "PIT"
 [transform_R, transform_c, transform_t] = get_transform_params(city_name_dict[city_name])
+
 
 fig, ax = plt.subplots()
 ax.set_aspect('equal')

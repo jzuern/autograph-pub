@@ -419,12 +419,15 @@ def main():
     in_layers = opt.in_layers
     print("Using the following input layers: ", in_layers)
     in_channels = 0
+    layer_indices = []
     if "rgb" in in_layers:
-        in_channels += 3
+        layer_indices = layer_indices + [0, 1, 2]
     if "sdf" in in_layers:
-        in_channels += 1
+        layer_indices = layer_indices + [3]
     if "angle" in in_layers:
-        in_channels += 3
+        layer_indices = layer_indices + [4, 5, 6]
+    if "pos_encoding" in in_layers:
+        layer_indices = layer_indices + [7, 8, 9]
 
     model = LaneGNN(gnn_depth=params.model.gnn_depth,
                     edge_geo_dim=params.model.edge_geo_dim,
@@ -432,7 +435,7 @@ def main():
                     edge_dim=params.model.edge_dim,
                     node_dim=params.model.node_dim,
                     msg_dim=params.model.msg_dim,
-                    in_channels=in_channels,
+                    layer_indices=layer_indices,
                     ).to(params.model.device)
 
     # Make model parallel if available
@@ -462,7 +465,7 @@ def main():
                                         num_samples=200,  # None for all
                                         in_layers=in_layers,
                                         target=opt.target,)
-    dataset_val = PreprocessedDataset(path=val_path,  # TODO: change to val_path
+    dataset_val = PreprocessedDataset(path=val_path,
                                       num_samples=30,  # None for all
                                       in_layers=in_layers,
                                       target=opt.target)
