@@ -124,14 +124,14 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.path = path
 
         print("Looking for files in", path)
-
-        # self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense.png')))
-        # self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
-        # self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-dense.png')))
-        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-lanes.png')))
-        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-lanes.png')))
-        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-lanes.png')))
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
+
+        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense-sparse.png')))
+        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
+        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-dense.png')))
+        # self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-lanes.png')))
+        # self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-lanes.png')))
+        # self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-lanes.png')))
 
         # check if all sdf files have same resolution
         sdf_files = self.sdf_files
@@ -141,15 +141,17 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
             if sdf_new.shape[0] == sdf_new.shape[1]:
                 self.sdf_files.append(sdf_file)
 
-        # only use files for which we have all three modalities
+        # only use files for which we have all modalities
         file_ids = [get_id(f) for f in self.sdf_files]
         self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
         self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
         self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
         self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
 
+        print(len(self.sdf_files), len(self.rgb_files), len(self.angles_files), len(self.pos_enc_files))
+
         # check if all files are present
-        assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files)
+        assert len(self.sdf_files) == len(self.rgb_files)
 
         self.split = split
 

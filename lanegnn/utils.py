@@ -39,6 +39,7 @@ def visualize_angles(a_x, a_y, mask):
 
     angle3 = np.zeros((angle.shape[0], angle.shape[1], 3), dtype=np.float32)
     angle3[..., 0] = angle
+    angle3[..., 2] = angle
     angle3 = (angle3 * 255).astype(np.uint8)
     mask = np.logical_and(a_x != 0, a_y != 0) * 255
     angle3[..., 1] = mask

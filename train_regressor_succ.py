@@ -19,32 +19,32 @@ from collections import OrderedDict
 
 from data.datasets import SuccessorRegressorDataset
 from lanegnn.utils import ParamLib
-
+import glob
 
 def weighted_mse_loss(input, target, weight):
     return torch.mean(weight * (input - target) ** 2)
 
 
 # Calculate metrics according to torchmetrics
-#precision = Precision(task="binary", average='none', mdmc_average='global')
-#recall = Recall(task="binary", average='none', mdmc_average='global')
+precision = Precision(task="binary", average='none', mdmc_average='global')
+recall = Recall(task="binary", average='none', mdmc_average='global')
 iou = JaccardIndex(task="binary", reduction='none', num_classes=2, ignore_index=0)
 f1 = F1Score(average='none', mdmc_average='global', num_classes=2, ignore_index=0)
 
 
 def calc_torchmetrics(seg_preds, seg_gts, name):
 
-    seg_preds = torch.tensor(seg_preds)
-    seg_gts = torch.tensor(seg_gts)
+    seg_preds = torch.round(torch.cat(seg_preds)).squeeze().cpu().int()
+    seg_gts = torch.round(torch.cat(seg_gts)).squeeze().cpu().int()
 
-    #p = precision(seg_preds, seg_gts).numpy()
-    #r = recall(seg_preds, seg_gts).numpy()
+    p = precision(seg_preds, seg_gts).numpy()
+    r = recall(seg_preds, seg_gts).numpy()
     i = iou(seg_preds, seg_gts).numpy()
     f = f1(seg_preds, seg_gts).numpy()
 
     metrics = {
-        #'eval/precision_{}'.format(name): p.item(),
-        #'eval/recall_{}'.format(name): r.item(),
+        'eval/precision_{}'.format(name): p.item(),
+        'eval/recall_{}'.format(name): r.item(),
         'eval/iou_{}'.format(name): i.item(),
         'eval/f1_{}'.format(name): f[1],
     }
@@ -86,7 +86,6 @@ class Trainer():
 
         print("Training...")
 
-
         self.model.train()
 
         train_progress = tqdm(self.dataloader_train)
@@ -106,7 +105,6 @@ class Trainer():
             (pred, features) = self.model(in_tensor)
             pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[2:], mode='bilinear', align_corners=True)
             pred_sdf = torch.nn.Sigmoid()(pred)
-
 
             loss_dict = {
                 'loss_sdf': torch.nn.BCELoss()(pred_sdf, sdf_target),
@@ -148,80 +146,51 @@ class Trainer():
             wandb.log({"train/epoch": epoch})
 
 
-    def eval(self, epoch):
+    def eval(self):
 
         print("Evaluating...")
 
         self.model.eval()
 
         val_losses = []
-        seg_sdf_preds = []
-        seg_sdf_gts = []
-        frac_correct_list = []
+        sdf_preds = []
+        sdf_targets = []
 
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
 
-            self.optimizer.zero_grad()
-
             # loss and optim
             sdf_target = data["sdf"].cuda()
+            pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
-            angle_x_target = data["angles_x"].cuda()
-            angle_y_target = data["angles_y"].cuda()
 
-            (pred, features) = self.model(rgb)
-            pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[1:], mode='bilinear', align_corners=True)
+            in_tensor = torch.cat([rgb, pos_enc], dim=1)
 
-            pred_angle = torch.nn.Tanh()(pred[:, :2])
-            pred_sdf = torch.nn.Sigmoid()(pred[:, 2:])
+            sdf_target = sdf_target.unsqueeze(1)
 
-            target_sdf = sdf_target.unsqueeze(1)
-            target_angle = torch.cat([angle_x_target.unsqueeze(1), angle_y_target.unsqueeze(1)], dim=1)
+            with torch.no_grad():
+                (pred, features) = self.model(in_tensor)
+                pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[2:], mode='bilinear', align_corners=True)
+                pred_sdf = torch.nn.Sigmoid()(pred)
 
-            loss_weight = target_sdf > 0.5
-            loss_weight = loss_weight.float()
+            sdf_targets.append(sdf_target)
+            sdf_preds.append(pred_sdf)
 
             loss_dict = {
-                'loss_sdf': torch.nn.BCELoss()(pred_sdf, target_sdf),
-                'loss_angles': weighted_mse_loss(pred_angle, target_angle, loss_weight),
+                'loss_sdf': torch.nn.BCELoss()(pred_sdf, sdf_target),
             }
 
-            seg_sdf_preds.append((pred_sdf[0] > self.threshold_sdf).cpu().numpy().astype(np.uint8)[0])
-            seg_sdf_gts.append((target_sdf[0] > self.threshold_sdf).cpu().numpy().astype(np.uint8).squeeze())
-
-            target_angle = torch.atan2(angle_y_target, angle_x_target)
-            pred_angle = torch.atan2(pred_angle[0, 1], pred_angle[0, 0])
-
-            correct_angles = (torch.abs(pred_angle - target_angle)[0] < self.threshold_angle)
-            correct_angles = (correct_angles * (target_sdf[0, 0] > self.threshold_sdf)).cpu().numpy().astype(np.uint8)
-            sdf_thresholded = (target_sdf[0, 0].cpu().numpy() > self.threshold_sdf).astype(np.uint8)
-
-            frac_correct_angles = np.sum(correct_angles) / np.sum(sdf_thresholded)
-            frac_correct_list.append(frac_correct_angles)
-
-            loss = sum(loss_dict.values())
-            val_losses.append(loss.item())
-
+            loss = sum(loss_dict.values()).cpu().numpy().item()
+            val_losses.append(loss)
 
         val_loss = np.nanmean(val_losses)
 
-        print("eval/loss", val_loss)
-
-        metrics_sdf = calc_torchmetrics(seg_sdf_preds, seg_sdf_gts, name="sdf")
-
-        frac_correct_angle = np.nanmean(frac_correct_list)
-        print("eval/frac_correct_angle", frac_correct_angle)
+        metrics_sdf = calc_torchmetrics(sdf_preds, sdf_targets, name="sdf")
+        metrics_sdf["eval/loss"] = val_loss
 
         print(metrics_sdf)
 
-        if not self.params.main.disable_wandb:
-            wandb.log({"eval/loss": val_loss,
-                       "eval/frac_correct_angle": frac_correct_angle})
-            wandb.log(metrics_sdf)
-
-        return val_loss
-
+        return metrics_sdf
 
 
     def inference(self):
@@ -229,61 +198,63 @@ class Trainer():
         print("Inference...")
 
         # Load model
-        #model_path = "checkpoints/reg_succ_lanes.pth"
-        #model_path = "checkpoints/reg_succ_traj.pth"
-        model_path = "checkpoints/reg_succ_traj_3.pth"
+        model_path = "checkpoints/reg_succ_enchanting-ox-7.pth"
+        #model_path = "checkpoints/reg_succ_enchanting-ox-7-e180.pth"
 
         state_dict = torch.load(model_path)
         new_state_dict = OrderedDict()
         for k, v in state_dict.items():
-            name = k[7:]  # remove `module.`
+            if 'module' in k:
+                name = k[7:]  # remove `module.`
+            else:
+                name = k
             new_state_dict[name] = v
 
         self.model.load_state_dict(new_state_dict)
         self.model = self.model.eval()
 
-        base_image = "/data/autograph/exp-successors-traj/pittsburgh-pre/val/0-Pittsburgh-25900-35700-rgb.png"
-        base_image = cv2.imread(base_image)
-
-        # cv2 callback function for clicking on image
-        def click(event, x, y, flags, param):
-            if event == cv2.EVENT_LBUTTONDOWN:
-                q = [y, x]
-
-                pos_encoding = np.zeros(base_image.shape, dtype=np.float32)
-                x, y = np.meshgrid(np.arange(base_image.shape[1]), np.arange(base_image.shape[0]))
-                pos_encoding[q[0], q[1], 0] = 1
-                pos_encoding[..., 1] = np.abs((x - q[1])) / base_image.shape[1]
-                pos_encoding[..., 2] = np.abs((y - q[0])) / base_image.shape[0]
-                pos_encoding = (pos_encoding * 255).astype(np.uint8)
-                pos_encoding = cv2.cvtColor(pos_encoding, cv2.COLOR_BGR2RGB)
-
-                cv2.imshow("base_image", base_image)
-                cv2.imshow("pos_encoding", pos_encoding)
-                cv2.waitKey(1)
-
-                rgb = torch.from_numpy(base_image).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
-                pos_enc = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
-
-                in_tensor = torch.cat([rgb, pos_enc], dim=1)
-                in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
-
-                (pred, features) = self.model(in_tensor)
-                pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
-                pred_sdf = torch.nn.Sigmoid()(pred)
-
-                pred_sdf = pred_sdf[0, 0].cpu().detach().numpy()
-
-                pred_sdf = (pred_sdf * 255).astype(np.uint8)
-                pred_sdf_viz = cv2.addWeighted(base_image, 0.5, cv2.applyColorMap(pred_sdf, cv2.COLORMAP_MAGMA), 0.5, 0)
-                cv2.imshow("pred_sdf_viz", pred_sdf_viz)
+        base_images = glob.glob("/data/autograph/exp-successors-sparse-intersection/pittsburgh-pre/val/Pittsburgh-*rgb.png")
 
 
-        cv2.namedWindow("base_image")
-        cv2.setMouseCallback("base_image", click)
-        cv2.waitKey(-1)
+        for base_image in base_images:
+            base_image = cv2.imread(base_image)
 
-        exit()
+            # cv2 callback function for clicking on image
+            def click(event, x, y, flags, param):
+                if event == cv2.EVENT_LBUTTONDOWN:
+                    q = [y, x]
+
+                    pos_encoding = np.zeros(base_image.shape, dtype=np.float32)
+                    x, y = np.meshgrid(np.arange(base_image.shape[1]), np.arange(base_image.shape[0]))
+                    pos_encoding[q[0], q[1], 0] = 1
+                    pos_encoding[..., 1] = np.abs((x - q[1])) / base_image.shape[1]
+                    pos_encoding[..., 2] = np.abs((y - q[0])) / base_image.shape[0]
+                    pos_encoding = (pos_encoding * 255).astype(np.uint8)
+                    pos_encoding = cv2.cvtColor(pos_encoding, cv2.COLOR_BGR2RGB)
+
+                    # cv2.waitKey(1)
+
+                    rgb = torch.from_numpy(base_image).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
+                    pos_enc = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
+
+                    in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                    in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
+
+                    (pred, features) = self.model(in_tensor)
+                    pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear',
+                                                           align_corners=True)
+                    pred_sdf = torch.nn.Sigmoid()(pred)
+
+                    pred_sdf = pred_sdf[0, 0].cpu().detach().numpy()
+
+                    pred_sdf = (pred_sdf * 255).astype(np.uint8)
+                    pred_sdf_viz = cv2.addWeighted(base_image, 0.5, cv2.applyColorMap(pred_sdf, cv2.COLORMAP_MAGMA),
+                                                   0.5, 0)
+                    cv2.imshow("pred_sdf_viz", pred_sdf_viz)
+
+            cv2.namedWindow("pred_sdf_viz")
+            cv2.setMouseCallback("pred_sdf_viz", click)
+            cv2.waitKey(-1)
 
 
 
@@ -302,6 +273,7 @@ def main():
     parser.add_argument('--target', type=str, choices=["sdf", "angle", "both"], help="define the target that is used")
     parser.add_argument('--stego', action="store_true", default=False, help="If True, applies stego loss")
     parser.add_argument('--visualize', action='store_true', help="visualize the dataset")
+    parser.add_argument('--disable_wandb', '-d', action='store_true', help="disable wandb")
 
     opt = parser.parse_args()
 
@@ -345,8 +317,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'exp-successors-lanes', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, 'exp-successors-lanes', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, 'exp-successors-sparse-intersection', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, 'exp-successors-sparse-intersection', "*", "val")
 
     dataset_train = SuccessorRegressorDataset(path=train_path, split='train')
     dataset_val = SuccessorRegressorDataset(path=val_path, split='val')
@@ -373,8 +345,10 @@ def main():
         #if not params.main.disable_wandb:
         if epoch % 2 == 0:
 
-            #eval_loss = trainer.eval(epoch)
-            eval_loss = 0.0
+            metrics_sdf = trainer.eval()
+
+            if not params.main.disable_wandb:
+                wandb.log(metrics_sdf)
 
             try:
                 wandb_run_name = wandb.run.name

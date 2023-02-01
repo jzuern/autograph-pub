@@ -19,9 +19,10 @@ if __name__ == '__main__':
             q = np.array([mouseX, mouseY])
 
             succ_traj,  sat_image_viz = merge_successor_trajectories(q, t, sat_image)
-            sat_image_viz, sdf = get_succ_graph(q, succ_traj,  sat_image_viz)
+            G, sat_image_viz, sdf, angles, angles_viz = get_succ_graph(q, succ_traj,  sat_image_viz)
 
             sat_image_viz = cv2.circle(sat_image_viz, (mouseX, mouseY), 5, (0, 0, 0), -1)
+
             print("Inference time: {:.4f} s".format(time.time() - now))
             cv2.imshow('image_0', sat_image_viz)
 
