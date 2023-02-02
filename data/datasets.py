@@ -10,7 +10,8 @@ import networkx as nx
 
 
 def get_id(filename):
-    return os.path.basename(filename).split('-')[1] + '-' + os.path.basename(filename).split('-')[2]
+    id_list = os.path.basename(filename).split('-')
+    return "-".join(id_list[1:4])
 
 
 class RegressorDataset(torch.utils.data.Dataset):
@@ -23,14 +24,6 @@ class RegressorDataset(torch.utils.data.Dataset):
         self.intersection_files = sorted(glob(os.path.join(path, '*-intersection-gt.png')))
         self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
-
-        # check if all sdf files have same resolution
-        sdf_files = self.sdf_files
-        self.sdf_files = []
-        for sdf_file in sdf_files:
-            sdf_new = cv2.imread(sdf_file, cv2.IMREAD_UNCHANGED)
-            if sdf_new.shape[0] == sdf_new.shape[1]:
-                self.sdf_files.append(sdf_file)
 
         # only use files for which we have all three modalities
         file_ids = [get_id(f) for f in self.sdf_files]
@@ -52,7 +45,7 @@ class RegressorDataset(torch.utils.data.Dataset):
     def random_rotate(self, return_dict):
 
 
-        # TODO: DEBBUG THIS
+        # TODO: DEBUG THIS
 
         # random rotation
         k = np.random.choice([0, 1, 2, 3])
@@ -120,35 +113,24 @@ class RegressorDataset(torch.utils.data.Dataset):
 
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
-    def __init__(self, path, split):
+    def __init__(self, params, path, split):
         self.path = path
+        self.params = params
 
         print("Looking for files in", path)
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
-
-        self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-dense-sparse.png')))
-        self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
+        self.sdf_files = sorted(glob(os.path.join(path, '*-masks-dense.png')))
+        #self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
         self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-dense.png')))
-        # self.sdf_files = sorted(glob(os.path.join(path, '*-sdf-tracklets-lanes.png')))
-        # self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-lanes.png')))
-        # self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-lanes.png')))
-
-        # check if all sdf files have same resolution
-        sdf_files = self.sdf_files
-        self.sdf_files = []
-        for sdf_file in sdf_files:
-            sdf_new = cv2.imread(sdf_file, cv2.IMREAD_UNCHANGED)
-            if sdf_new.shape[0] == sdf_new.shape[1]:
-                self.sdf_files.append(sdf_file)
 
         # only use files for which we have all modalities
         file_ids = [get_id(f) for f in self.sdf_files]
         self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
-        self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
+        #self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
         self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
         self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
 
-        print(len(self.sdf_files), len(self.rgb_files), len(self.angles_files), len(self.pos_enc_files))
+        print(len(self.sdf_files), len(self.rgb_files), len(self.pos_enc_files))
 
         # check if all files are present
         assert len(self.sdf_files) == len(self.rgb_files)
@@ -160,39 +142,61 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.sdf_files)
 
+    def random_rotate(self, return_dict):
+        k = np.random.randint(0, 4)
+        return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
+        return_dict['mask_full'] = torch.rot90(return_dict['mask_full'], k, [0, 1])
+        return_dict['mask_successor'] = torch.rot90(return_dict['mask_successor'], k, [0, 1])
+        return_dict['mask_pedestrian'] = torch.rot90(return_dict['mask_pedestrian'], k, [0, 1])
+
+        return_dict['pos_enc'] = torch.rot90(return_dict['pos_enc'], k, [0, 1])
+
+
+
     def __getitem__(self, idx):
-        sdf = cv2.imread(self.sdf_files[idx], cv2.IMREAD_UNCHANGED)
+        mask = cv2.imread(self.sdf_files[idx], cv2.IMREAD_COLOR)
         pos_enc = cv2.imread(self.pos_enc_files[idx], cv2.IMREAD_UNCHANGED)
-        angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_COLOR)
-        angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
+        #angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_COLOR)
+        #angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
         rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
 
         # convert from angles to unit circle xy coordinates
         # to hsv to get hue
-        angles_mask = (angles[:, :, 1] > 0).astype(np.uint8)
-        angles = angles[:, :, 0] / 255.0
+        #angles_mask = (angles[:, :, 1] > 0).astype(np.uint8)
+        #angles = angles[:, :, 0] / 255.0
 
-        angles_x = np.cos(angles)
-        angles_y = np.sin(angles)
+        #angles_x = np.cos(angles)
+        #angles_y = np.sin(angles)
+
+        mask_full = mask[:, :, 1]
+        mask_successor = mask[:, :, 2]
+        mask_pedestrian = mask[:, :, 0]
 
         # to tensor
-        sdf = torch.from_numpy(sdf).float() / 255.0
-        angles_x = torch.from_numpy(angles_x).float()
-        angles_y = torch.from_numpy(angles_y).float()
-        angles_mask = torch.from_numpy(angles_mask).float()
-        angles = torch.from_numpy(angles).float()
+        mask_full = torch.from_numpy(mask_full).float() / 255.0
+        mask_successor = torch.from_numpy(mask_successor).float() / 255.0
+        mask_pedestrian = torch.from_numpy(mask_pedestrian).float() / 255.0
+        #angles_x = torch.from_numpy(angles_x).float()
+        #angles_y = torch.from_numpy(angles_y).float()
+        #angles_mask = torch.from_numpy(angles_mask).float()
+        #angles = torch.from_numpy(angles).float()
         rgb = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
         pos_enc = torch.from_numpy(pos_enc).float().permute(2, 0, 1) / 255.0
 
         return_dict = {
-            'sdf': sdf,
+            'mask_full': mask_full,
+            'mask_successor': mask_successor,
+            'mask_pedestrian': mask_pedestrian,
             'pos_enc': pos_enc,
-            'angles_mask': angles_mask,
-            'angles_x': angles_x,
-            'angles_y': angles_y,
-            'angles': angles,
+            #'angles_mask': angles_mask,
+            #'angles_x': angles_x,
+            #'angles_y': angles_y,
+            #'angles': angles,
             'rgb': rgb
         }
+
+        if self.params.preprocessing.augment and self.split == 'train':
+           return_dict = self.random_rotate(return_dict)
 
         return return_dict
 

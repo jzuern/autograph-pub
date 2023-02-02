@@ -94,11 +94,15 @@ class Trainer():
             #data = self.one_sample_data
 
             # loss and optim
-            sdf_target = data["sdf"].cuda()
+            #sdf_target = data["mask_full"].cuda()
+            sdf_target = data["mask_successor"].cuda()
+            #sdf_target = data["mask_pedestrian"].cuda()
+
             pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
             in_tensor = torch.cat([rgb, pos_enc], dim=1)
+            #in_tensor = rgb
 
             sdf_target = sdf_target.unsqueeze(1)
 
@@ -160,11 +164,16 @@ class Trainer():
         for step, data in enumerate(eval_progress):
 
             # loss and optim
-            sdf_target = data["sdf"].cuda()
+            #sdf_target = data["mask_full"].cuda()
+            sdf_target = data["mask_successor"].cuda()
+            #sdf_target = data["mask_pedestrian"].cuda()
+
+
             pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
             in_tensor = torch.cat([rgb, pos_enc], dim=1)
+            #in_tensor = rgb
 
             sdf_target = sdf_target.unsqueeze(1)
 
@@ -198,8 +207,7 @@ class Trainer():
         print("Inference...")
 
         # Load model
-        model_path = "checkpoints/reg_succ_enchanting-ox-7.pth"
-        #model_path = "checkpoints/reg_succ_enchanting-ox-7-e180.pth"
+        model_path = "checkpoints/reg_succ_local_run.pth"
 
         state_dict = torch.load(model_path)
         new_state_dict = OrderedDict()
@@ -213,7 +221,7 @@ class Trainer():
         self.model.load_state_dict(new_state_dict)
         self.model = self.model.eval()
 
-        base_images = glob.glob("/data/autograph/exp-successors-sparse-intersection/pittsburgh-pre/val/Pittsburgh-*rgb.png")
+        base_images = glob.glob("/data/autograph/successors-pedestrians/pittsburgh-pre/val/*rgb.png")
 
 
         for base_image in base_images:
@@ -232,12 +240,11 @@ class Trainer():
                     pos_encoding = (pos_encoding * 255).astype(np.uint8)
                     pos_encoding = cv2.cvtColor(pos_encoding, cv2.COLOR_BGR2RGB)
 
-                    # cv2.waitKey(1)
-
                     rgb = torch.from_numpy(base_image).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
                     pos_enc = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
 
                     in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                    #in_tensor = rgb
                     in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
 
                     (pred, features) = self.model(in_tensor)
@@ -270,10 +277,10 @@ def main():
     parser.add_argument('--config', type=str, help='Provide a config YAML!', required=True)
     parser.add_argument('--dataset', type=str, help="dataset path")
     parser.add_argument('--version', type=str, help="define the dataset version that is used")
-    parser.add_argument('--target', type=str, choices=["sdf", "angle", "both"], help="define the target that is used")
     parser.add_argument('--stego', action="store_true", default=False, help="If True, applies stego loss")
     parser.add_argument('--visualize', action='store_true', help="visualize the dataset")
     parser.add_argument('--disable_wandb', '-d', action='store_true', help="disable wandb")
+    parser.add_argument('--inference', action='store_true', help="perform inference instead of training")
 
     opt = parser.parse_args()
 
@@ -281,7 +288,6 @@ def main():
     params.main.overwrite(opt)
     params.preprocessing.overwrite(opt)
     params.model.overwrite(opt)
-    params.model.target = opt.target
     params.visualize = opt.visualize
     params.stego = opt.stego
 
@@ -300,7 +306,9 @@ def main():
         wandb.config.update(params.preprocessing)
 
     # -------  Model, optimizer and data initialization ------
-    model = DeepLabv3Plus(models.resnet101(pretrained=True), num_in_channels=6, num_classes=1).to(params.model.device)
+    model = DeepLabv3Plus(models.resnet101(pretrained=True),
+                          num_in_channels=6,
+                          num_classes=1).to(params.model.device)
 
     # Make model parallel if available
     if params.model.dataparallel:
@@ -317,11 +325,11 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'exp-successors-sparse-intersection', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, 'exp-successors-sparse-intersection', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, 'successors-pedestrians', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, 'successors-pedestrians', "*", "val")
 
-    dataset_train = SuccessorRegressorDataset(path=train_path, split='train')
-    dataset_val = SuccessorRegressorDataset(path=val_path, split='val')
+    dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train')
+    dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val')
 
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,
@@ -335,7 +343,8 @@ def main():
 
     trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
 
-    trainer.inference()
+    if opt.inference:
+        trainer.inference()
 
     for epoch in range(params.model.num_epochs):
 

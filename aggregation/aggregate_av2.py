@@ -140,16 +140,18 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
 
 
 
-def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_, lanes_, sat_image_, out_path_root, centerline_image_=None, city_name=None):
+def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_, trajectories_ped_, lanes_, sat_image_, out_path_root, centerline_image_=None, city_name=None):
 
     if "tracklets" in source:
         annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
+        annotations_ped_centers = [np.mean(t, axis=0) for t in trajectories_ped_]
         annot_ = trajectories_
+        annot_ped_ = trajectories_ped_
     elif "lanes" in source:
         annotations_centers = [np.mean(t, axis=0) for t in lanes_]
         annot_ = lanes_
     else:
-        raise ValueError("Invalid source")
+        raise ValueError("Invalid annotation source")
 
     for roi_num, roi_xxyy in tqdm(enumerate(roi_xxyy_list), total=len(roi_xxyy_list)):
 
@@ -174,44 +176,59 @@ def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_,
             continue
 
         annot_candidates = []
+        annot_ped_candidates = []
         for i in range(len(annot_)):
             if np.linalg.norm(annotations_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 500:
                 annot_candidates.append(annot_[i])
+        for i in range(len(annot_ped_)):
+            if np.linalg.norm(annotations_ped_centers[i] - [roi_xxyy[2], roi_xxyy[0]]) < 500:
+                annot_ped_candidates.append(annot_ped_[i])
 
         annots = []
         for annot in annot_candidates:
-
             annot = annot - np.array([roi_xxyy[2], roi_xxyy[0]])
-
-            # # filter trajectories according to current roi_xxyy
+            # filter trajectories according to current roi_xxyy
             is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image.shape[1])
             if not np.any(is_in_roi):
                 continue
             is_in_roi = np.logical_and(is_in_roi, annot[:, 1] > 0)
             if not np.any(is_in_roi):
                 continue
-
             is_in_roi = np.logical_and(is_in_roi, annot[:, 1] < sat_image.shape[0])
             if not np.any(is_in_roi):
                 continue
-
             annot = annot[is_in_roi]
 
             # resample trajectory to have equally distant points
             annot = resample_trajectory(annot, dist=5)
 
-            # filter based on number of points
-            if "tracklets" in source:
-                if len(annot) < 15:
-                    continue
-
-            # and on physical length of trajectory
-            if "tracklets" in source:
-                total_length = np.sum(np.linalg.norm(annot[1:] - annot[:-1], axis=1))
-                if total_length < 50:
-                    continue
-
             annots.append(annot)
+
+        annots_ped = []
+        for annot in annot_ped_candidates:
+            annot = annot - np.array([roi_xxyy[2], roi_xxyy[0]])
+
+            # filter trajectories according to current roi_xxyy
+            is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image.shape[1])
+            if not np.any(is_in_roi):
+                continue
+            is_in_roi = np.logical_and(is_in_roi, annot[:, 1] > 0)
+            if not np.any(is_in_roi):
+                continue
+            is_in_roi = np.logical_and(is_in_roi, annot[:, 1] < sat_image.shape[0])
+            if not np.any(is_in_roi):
+                continue
+            annot = annot[is_in_roi]
+
+            # resample trajectory to have equally distant points
+            annot = resample_trajectory(annot, dist=5)
+
+            annots_ped.append(annot)
+
+
+        # filter out too short annots
+        annots = [a for a in annots if len(a) > 5]
+        annots_ped = [a for a in annots_ped if len(a) > 5]
 
         if len(annots) < 1:
             continue
@@ -222,10 +239,9 @@ def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_,
 
         query_points = np.random.randint(0, sat_image.shape[0], size=(200, 2))
 
-
         # Whether to export sparse or dense trajectory annotations
         if source == "tracklets_sparse":
-            trajectories = annots # not filtered
+            trajectories = annots  # not filtered
             output_name = "sparse"
         elif source == "tracklets_dense":
             output_name = "dense"
@@ -240,9 +256,9 @@ def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_,
 
         for i_query, q in enumerate(query_points):
 
-            succ_traj, sat_image_viz = merge_successor_trajectories(q, trajectories, sat_image)
+            succ_traj, mask_total, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image)
 
-            if len(succ_traj) < 5:
+            if len(succ_traj) < 3:
                 logging.info("Too few successor trajectories")
                 continue
 
@@ -256,14 +272,19 @@ def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_,
                 logging.info("Not enough pixels covered with successor graph. Skipping")
                 continue
 
-
             # Must be sufficiently dissimilar from any previous sample
             max_iou = max([bm0(mask_succ_sparse, m) for m in tracklets_im_list]) if len(tracklets_im_list) > 0 else 0
-            print(max_iou)
             if max_iou > 0.7:
                 logging.info("Sample too similar to previous samples. Skipping")
                 continue
             tracklets_im_list.append(mask_succ_sparse)
+
+
+            # Build 3 channel mask
+            mask_all = np.zeros(sat_image.shape, dtype=np.uint8)
+            mask_all[:, :, 0] = (mask_succ_sparse * 255.).astype(np.uint8)
+            mask_all[:, :, 1] = mask_total[:, :, 1]
+            mask_all[:, :, 2] = mask_total[:, :, 2]
 
 
             pos_encoding = np.zeros(sat_image.shape, dtype=np.float32)
@@ -278,9 +299,10 @@ def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_,
             Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding-{}.png".format(out_path, sample_id, i_query, output_name))
             Image.fromarray(sat_image).save("{}/{}-{}-rgb.png".format(out_path, sample_id, i_query))
             Image.fromarray(sat_image_viz).save("{}/{}-{}-rgb-viz.png".format(out_path, sample_id, i_query))
-            Image.fromarray(angles_viz).save("{}/{}-{}-angles-tracklets-{}.png".format(out_path, sample_id, i_query, output_name))
-            Image.fromarray((sdf * 255.).astype(np.uint8)).convert("L").save("{}/{}-{}-sdf-tracklets-{}.png".format(out_path, sample_id, i_query, output_name))
-            Image.fromarray((mask_succ_sparse * 255.).astype(np.uint8)).convert("L").save("{}/{}-{}-sdf-tracklets-{}-sparse.png".format(out_path, sample_id, i_query, output_name))
+            #Image.fromarray(angles_viz).save("{}/{}-{}-angles-tracklets-{}.png".format(out_path, sample_id, i_query, output_name))
+            #Image.fromarray((sdf * 255.).astype(np.uint8)).convert("L").save("{}/{}-{}-sdf-tracklets-{}.png".format(out_path, sample_id, i_query, output_name))
+            #Image.fromarray((mask_succ_sparse * 255.).astype(np.uint8)).convert("L").save("{}/{}-{}-sdf-tracklets-{}-sparse.png".format(out_path, sample_id, i_query, output_name))
+            Image.fromarray((mask_all).astype(np.uint8)).save("{}/{}-{}-masks-{}.png".format(out_path, sample_id, i_query, output_name))
 
 
             if export_final:
@@ -763,8 +785,7 @@ if __name__ == "__main__":
         trajectories_gt_ = np.load("data/trajectories_gt_{}.npy".format(city_name), allow_pickle=True)  # GT
         lanes_ = np.load("data/lanes_{}.npy".format(city_name), allow_pickle=True)
 
-    #if not os.path.exists("data/trajectories_pred_{}.npy".format(city_name)):
-    if True:
+    if not os.path.exists("data/trajectories_pred_{}.npy".format(city_name)):
         trajectories_pred_ = []
         trajectories_ped_pred_ = []
 
@@ -801,10 +822,18 @@ if __name__ == "__main__":
 
                 for counter, tracklet in enumerate(tracklets):
                     tracklet = tracklets[tracklet]
-                    tracklet = filter_tracklet(tracklet, transform_t, transform_c, transform_R)
+
+                    if tracklet.label in [1, 2, 3, 4, 5, 7]:  # vehicle
+                        tracklet.label = 1
+                    else:
+                        tracklet.label = 2  # pedestrian
+
+
+                    tracklet.transform(transform_t, transform_c, transform_R)
+
+                    tracklet = filter_tracklet(tracklet)
 
                     if tracklet is not None:
-                        print(tracklet.label)
 
                         if tracklet.label == 1: # vehicle
                             trajectories_pred_.append(tracklet.path)
@@ -822,27 +851,10 @@ if __name__ == "__main__":
 
     # USE PRED TRAJECTORIES
     trajectories_ = trajectories_pred_
+    trajectories_ped_ = trajectories_ped_pred_
 
     # OR USE GT TRAJETORIES
     #trajectories_ = trajectories_gt_
-
-
-    print("Number of trajectories BEFORE filter: {}".format(len(trajectories_)))
-    trajectories_list = []
-    # generate roi_xxyy list over full satellite image in sliding window fashion
-    for t in trajectories_:
-        # ignore too small end start difference (i.e. standing vehicles)
-        if np.linalg.norm(t[0] - t[-1]) < 50:  # in px
-            continue
-
-        # too few samples in trajectory
-        if len(t) < 20:
-            continue
-
-        trajectories_list.append(t)
-
-    trajectories_ = np.array(trajectories_list)
-    print("Number of trajectories AFTER filter: {}".format(len(trajectories_)))
 
 
     # Visualize tracklets
@@ -859,9 +871,10 @@ if __name__ == "__main__":
         for i in range(len(t)-1):
             cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
 
-    cv2.imwrite(os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name)), cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
+    viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
+    print("Saving tracklet visualization to {}".format(viz_file))
+    cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
 
-    exit()
 
     # single core
     if num_cpus <= 1:
@@ -869,6 +882,7 @@ if __name__ == "__main__":
                       roi_xxyy_list,
                       export_final,
                       trajectories_,
+                      trajectories_ped_,
                       lanes_,
                       sat_image_,
                       out_path_root,
@@ -901,6 +915,7 @@ if __name__ == "__main__":
                         roi_chunks,
                         repeat(export_final),
                         repeat(trajectories_),
+                        repeat(trajectories_ped_),
                         repeat(lanes_),
                         repeat(sat_image_),
                         repeat(out_path_root),

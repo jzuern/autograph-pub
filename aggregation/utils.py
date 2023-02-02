@@ -24,7 +24,7 @@ def bm0(mask1, mask2):
     iou = intersection/(mask1_area+mask2_area-intersection)
     return iou
 
-def merge_successor_trajectories(q, trajectories_all, sat_image):
+def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_image):
     # Get all trajectories that go through query point
 
     dist_thrsh = 6  # in px
@@ -81,9 +81,24 @@ def merge_successor_trajectories(q, trajectories_all, sat_image):
         for i in range(len(t2)-1):
             cv2.arrowedLine(sat_image_viz, tuple(t2[i].astype(int)), tuple(t2[i+1].astype(int)), (255, 0, 0), 1)
 
+    mask_ped = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
+    mask_veh = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
+
+    for t in trajectories_all:
+        for i in range(len(t)-1):
+            cv2.arrowedLine(mask_veh, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
+    for t in trajectories_ped:
+        for i in range(len(t)-1):
+            cv2.arrowedLine(mask_ped, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
+            cv2.arrowedLine(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1)
+
+    mask_total = np.zeros(sat_image.shape, dtype=np.uint8)
+    mask_total[:, :, 2] = mask_ped
+    mask_total[:, :, 1] = mask_veh
+
     succ_traj = trajectories_2 + trajectories_close_q
 
-    return succ_traj,  sat_image_viz
+    return succ_traj,  mask_total, sat_image_viz
 
 
 
@@ -95,27 +110,34 @@ class Tracklet(object):
         self.path = []
         self.timesteps = []
 
+    def transform(self, t, c, R):
+        self.path = np.array(self.path)
+        traj = self.path[:, 0:2]
 
-def filter_tracklet(tracklet, t, c, R):
+        # Coordinate transformation
+        bb = np.hstack([traj, np.zeros((len(traj), 1))])
+        tmp = t[np.newaxis, :] + c * np.einsum('jk,ik', R, bb)
+        traj = tmp[:, 0:2]
+
+        self.path = traj
+
+
+def filter_tracklet(tracklet):
 
     traj = np.array(tracklet.path)
-    traj_type = tracklet.label
-
     traj = traj[:, 0:2]
 
-    # ALL UNITS IN m
-    if traj_type in [1, 2, 3, 4, 5, 7]:  # vehicle
-        tracklet.label = 1
-        MIN_TRAJ_LEN = 15
-        MIN_START_END_DIFF = 10
-        MIN_TIMESTEPS = 10
-        MAX_JUMPSIZE = 2
-    else:
-        tracklet.label = 2
+    # ALL UNITS IN PIX
+    if tracklet.label == 1:  # vehicle
+        MIN_TRAJ_LEN = 50
+        MIN_START_END_DIFF = 50
+        MIN_TIMESTEPS = 5
+        MAX_JUMPSIZE = 20
+    else:                   # pedestrian
         MIN_TRAJ_LEN = 5
         MIN_START_END_DIFF = 5
-        MIN_TIMESTEPS = 10
-        MAX_JUMPSIZE = 1
+        MIN_TIMESTEPS = 5
+        MAX_JUMPSIZE = 10
 
     # Based on overall length
     total_length = np.sum(np.linalg.norm(traj[1:] - traj[:-1], axis=1))
@@ -135,10 +157,6 @@ def filter_tracklet(tracklet, t, c, R):
     if np.max(np.linalg.norm(traj[1:] - traj[:-1], axis=1)) > MAX_JUMPSIZE:
         return None
 
-    # Coordinate transformation
-    bb = np.hstack([traj, np.zeros((len(traj), 1))])
-    tmp = t[np.newaxis, :] + c * np.einsum('jk,ik', R, bb)
-    traj = tmp[:, 0:2]
 
     tracklet.path = traj
 
