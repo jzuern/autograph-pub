@@ -7,6 +7,7 @@ import os
 import cv2
 import numpy as np
 import networkx as nx
+import random
 
 
 def get_id(filename):
@@ -44,12 +45,13 @@ class RegressorDataset(torch.utils.data.Dataset):
 
     def random_rotate(self, return_dict):
 
-
         # TODO: DEBUG THIS
+
+
 
         # random rotation
         k = np.random.choice([0, 1, 2, 3])
-        #k = np.random.choice([1])
+        #k = np.random.choice([0])
 
 
         return_dict['rgb_unrotated'] = return_dict['rgb']
@@ -130,6 +132,11 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
         self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
 
+        # jointly shuffle them
+        c = list(zip(self.sdf_files, self.rgb_files, self.pos_enc_files))
+        random.shuffle(c)
+        self.sdf_files, self.rgb_files, self.pos_enc_files = zip(*c)
+
         print(len(self.sdf_files), len(self.rgb_files), len(self.pos_enc_files))
 
         # check if all files are present
@@ -149,7 +156,32 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         return_dict['mask_successor'] = torch.rot90(return_dict['mask_successor'], k, [0, 1])
         return_dict['mask_pedestrian'] = torch.rot90(return_dict['mask_pedestrian'], k, [0, 1])
 
-        return_dict['pos_enc'] = torch.rot90(return_dict['pos_enc'], k, [0, 1])
+        imshape = return_dict['rgb'].shape
+
+        old_pos_encoding = return_dict['pos_enc']
+        pos_center = torch.where(old_pos_encoding == 1.0)[1:3]
+        q = pos_center[0].item(), pos_center[1].item()
+
+        # change position of q according to rotation
+        if k == 1:
+            q = old_pos_encoding.shape[2] - q[1] - 1, q[0]
+        elif k == 2:
+            q = old_pos_encoding.shape[1] - q[0] - 1, old_pos_encoding.shape[2] - q[1] - 1
+        elif k == 3:
+            q = q[1], old_pos_encoding.shape[1] - q[0] - 1
+
+        pos_encoding = np.zeros(imshape, dtype=np.float32)
+        x, y = np.meshgrid(np.arange(imshape[2]), np.arange(imshape[1]))
+        pos_encoding[2, q[1], q[0]] = 1
+        pos_encoding[0, :, :] = np.abs((x - q[0])) / imshape[2]
+        pos_encoding[1, :, :] = np.abs((y - q[1])) / imshape[1]
+        pos_encoding = (pos_encoding * 255).astype(np.uint8)
+
+        pos_encoding = torch.from_numpy(pos_encoding).float() / 255.0
+
+        return_dict['pos_enc'] = pos_encoding
+
+        return return_dict
 
 
 
@@ -195,7 +227,7 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
             'rgb': rgb
         }
 
-        if self.params.preprocessing.augment and self.split == 'train':
+        if self.split == 'train':
            return_dict = self.random_rotate(return_dict)
 
         return return_dict

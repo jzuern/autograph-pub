@@ -16,10 +16,12 @@ from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 import torchvision.models as models
 from torchmetrics import JaccardIndex, Precision, Recall, F1Score
 from collections import OrderedDict
+from matplotlib import cm
 
 from data.datasets import SuccessorRegressorDataset
-from lanegnn.utils import ParamLib
+from lanegnn.utils import ParamLib, make_image_grid
 import glob
+
 
 def weighted_mse_loss(input, target, weight):
     return torch.mean(weight * (input - target) ** 2)
@@ -56,7 +58,7 @@ def calc_torchmetrics(seg_preds, seg_gts, name):
 
 class Trainer():
 
-    def __init__(self, params, model, dataloader_train, dataloader_val, optimizer):
+    def __init__(self, params, model, dataloader_train, dataloader_val, optimizer, model_full=None):
 
         self.model = model
         self.dataloader_train = dataloader_train
@@ -67,6 +69,8 @@ class Trainer():
         self.total_step = 0
         self.threshold_sdf = 0.3
         self.threshold_angle = np.pi / 4.
+        self.model_full = model_full
+
 
         if self.params.stego:
             print("Using STEGO Loss")
@@ -91,18 +95,25 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-            #data = self.one_sample_data
-
-            # loss and optim
-            #sdf_target = data["mask_full"].cuda()
-            sdf_target = data["mask_successor"].cuda()
-            #sdf_target = data["mask_pedestrian"].cuda()
-
+            mask_pedestrian = data["mask_pedestrian"].cuda()
             pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
-            in_tensor = torch.cat([rgb, pos_enc], dim=1)
-            #in_tensor = rgb
+            if self.params.target == "full":
+                in_tensor = rgb
+                sdf_target = data["mask_full"].cuda()
+            elif self.params.target == "successor":
+                if self.model_full is not None:
+                    with torch.no_grad():
+                        (mask_full, _) = self.model_full(rgb)    # get from model
+                    mask_full = torch.nn.functional.interpolate(mask_full, size=rgb.shape[2:], mode='bilinear',
+                                                           align_corners=True)
+                    mask_full = torch.nn.Sigmoid()(mask_full)
+                else:
+                    mask_full = data["mask_full"].unsqueeze(1)  # get from disk
+
+                in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
+                sdf_target = data["mask_successor"].cuda()
 
             sdf_target = sdf_target.unsqueeze(1)
 
@@ -125,8 +136,10 @@ class Trainer():
             # Visualization
             if self.total_step % 10 == 0 and self.params.visualize:
                 cv2.imshow("rgb", rgb[0].cpu().numpy().transpose(1, 2, 0))
-                cv2.imshow("pos_enc", pos_enc[0].cpu().numpy().transpose(1, 2, 0))
 
+                if self.params.target == "successor":
+                    cv2.imshow("pos_enc", pos_enc[0].cpu().numpy().transpose(1, 2, 0))
+                    cv2.imshow("mask_full", mask_full[0, 0].cpu().numpy())
 
                 sdf_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
                 sdf_target = sdf_target[0, 0].cpu().detach().numpy()
@@ -137,7 +150,6 @@ class Trainer():
 
                 cv2.imshow("sdf_target", sdf_target)
                 cv2.imshow("sdf_pred", sdf_pred)
-
                 cv2.waitKey(1)
 
             text = 'Epoch {} / {}, it {} / {}, it global {}, train loss = {:03f}'.\
@@ -150,7 +162,7 @@ class Trainer():
             wandb.log({"train/epoch": epoch})
 
 
-    def eval(self):
+    def evaluate(self, epoch):
 
         print("Evaluating...")
 
@@ -160,20 +172,31 @@ class Trainer():
         sdf_preds = []
         sdf_targets = []
 
+        target_overlay_list = []
+        pred_overlay_list = []
+
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
 
-            # loss and optim
-            #sdf_target = data["mask_full"].cuda()
-            sdf_target = data["mask_successor"].cuda()
-            #sdf_target = data["mask_pedestrian"].cuda()
-
-
+            mask_pedestrian = data["mask_pedestrian"].cuda()
             pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
-            in_tensor = torch.cat([rgb, pos_enc], dim=1)
-            #in_tensor = rgb
+            if self.params.target == "full":
+                in_tensor = rgb
+                sdf_target = data["mask_full"].cuda()
+            elif self.params.target == "successor":
+                if self.model_full is not None:
+                    with torch.no_grad():
+                        (mask_full, _) = self.model_full(rgb)    # get from model
+                    mask_full = torch.nn.functional.interpolate(mask_full, size=rgb.shape[2:], mode='bilinear',
+                                                           align_corners=True)
+                    mask_full = torch.nn.Sigmoid()(mask_full)
+                else:
+                    mask_full = data["mask_full"].unsqueeze(1)  # get from disk
+
+                in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
+                sdf_target = data["mask_successor"].cuda()
 
             sdf_target = sdf_target.unsqueeze(1)
 
@@ -184,6 +207,21 @@ class Trainer():
 
             sdf_targets.append(sdf_target)
             sdf_preds.append(pred_sdf)
+
+
+            # visualization
+            pred_viz = (cm.plasma(pred_sdf.cpu().detach().numpy()[0, 0])[:, :, 0:3] * 255).astype(np.uint8)
+            target_viz = (cm.plasma(sdf_target.cpu().detach().numpy()[0, 0])[:, :, 0:3] * 255).astype(np.uint8)
+
+            rgb_viz = np.transpose(rgb.cpu().numpy()[0], (1, 2, 0))
+            rgb_viz = (rgb_viz * 255.).astype(np.uint8)
+
+            target_overlay = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(target_viz), 0.5, 0)
+            pred_overlay = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(pred_viz), 0.5, 0)
+
+            target_overlay_list.append(target_overlay)
+            pred_overlay_list.append(pred_overlay)
+
 
             loss_dict = {
                 'loss_sdf': torch.nn.BCELoss()(pred_sdf, sdf_target),
@@ -197,6 +235,20 @@ class Trainer():
         metrics_sdf = calc_torchmetrics(sdf_preds, sdf_targets, name="sdf")
         metrics_sdf["eval/loss"] = val_loss
 
+
+        # Make grid of images
+        target_overlay_grid = make_image_grid(target_overlay_list, nrow=8, ncol=8)
+        pred_overlay_grid = make_image_grid(pred_overlay_list, nrow=8, ncol=8)
+
+        if not self.params.main.disable_wandb:
+            wandb.log(metrics_sdf)
+            wandb.log({"Samples eval": [wandb.Image(target_overlay_grid, caption="GT"),
+                                        wandb.Image(pred_overlay_grid, caption="Pred")],
+                       })
+
+        cv2.imwrite("viz/target_overlay_grid-e{}.png".format(epoch), target_overlay_grid)
+        cv2.imwrite("viz/pred_overlay_grid-e{}.png".format(epoch), pred_overlay_grid)
+
         print(metrics_sdf)
 
         return metrics_sdf
@@ -207,7 +259,7 @@ class Trainer():
         print("Inference...")
 
         # Load model
-        model_path = "checkpoints/reg_succ_local_run.pth"
+        model_path = "checkpoints/reg_succ_twinkling-horse-9-e267.pth"
 
         state_dict = torch.load(model_path)
         new_state_dict = OrderedDict()
@@ -221,7 +273,7 @@ class Trainer():
         self.model.load_state_dict(new_state_dict)
         self.model = self.model.eval()
 
-        base_images = glob.glob("/data/autograph/successors-pedestrians/pittsburgh-pre/val/*rgb.png")
+        base_images = glob.glob("/data/autograph/successors-pedestrians/pittsburgh-pre/train/*rgb.png")
 
 
         for base_image in base_images:
@@ -280,7 +332,9 @@ def main():
     parser.add_argument('--stego', action="store_true", default=False, help="If True, applies stego loss")
     parser.add_argument('--visualize', action='store_true', help="visualize the dataset")
     parser.add_argument('--disable_wandb', '-d', action='store_true', help="disable wandb")
+    parser.add_argument('--target', type=str, help="which target to use for training", choices=["full", "successor"])
     parser.add_argument('--inference', action='store_true', help="perform inference instead of training")
+    parser.add_argument('--full-checkpoint', type=str, default=None, help="path to full checkpoint for inference")
 
     opt = parser.parse_args()
 
@@ -290,6 +344,7 @@ def main():
     params.model.overwrite(opt)
     params.visualize = opt.visualize
     params.stego = opt.stego
+    params.target = opt.target
 
     print("Batch size summed over all GPUs: ", params.model.batch_size_reg)
     
@@ -306,9 +361,24 @@ def main():
         wandb.config.update(params.preprocessing)
 
     # -------  Model, optimizer and data initialization ------
+    if opt.target == "full":
+        num_in_channels = 3  # rgb
+    elif opt.target == "successor":
+        num_in_channels = 7  # rgb, mask_sdf, pos_encoding
+    else:
+        raise ValueError("Unknown target")
     model = DeepLabv3Plus(models.resnet101(pretrained=True),
-                          num_in_channels=6,
+                          num_in_channels=num_in_channels,
                           num_classes=1).to(params.model.device)
+
+    model_full = None
+    if opt.full_checkpoint is not None:
+        model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
+                                   num_in_channels=3,
+                                   num_classes=1).to(params.model.device)
+        model_full.load_state_dict(torch.load(opt.full_checkpoint))
+        model_full.eval()
+
 
     # Make model parallel if available
     if params.model.dataparallel:
@@ -341,7 +411,7 @@ def main():
                                  num_workers=1,
                                  shuffle=False)
 
-    trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer)
+    trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer, model_full=model_full)
 
     if opt.inference:
         trainer.inference()
@@ -354,17 +424,18 @@ def main():
         #if not params.main.disable_wandb:
         if epoch % 2 == 0:
 
-            metrics_sdf = trainer.eval()
-
-            if not params.main.disable_wandb:
-                wandb.log(metrics_sdf)
+            trainer.evaluate(epoch)
 
             try:
                 wandb_run_name = wandb.run.name
             except:
-                wandb_run_name = "local_run"
+                if opt.target == "successor":
+                    wandb_run_name = "local_run_successor"
+                else:
+                    wandb_run_name = "local_run_full"
 
-            fname = 'reg_succ_{}.pth'.format(wandb_run_name)
+
+            fname = 'reg_{}.pth'.format(wandb_run_name)
             checkpoint_path = os.path.join(params.paths.checkpoints, fname)
             print("Saving checkpoint to {}".format(checkpoint_path))
 

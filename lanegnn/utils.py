@@ -28,6 +28,22 @@ import torchvision.transforms as T
 np.random.seed(0)
 
 
+def make_image_grid(img_list, nrow, ncol):
+    """
+    Args:
+        img_list: list of images
+        nrow: number of rows
+        ncol: number of columns
+    """
+    df = 2
+    canvas = np.zeros((nrow * img_list[0].shape[0]//df, ncol * img_list[0].shape[1]//df, 3), dtype=np.uint8)
+    for i in range(nrow):
+        for j in range(ncol):
+            if i * ncol + j < len(img_list):
+                img = img_list[i * ncol + j][::df, ::df, :]
+                canvas[i * img.shape[0]:(i + 1) * img.shape[0], j * img.shape[1]:(j + 1) * img.shape[1], :] = img[:, :, :]
+
+    return canvas
 
 
 def visualize_angles(a_x, a_y, mask):

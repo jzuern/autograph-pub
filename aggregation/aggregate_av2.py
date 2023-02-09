@@ -859,12 +859,14 @@ if __name__ == "__main__":
 
     # Visualize tracklets
     sat_image_viz = sat_image_.copy()
+    tracklets_image = np.zeros((sat_image_.shape[0], sat_image_.shape[1]), dtype=np.uint8)
 
     for t in trajectories_:
         rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
         rc = (int(rc[0]), int(rc[1]), int(rc[2]))
         for i in range(len(t)-1):
             cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+            cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), 255, 7)
     for t in trajectories_ped_pred_:
         rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
         rc = (int(rc[0]), int(rc[1]), int(rc[2]))
@@ -872,9 +874,12 @@ if __name__ == "__main__":
             cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
 
     viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
-    print("Saving tracklet visualization to {}".format(viz_file))
+    tracklet_file = os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))
     cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
-
+    print("Saved tracklet visualization to {}".format(viz_file))
+    cv2.imwrite(tracklet_file, tracklets_image)
+    print("Saved tracklet visualization to {}".format(tracklet_file))
+    exit("Just created images")
 
     # single core
     if num_cpus <= 1:
@@ -889,16 +894,6 @@ if __name__ == "__main__":
                       centerline_image_,
                       city_name,
                       )
-        # process_chunk(args.source,
-        #               roi_xxyy_list,
-        #               export_final,
-        #               trajectories_,
-        #               lanes_,
-        #               sat_image_,
-        #               out_path_root,
-        #               centerline_image_,
-        #               city_name,
-        #               )
     else:
 
         # multi core
