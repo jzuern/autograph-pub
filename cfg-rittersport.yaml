@@ -9,7 +9,7 @@ paths:
     dataroot: /data/autograph/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
-    config_name: exp-successors-traj2/* # preprocessed/city_name or preprocessed/*
+    config_name: exp-successors-sparse/* # preprocessed/city_name or preprocessed/*
 preprocessing:
     gt_pointwise: True
     sampling_method: poisson
@@ -24,7 +24,7 @@ model:
     dataparallel: False
     device: cuda
     batch_size: 1
-    batch_size_reg: 16
+    batch_size_reg: 32
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999

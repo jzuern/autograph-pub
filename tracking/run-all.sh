@@ -18,6 +18,8 @@ export CFG=/home/zuern/self-supervised-graph/tracking/OpenPCDet/tools/cfgs/nusce
 #(cd OpenPCDet/tools && $PYTHON demo.py --cfg_file $CFG --ckpt $CKPT --ext .feather --av2_root /home/zuern/datasets/argoverse2-full/tbv/) # (1043 samples)
 #
 ## TRACK
+
+
 $PYTHON tracking.py --av2_root /home/zuern/datasets/argoverse2-full/sensor/test/ &
 $PYTHON tracking.py --av2_root /home/zuern/datasets/argoverse2-full/sensor/val/ &
 $PYTHON tracking.py --av2_root /home/zuern/datasets/argoverse2-full/sensor/train/ &
@@ -28,3 +30,7 @@ $PYTHON tracking.py --av2_root /home/zuern/datasets/argoverse2-full/lidar/train/
 
 $PYTHON tracking.py --av2_root /home/zuern/datasets/argoverse2-full/tbv/ &
 
+
+
+find /home/zuern/datasets/argoverse2-full -type f -wholename '/home/zuern/datasets/argoverse2-full/sensor/*/*/tracking.pickle' >> /home/zuern/self-supervised-graph/tracking/tracking_files.txt
+find /home/zuern/datasets/argoverse2-full -type f -wholename '/home/zuern/datasets/argoverse2-full/tbv/*/tracking.pickle' >> /home/zuern/self-supervised-graph/tracking/tracking_files.txt
