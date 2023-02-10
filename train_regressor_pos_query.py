@@ -349,7 +349,6 @@ def main():
     print("Batch size summed over all GPUs: ", params.model.batch_size_reg)
     
     if not params.main.disable_wandb:
-        wandb.login()
         wandb.init(
             entity='jannik-zuern',
             project='autograph-regressor',
@@ -376,7 +375,18 @@ def main():
         model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
                                    num_in_channels=3,
                                    num_classes=1).to(params.model.device)
-        model_full.load_state_dict(torch.load(opt.full_checkpoint))
+
+        state_dict = torch.load(opt.full_checkpoint)
+        try:
+            model_full.load_state_dict(state_dict)
+        except:
+            # create new OrderedDict that does not contain `module.`
+            new_state_dict = OrderedDict()
+            for k, v in state_dict.items():
+                name = "module." + k # add 'module'
+                new_state_dict[name] = v
+            model.load_state_dict(new_state_dict)
+
         model_full.eval()
 
 
