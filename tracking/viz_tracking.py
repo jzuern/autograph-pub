@@ -7,16 +7,9 @@ import matplotlib.pyplot as plt
 from data.av2.settings import get_transform_params
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
-<<<<<<< HEAD
-
-cmap = cm.Dark2
-norm = Normalize(vmin=0, vmax=10)
-=======
-from aggregation.utils import Tracklet, filter_tracklet
 
 cmap = cm.Dark2
 norm = Normalize(vmin=0, vmax=4)
->>>>>>> 6d315b7bd67a22781707bb7f842e2d8ad2f2ecfa
 
 
 city_name_dict ={
@@ -27,11 +20,7 @@ city_name_dict ={
 
 
 # Get tracking file locations
-<<<<<<< HEAD
-tracking_files = glob('/home/zuern/datasets/argoverse2-full-out/*_tracking.pickle')
-=======
 tracking_files = glob('/data/argoverse2-full/*_tracking.pickle')
->>>>>>> 6d315b7bd67a22781707bb7f842e2d8ad2f2ecfa
 
 city_name = "PIT"
 [transform_R, transform_c, transform_t] = get_transform_params(city_name_dict[city_name])
@@ -42,12 +31,6 @@ axarr[0].set_aspect('equal')
 axarr[1].set_aspect('equal')
 
 
-for fcounter, p in tqdm(enumerate(tracking_files), total=len(tracking_files)):
-
-    if fcounter > 100:
-        break
-
-<<<<<<< HEAD
 class Tracklet(object):
     def __init__(self, label):
         self.label = label
@@ -109,9 +92,6 @@ for fcounter, p in tqdm(enumerate(tracking_files)):
     if fcounter > 1000:
         break
 
-
-=======
->>>>>>> 6d315b7bd67a22781707bb7f842e2d8ad2f2ecfa
     with open(p, "rb") as f:
         try:
             av2_annos = pickle.load(f)
@@ -124,10 +104,6 @@ for fcounter, p in tqdm(enumerate(tracking_files)):
         ego_pos = np.array([p.translation for p in av2_annos["ego_pos"]])
 
         # Coordinate transformation
-        #bb = np.hstack([ego_pos[:, 0:2], np.zeros((len(ego_pos), 1))])
-        #tmp = transform_t[np.newaxis, :] + transform_c * np.einsum('jk,ik', transform_R, bb)
-        #ego_pos = tmp[:, 0:2]
-
         axarr[0].plot(ego_pos[:, 0], ego_pos[:, 1], color=cmap(norm(0)))
         axarr[1].plot(ego_pos[:, 0], ego_pos[:, 1], color=cmap(norm(0)))
 
@@ -145,7 +121,6 @@ for fcounter, p in tqdm(enumerate(tracking_files)):
 
         # Now we filter tracklets and smooth them
         tracklets_filtered = []
-<<<<<<< HEAD
 
         for counter, tracklet in enumerate(tracklets):
 
@@ -155,11 +130,9 @@ for fcounter, p in tqdm(enumerate(tracking_files)):
             if tracklet is not None:
                 tracklets_filtered.append(tracklet)
 
-
         for tracklet in tracklets_filtered:
-            ax.plot(tracklet.path[:, 0], tracklet.path[:, 1], alpha=0.7, color=cmap(norm(tracklet.label)))
-        ax.legend(["Ego", "Vehicle", "Pedestrian"])
-=======
+            axarr[0].plot(tracklet.path[:, 0], tracklet.path[:, 1], alpha=0.7, color=cmap(norm(tracklet.label)))
+
         tracklets_unfiltered = []
 
         for counter, tracklet in enumerate(tracklets):
@@ -183,7 +156,6 @@ for fcounter, p in tqdm(enumerate(tracking_files)):
 
 axarr[0].legend(["Ego", "Pedestrian", "Vehicle"])
 axarr[1].legend(["Ego", "Pedestrian", "Vehicle"])
->>>>>>> 6d315b7bd67a22781707bb7f842e2d8ad2f2ecfa
 
 
 plt.show()
