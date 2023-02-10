@@ -26,8 +26,23 @@ def greedy_assignment(dist):
   return np.array(matched_indices, np.int32).reshape(-1, 2)
 
 NUSCENES_TRACKING_NAMES = [
-    1, # car
+    1, 2, 3, 4, 5, 7, 8, 9
 ]
+
+NUSCENE_CLS_VELOCITY_ERROR = {
+    1: 4,  # car
+    2: 4,  # truck
+    3: 4,  # construction_vehicle
+    4: 4,  # bus
+    5: 4,  # trailer
+    7: 4,  # motorcycle
+    8: 2,  # bicycle
+    9: 2,  # pedestrian
+}
+
+NUSCENES_CLASS_NAMES = ['car','truck', 'construction_vehicle', 'bus', 'trailer',
+                        'barrier', 'motorcycle', 'bicycle', 'pedestrian', 'traffic_cone']
+
 
 # 99.9 percentile of the l2 velocity error distribution (per clss / 0.5 second)
 # This is an earlier statistcs and I didn't spend much time tuning it.
@@ -41,9 +56,7 @@ NUSCENES_TRACKING_NAMES = [
 #     'motorcycle': 13,
 #     'bicycle': 3,
 # }
-NUSCENE_CLS_VELOCITY_ERROR = {
-    1: 4, # car
-}
+
 
 
 SCORE_THRSHLD = 0.3
@@ -229,11 +242,13 @@ if __name__ == '__main__':
     for predictions_file in predictions_files:
         print("Performing Tracking on predictions file {}".format(predictions_file))
 
-        tracking_file = predictions_file.replace("detections.pickle", "tracking.pickle")
+        #tracking_file = predictions_file.replace("detections.pickle", "tracking.pickle")
+        scenario_id = predictions_file.split('/')[-2]
+        tracking_file = "/home/zuern/datasets/argoverse2-full-out/" + scenario_id + "_tracking.pickle"
 
-        if os.path.isfile(tracking_file):
-            print("    skip. Existing.")
-            continue
+        #if os.path.isfile(tracking_file):
+        #    print("    skip. Existing.")
+        #    continue
 
         with open(predictions_file, "rb") as f:
             try:
