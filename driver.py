@@ -66,8 +66,8 @@ class SatelliteDriver(object):
         self.tracklets_layer = np.asarray(Image.open(path.replace(".png", "-tracklets.png"))).astype(np.uint8)
 
         # Crop
-        self.satellite = self.satellite[30000:35000, 30000:35000, :]
-        self.tracklets_layer = self.tracklets_layer[30000:35000, 30000:35000]
+        self.satellite = self.satellite[27000:32000, 7000:12000, :]
+        self.tracklets_layer = self.tracklets_layer[25000:30000, 5000:10000]
 
         self.canvas_log_odds = np.ones([self.satellite.shape[0], self.satellite.shape[1]], dtype=np.float32)
 
@@ -135,9 +135,9 @@ class SatelliteDriver(object):
 
 
         # resize to smaller
-        df = self.canvas_log_odds.shape[0] / 1500
-        img1 = cv2.resize(colorize(self.canvas_log_odds), (1500, 1500))
-        img2 = cv2.resize(self.satellite, (1500, 1500))
+        df = self.canvas_log_odds.shape[0] / 1000
+        img1 = cv2.resize(colorize(self.canvas_log_odds), (1000, 1000))
+        img2 = cv2.resize(self.satellite, (1000, 1000))
         canvas_viz = cv2.addWeighted(img1, 0.5, img2, 0.5, 0)
 
         for i in range(1, len(self.pose_history)):
@@ -289,7 +289,6 @@ class SatelliteDriver(object):
 if __name__ == "__main__":
     driver = SatelliteDriver()
     driver.load_satellite(path="/data/lanegraph/woven-data/Pittsburgh.png")
-
     driver.load_model(model_path="checkpoints/reg_young-valley-13.pth", type="full")
     driver.load_model(model_path="checkpoints/reg_copper-capybara-16.pth", type="successor")
 

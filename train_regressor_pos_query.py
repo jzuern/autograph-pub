@@ -383,9 +383,9 @@ def main():
             # create new OrderedDict that does not contain `module.`
             new_state_dict = OrderedDict()
             for k, v in state_dict.items():
-                name = "module." + k # add 'module'
+                name = k[7:] # remove 'module'
                 new_state_dict[name] = v
-            model.load_state_dict(new_state_dict)
+            model_full.load_state_dict(new_state_dict)
 
         model_full.eval()
 
@@ -405,8 +405,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'successors-pedestrians', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, 'successors-pedestrians', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, '1302', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, '1302', "*", "val")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train')
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val')

@@ -132,12 +132,14 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
         self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
 
+        print(len(self.sdf_files), len(self.rgb_files), len(self.pos_enc_files))
+
+
         # jointly shuffle them
         c = list(zip(self.sdf_files, self.rgb_files, self.pos_enc_files))
         random.shuffle(c)
         self.sdf_files, self.rgb_files, self.pos_enc_files = zip(*c)
 
-        print(len(self.sdf_files), len(self.rgb_files), len(self.pos_enc_files))
 
         # check if all files are present
         assert len(self.sdf_files) == len(self.rgb_files)
@@ -228,7 +230,8 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         }
 
         if self.split == 'train':
-           return_dict = self.random_rotate(return_dict)
+            pass
+            #return_dict = self.random_rotate(return_dict)
 
         return return_dict
 
