@@ -19,6 +19,7 @@ from glob import glob
 import logging
 from av2.datasets.motion_forecasting import scenario_serialization
 import pickle
+import time
 
 from lanegnn.utils import poisson_disk_sampling, get_random_edges
 from data.av2.settings import get_transform_params
@@ -28,8 +29,8 @@ from aggregation.utils import get_scenario_centerlines, assign_graph_traversals,
     initialize_graph, dijkstra_trajectories
 
 # random shuffle seed
-random.seed(0)
-
+#random.seed(0)
+np.random.seed(seed=int(time.time()))
 
 
 
@@ -115,12 +116,6 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
     if len(pos_ends) < 1:
         logging.error("Too few endpoints found ({}). Skipping".format(len(pos_ends)))
         return None, None, None, None, None, None
-
-    # fig, axarr = plt.subplots(1, 3)
-    # axarr[0].imshow(sat_image_viz)
-    # axarr[1].imshow(mask_thin)
-    # axarr[2].imshow(sdf_thin)
-    # plt.show()
 
     for pos_end in pos_ends:
 
@@ -920,27 +915,27 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(out_path_root, 'val'), exist_ok=True)
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
-    centerline_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_centerlines.png".format(city_name))))
+    # centerline_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_centerlines.png".format(city_name))))
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
-    # generate roi_xxyy list over full satellite image in sliding window fashion
-    roi_xxyy_list = []
-    for i in range(0, sat_image_.shape[1]-256, 100):
-        for j in range(0, sat_image_.shape[0]-256, 100):
-            roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
-
-    random.shuffle(roi_xxyy_list)
-
-    roi_fname = "data/roi_usable_{}.npy".format(city_name)
-    if os.path.exists(roi_fname):
-        roi_usable = np.load(roi_fname)
-    else:
-        roi_usable = np.zeros(len(roi_xxyy_list), dtype=np.bool)
-
-    roi_xxyy_list = [roi_xxyy_list[i] for i in range(len(roi_xxyy_list)) if roi_usable[i]]
-
-    print("Length of ROI list:", len(roi_xxyy_list))
+    # # generate roi_xxyy list over full satellite image in sliding window fashion
+    # roi_xxyy_list = []
+    # for i in range(0, sat_image_.shape[1]-256, 100):
+    #     for j in range(0, sat_image_.shape[0]-256, 100):
+    #         roi_xxyy_list.append(np.array([j, j + 256, i, i + 256]))
+    #
+    # random.shuffle(roi_xxyy_list)
+    #
+    # roi_fname = "data/roi_usable_{}.npy".format(city_name)
+    # if os.path.exists(roi_fname):
+    #     roi_usable = np.load(roi_fname)
+    # else:
+    #     roi_usable = np.zeros(len(roi_xxyy_list), dtype=np.bool)
+    #
+    # roi_xxyy_list = [roi_xxyy_list[i] for i in range(len(roi_xxyy_list)) if roi_usable[i]]
+    #
+    # print("Length of ROI list:", len(roi_xxyy_list))
 
     if args.source == "tracklets_sparse":
         print("Exporting SPARSE tracklet annotations!")
@@ -1007,7 +1002,7 @@ if __name__ == "__main__":
         lanes_ = np.array(lanes_)
 
         # save trajectories
-        np.save("data/trajectories_{}.npy".format(city_name), trajectories_)
+        np.save("data/trajectories_gt_{}.npy".format(city_name), trajectories_)
         np.save("data/lanes_{}.npy".format(city_name), lanes_)
     else:
         trajectories_gt_ = np.load("data/trajectories_gt_{}.npy".format(city_name), allow_pickle=True)  # GT
@@ -1068,10 +1063,8 @@ if __name__ == "__main__":
                         else:
                             trajectories_ped_pred_.append(tracklet.path)
 
-
         np.save("data/trajectories_pred_{}.npy".format(city_name), trajectories_pred_)
         np.save("data/trajectories_ped_pred_{}.npy".format(city_name), trajectories_ped_pred_)
-
     else:
         trajectories_pred_ = np.load("data/trajectories_pred_{}.npy".format(city_name), allow_pickle=True)  # PRED VEHICLES
         trajectories_ped_pred_ = np.load("data/trajectories_ped_pred_{}.npy".format(city_name), allow_pickle=True)  # PRED PEDESTRIANS
@@ -1084,7 +1077,7 @@ if __name__ == "__main__":
     # OR USE GT TRAJETORIES
     #trajectories_ = trajectories_gt_
 
-    tracklets_image = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))))
+    tracklets_image = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name)))).astype(np.uint8)
 
     # # Visualize tracklets
     # sat_image_viz = sat_image_.copy()
@@ -1124,18 +1117,6 @@ if __name__ == "__main__":
                             sat_image_,
                             tracklets_image,
                             out_path_root,)
-
-        # process_chunk_successors(args.source,
-        #               roi_xxyy_list,
-        #               export_final,
-        #               trajectories_,
-        #               trajectories_ped_,
-        #               lanes_,
-        #               sat_image_,
-        #               out_path_root,
-        #               centerline_image_,
-        #               city_name,
-        #               )
     else:
 
         # multi core
@@ -1148,19 +1129,17 @@ if __name__ == "__main__":
         num_chunks = int(np.ceil(num_samples / num_cpus))
         roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
 
-        arguments = zip(repeat(args.source),
-                        roi_chunks,
-                        repeat(export_final),
+        arguments = zip(repeat(city_name),
+                        repeat(args.source),
                         repeat(trajectories_),
                         repeat(trajectories_ped_),
                         repeat(lanes_),
                         repeat(sat_image_),
+                        repeat(tracklets_image),
                         repeat(out_path_root),
-                        repeat(centerline_image_),
-                        repeat(city_name),
                         )
 
-        #Pool(num_cpus).starmap(process_chunk_successors, arguments)
+
         Pool(num_cpus).starmap(process_chunk_final, arguments)
 
 

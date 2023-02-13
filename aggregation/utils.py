@@ -15,7 +15,6 @@ from av2.map.map_api import ArgoverseStaticMap
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_angles,  get_oriented_crop, transform2vgg
 
 
-
 def bm0(mask1, mask2):
     # Calculates IoU between two binary masks
     mask1_area = np.count_nonzero(mask1 == 1)
@@ -24,6 +23,7 @@ def bm0(mask1, mask2):
     iou = intersection/(mask1_area+mask2_area-intersection)
     return iou
 
+
 def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_image):
     # Get all trajectories that go through query point
 
@@ -31,7 +31,6 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
     angle_thrsh = np.pi / 4  # in rad
 
     sat_image_viz = sat_image.copy()
-
 
     trajectories_close_q = []
     for t in trajectories_all:
