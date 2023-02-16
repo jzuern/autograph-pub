@@ -31,7 +31,7 @@ def weighted_mse_loss(input, target, weight):
 precision = Precision(task="binary", average='none', mdmc_average='global')
 recall = Recall(task="binary", average='none', mdmc_average='global')
 iou = JaccardIndex(task="binary", reduction='none', num_classes=2, ignore_index=0)
-f1 = F1Score(average='none', mdmc_average='global', num_classes=2, ignore_index=0)
+f1 = F1Score(task="binary", average='none', mdmc_average='global', num_classes=2, ignore_index=0)
 
 
 def calc_torchmetrics(seg_preds, seg_gts, name):
@@ -48,7 +48,7 @@ def calc_torchmetrics(seg_preds, seg_gts, name):
         'eval/precision_{}'.format(name): p.item(),
         'eval/recall_{}'.format(name): r.item(),
         'eval/iou_{}'.format(name): i.item(),
-        'eval/f1_{}'.format(name): f[1],
+        'eval/f1_{}'.format(name): f.item(),
     }
 
     return metrics
@@ -432,7 +432,7 @@ def main():
         trainer.train(epoch)
 
         #if not params.main.disable_wandb:
-        if epoch % 2 == 0:
+        if epoch % 1 == 0:
 
             trainer.evaluate(epoch)
 
@@ -443,7 +443,6 @@ def main():
                     wandb_run_name = "local_run_successor"
                 else:
                     wandb_run_name = "local_run_full"
-
 
             fname = 'reg_{}.pth'.format(wandb_run_name)
             checkpoint_path = os.path.join(params.paths.checkpoints, fname)

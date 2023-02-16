@@ -682,7 +682,7 @@ def random_cropping(sat_image, tracklet_image):
 
 
 
-def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lanes_, sat_image_, tracklets_image, out_path_root):
+def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lanes_, sat_image_, tracklets_image, out_path_root, max_num_samples=100):
 
     if "tracklets" in source:
         annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
@@ -696,9 +696,8 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         raise ValueError("Invalid annotation source")
 
 
-    MAX_NUM_SAMPLES = 1000
     sample_num = 0
-    while sample_num < MAX_NUM_SAMPLES:
+    while sample_num < max_num_samples:
 
         # this is not guaranteed to give valid crops
         sat_image_crop, tracklet_image_crop, crop_pose = random_cropping(sat_image_, tracklets_image)
@@ -872,8 +871,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
             Image.fromarray((mask_all).astype(np.uint8)).save("{}/{}-{}-masks-{}.png".format(out_path, sample_id, i_query, output_name))
 
             sample_num += 1
-            print("Sample num: {} / {}".format(sample_num, MAX_NUM_SAMPLES))
-
+            print("Generated sample {} / {}".format(sample_num, max_num_samples))
 
 
 
@@ -887,6 +885,7 @@ if __name__ == "__main__":
     parser.add_argument("--out_path_root", type=str, default="data")
     parser.add_argument("--num_cpus", type=int, default=1)
     parser.add_argument("--source", type=str, default="tracklets_sparse", choices=["tracklets_sparse", "tracklets_dense", "lanes"])
+    parser.add_argument("--max_num_samples", type=int, default=100, help="Number of samples to generate per city")
     args = parser.parse_args()
 
     out_path_root = args.out_path_root
@@ -1077,35 +1076,34 @@ if __name__ == "__main__":
     # OR USE GT TRAJETORIES
     #trajectories_ = trajectories_gt_
 
-    tracklets_image = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name)))).astype(np.uint8)
 
-    # # Visualize tracklets
-    # sat_image_viz = sat_image_.copy()
-    #
-    # try:
-    #     tracklets_image = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))))
-    # except:
-    #     tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
-    #
-    #     for t in trajectories_:
-    #         rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
-    #         rc = (int(rc[0]), int(rc[1]), int(rc[2]))
-    #         for i in range(len(t)-1):
-    #             cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
-    #             cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
-    #     for t in trajectories_ped_pred_:
-    #         rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
-    #         rc = (int(rc[0]), int(rc[1]), int(rc[2]))
-    #         for i in range(len(t)-1):
-    #             cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
-    #             cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (0, 255, 0), 3)
-    #
-    #     viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
-    #     tracklet_file = os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))
-    #     cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
-    #     print("Saved tracklet visualization to {}".format(viz_file))
-    #     cv2.imwrite(tracklet_file, tracklets_image)
-    #     print("Saved tracklet visualization to {}".format(tracklet_file))
+    # Visualize tracklets
+    sat_image_viz = sat_image_.copy()
+
+    try:
+        tracklets_image = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name)))).astype(np.uint8)
+    except:
+        tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
+
+        for t in trajectories_:
+            rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
+            rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+            for i in range(len(t)-1):
+                cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+                cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
+        for t in trajectories_ped_pred_:
+            rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
+            rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+            for i in range(len(t)-1):
+                cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+                cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (0, 255, 0), 3)
+
+        viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
+        tracklet_file = os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))
+        cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
+        print("Saved tracklet visualization to {}".format(viz_file))
+        cv2.imwrite(tracklet_file, tracklets_image)
+        print("Saved tracklet visualization to {}".format(tracklet_file))
 
     # single core
     if num_cpus <= 1:
@@ -1116,19 +1114,10 @@ if __name__ == "__main__":
                             lanes_,
                             sat_image_,
                             tracklets_image,
-                            out_path_root,)
+                            out_path_root,
+                            args.max_num_samples,
+                            )
     else:
-
-        # multi core
-        def chunkify(lst, n):
-            """Yield successive n-sized chunks from lst."""
-            for i in range(0, len(lst), n):
-                yield lst[i:i + n]
-
-        num_samples = len(roi_xxyy_list)
-        num_chunks = int(np.ceil(num_samples / num_cpus))
-        roi_chunks = list(chunkify(roi_xxyy_list, n=num_chunks))
-
         arguments = zip(repeat(city_name),
                         repeat(args.source),
                         repeat(trajectories_),
@@ -1137,6 +1126,7 @@ if __name__ == "__main__":
                         repeat(sat_image_),
                         repeat(tracklets_image),
                         repeat(out_path_root),
+                        repeat(args.max_num_samples),
                         )
 
 

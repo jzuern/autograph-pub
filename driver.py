@@ -25,8 +25,7 @@ def colorize(mask):
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
-        #self.pose = np.array([1280., 3660., 2.6])
-        self.pose = np.array([500., 500., 2.6])
+        self.pose = np.array([1540, 2300, -4.60])
         self.current_crop = None
         self.model = None
         self.crop_shape = (256, 256)
@@ -63,11 +62,12 @@ class SatelliteDriver(object):
     def load_satellite(self, path):
         self.satellite = np.asarray(Image.open(path)).astype(np.uint8)
         self.satellite = cv2.cvtColor(self.satellite, cv2.COLOR_BGR2RGB)
-        self.tracklets_layer = np.asarray(Image.open(path.replace(".png", "-tracklets.png"))).astype(np.uint8)
 
         # Crop
-        self.satellite = self.satellite[27000:32000, 7000:12000, :]
-        self.tracklets_layer = self.tracklets_layer[25000:30000, 5000:10000]
+        #self.satellite = self.satellite[27000:32000, 7000:12000, :]   # vertical, horizontal
+        top_left = [30000, 12000]  # vertical, horizontal
+        delta = [5000, 5000]
+        self.satellite = self.satellite[top_left[0]:top_left[0] + delta[0], top_left[1]:top_left[1] + delta[1], :]
 
         self.canvas_log_odds = np.ones([self.satellite.shape[0], self.satellite.shape[1]], dtype=np.float32)
 
@@ -185,8 +185,6 @@ class SatelliteDriver(object):
 
         satellite_image = self.satellite[int(y - csize): int(y + csize),
                                          int(x - csize): int(x + csize)].copy()
-        tracklet_image = self.tracklets_layer[int(y - csize): int(y + csize),
-                                              int(x - csize): int(x + csize)].copy()
 
         # For bottom centered
         src_pts = np.array([[-128, 0],
@@ -213,13 +211,12 @@ class SatelliteDriver(object):
 
         try:
             rgb = cv2.warpPerspective(satellite_image, M, (csize, csize), cv2.INTER_LINEAR, borderMode=cv2.BORDER_TRANSPARENT)
-            tracklet_image = cv2.warpPerspective(tracklet_image, M, (csize, csize), cv2.INTER_LINEAR, borderMode=cv2.BORDER_TRANSPARENT)
         except:
             print("Error in warpPerspective. Resetting position")
-            self.pose = np.array([1280., 3660., 2.6])
-            rgb, tracklet_image = self.crop_satellite_at_pose(self.pose)
+            self.pose = np.array([1540, 2300, -4.60])
+            rgb = self.crop_satellite_at_pose(self.pose)
 
-        return rgb, tracklet_image
+        return rgb
 
 
     def drive_step(self,key):
@@ -252,11 +249,10 @@ class SatelliteDriver(object):
         self.pose_history.append(self.pose.copy())
 
         pos_encoding = self.generate_pos_encoding()
-        rgb, tracklet_image = self.crop_satellite_at_pose(self.pose)
+        rgb = self.crop_satellite_at_pose(self.pose)
 
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
         pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
-        tracklet_image_torch = torch.from_numpy(tracklet_image).unsqueeze(0).unsqueeze(0).float().cuda() / 255
 
         if self.model_full is not None:
             with torch.no_grad():
@@ -289,8 +285,8 @@ class SatelliteDriver(object):
 if __name__ == "__main__":
     driver = SatelliteDriver()
     driver.load_satellite(path="/data/lanegraph/woven-data/Pittsburgh.png")
-    driver.load_model(model_path="checkpoints/reg_young-valley-13.pth", type="full")
-    driver.load_model(model_path="checkpoints/reg_copper-capybara-16.pth", type="successor")
+    driver.load_model(model_path="checkpoints/reg_thoughtful-violet-21.pth", type="full")
+    driver.load_model(model_path="checkpoints/reg_heartfelt-infatuation-22-e50.pth", type="successor")
 
     print("Press arrow keys to drive")
 
