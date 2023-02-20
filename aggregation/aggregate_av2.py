@@ -654,7 +654,7 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
 #     np.save("data/roi_usable_{}.npy".format(city_name), roi_usable)
 
 
-def random_cropping(sat_image, tracklet_image):
+def random_cropping(sat_image, tracklet_image, drivable_gt):
 
     crop_size = 256
 
@@ -676,7 +676,7 @@ def random_cropping(sat_image, tracklet_image):
         # check if tracklet image is empty in central region
         half = sat_image_precrop.shape[1] // 2
 
-        if np.sum(tracklet_image_precrop[half - 64:half + 64, half - 64:half + 64, 2]) == 0:
+        if np.sum(tracklet_image_precrop[half - 64:half + 64, half - 64:half + 64, 0]) == 0:
             continue
 
         # get crop at center and with angle
@@ -812,7 +812,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
             raise ValueError("Invalid source")
 
         # Get query points
-        query_points = np.argwhere(tracklet_image_crop[:, :, 2] > 0)
+        query_points = np.argwhere(tracklet_image_crop[:, :, 0] > 0)
         np.random.shuffle(query_points)
         query_points = query_points[:50]
 
