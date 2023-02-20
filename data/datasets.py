@@ -121,9 +121,10 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         print("Looking for files in", path)
         self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
-        self.sdf_files = sorted(glob(os.path.join(path, '*-masks-dense.png')))
+        self.sdf_files = sorted(glob(os.path.join(path, '*-masks.png')))
         #self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
-        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding-dense.png')))
+        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding.png')))
+        self.drivable_gt_files = sorted(glob(os.path.join(path, '*-drivable-gt.png')))
 
         # only use files for which we have all modalities
         file_ids = [get_id(f) for f in self.sdf_files]
@@ -131,14 +132,15 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         #self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
         self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
         self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
+        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
 
-        print(len(self.sdf_files), len(self.rgb_files), len(self.pos_enc_files))
+        print(len(self.sdf_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
 
         # jointly shuffle them
-        c = list(zip(self.sdf_files, self.rgb_files, self.pos_enc_files))
+        c = list(zip(self.sdf_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
         random.shuffle(c)
-        self.sdf_files, self.rgb_files, self.pos_enc_files = zip(*c)
+        self.sdf_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
 
 
         # check if all files are present
@@ -193,6 +195,7 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         #angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_COLOR)
         #angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
         rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
+        drivable_gt = cv2.imread(self.drivable_gt_files[idx], cv2.IMREAD_UNCHANGED)
 
         # convert from angles to unit circle xy coordinates
         # to hsv to get hue
@@ -208,6 +211,8 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         # to tensor
         mask_full = torch.from_numpy(mask_full).float() / 255.0
+        drivable_gt = torch.from_numpy(drivable_gt).float() / 255.0
+
         mask_successor = torch.from_numpy(mask_successor).float() / 255.0
         mask_pedestrian = torch.from_numpy(mask_pedestrian).float() / 255.0
         #angles_x = torch.from_numpy(angles_x).float()
@@ -219,6 +224,7 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         return_dict = {
             'mask_full': mask_full,
+            'drivable_gt': drivable_gt,
             'mask_successor': mask_successor,
             'mask_pedestrian': mask_pedestrian,
             'pos_enc': pos_enc,

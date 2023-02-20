@@ -651,6 +651,8 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
 def random_cropping(sat_image, tracklet_image):
 
     crop_size = 256
+
+
     while True:
 
         # random center position
@@ -662,6 +664,8 @@ def random_cropping(sat_image, tracklet_image):
                                       center_x - crop_size:center_x + crop_size, :].copy()
         tracklet_image_precrop = tracklet_image[center_y - crop_size:center_y + crop_size,
                                                 center_x - crop_size:center_x + crop_size, :].copy()
+        drivable_gt_precrop = drivable_gt[center_y - crop_size:center_y + crop_size,
+                                          center_x - crop_size:center_x + crop_size].copy()
 
         # check if tracklet image is empty in central region
         half = sat_image_precrop.shape[1] // 2
@@ -675,13 +679,17 @@ def random_cropping(sat_image, tracklet_image):
                                                                           256 - 128:256 + 128]
         tracklet_image_crop = cv2.warpAffine(tracklet_image_precrop, M, (512, 512), cv2.INTER_NEAREST)[256 - 128:256 + 128,
                                                                                                        256 - 128:256 + 128]
+        drivable_gt_crop = cv2.warpAffine(drivable_gt_precrop, M, (512, 512), cv2.INTER_NEAREST)[256 - 128:256 + 128,
+                                                                                                 256 - 128:256 + 128]
 
-        return sat_image_crop, tracklet_image_crop, [center_x, center_y, angle]
+        return sat_image_crop, tracklet_image_crop, drivable_gt_crop, [center_x, center_y, angle]
 
 
 
 
-def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lanes_, sat_image_, tracklets_image, out_path_root, max_num_samples=100):
+def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lanes_,
+                        sat_image_, tracklets_image, drivable_gt, out_path_root,
+                        max_num_samples=100):
 
     if "tracklets" in source:
         annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
@@ -694,12 +702,16 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
     else:
         raise ValueError("Invalid annotation source")
 
+    print("here")
 
     sample_num = 0
     while sample_num < max_num_samples:
 
+        print(sample_num)
+
         # this is not guaranteed to give valid crops
-        sat_image_crop, tracklet_image_crop, crop_pose = random_cropping(sat_image_, tracklets_image)
+        sat_image_crop, tracklet_image_crop, drivable_gt_crop, crop_pose = \
+            random_cropping(sat_image_, tracklets_image, drivable_gt)
 
         angle = crop_pose[2]
         R = np.array([[np.cos(angle), -np.sin(angle)],
@@ -858,12 +870,13 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
             pos_encoding[..., 2] = np.abs((y - q[1])) / sat_image_crop.shape[0]
             pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
-            print("-------------\nSaving to {}/{}-{}-{}".format(out_path, sample_id, i_query, output_name))
+            print("-------------\nSaving to {}/{}-{}".format(out_path, sample_id, i_query))
 
-            Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding-{}.png".format(out_path, sample_id, i_query, output_name))
+            Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding.png".format(out_path, sample_id, i_query))
             Image.fromarray(sat_image_crop).save("{}/{}-{}-rgb.png".format(out_path, sample_id, i_query))
             Image.fromarray(sat_image_viz).save("{}/{}-{}-rgb-viz.png".format(out_path, sample_id, i_query))
-            Image.fromarray((mask_all).astype(np.uint8)).save("{}/{}-{}-masks-{}.png".format(out_path, sample_id, i_query, output_name))
+            Image.fromarray((mask_all).astype(np.uint8)).save("{}/{}-{}-masks.png".format(out_path, sample_id, i_query))
+            Image.fromarray((drivable_gt_crop).astype(np.uint8)).save("{}/{}-{}-drivable-gt.png".format(out_path, sample_id, i_query))
 
             sample_num += 1
             print("Generated sample {} / {}".format(sample_num, max_num_samples))
@@ -1052,11 +1065,16 @@ if __name__ == "__main__":
     trajectories_ = trajectories_pred_
     trajectories_ped_ = trajectories_ped_pred_
 
+
     # OR USE GT TRAJETORIES
     #trajectories_ = trajectories_gt_
 
     print("vehicle trajectories: ",  len(trajectories_))
     print("pedestrian trajectories: ",  len(trajectories_ped_))
+
+    print("vehicle trajectories: ",  trajectories_.shape)
+    print("pedestrian trajectories: ",  trajectories_ped_.shape)
+
 
     # Visualize tracklets
     sat_image_viz = sat_image_.copy()
@@ -1083,6 +1101,11 @@ if __name__ == "__main__":
     cv2.imwrite(tracklet_file, tracklets_image)
     print("Saved tracklet visualization to {}".format(tracklet_file))
 
+    drivable_gt = np.asarray(
+        Image.open(os.path.join(args.sat_image_root, "{}_drivable.png".format(city_name)))).astype(np.uint8)
+    drivable_gt[drivable_gt > 1] = 255
+
+
     # single core
     if num_cpus <= 1:
         process_chunk_final(city_name,
@@ -1092,23 +1115,24 @@ if __name__ == "__main__":
                             lanes_,
                             sat_image_,
                             tracklets_image,
+                            drivable_gt,
                             out_path_root,
                             args.max_num_samples,
                             )
-    else:
-        arguments = zip(repeat(city_name),
-                        repeat(args.source),
-                        repeat(trajectories_),
-                        repeat(trajectories_ped_),
-                        repeat(lanes_),
-                        repeat(sat_image_),
-                        repeat(tracklets_image),
-                        repeat(out_path_root),
-                        repeat(args.max_num_samples),
-                        )
-
-
-        Pool(num_cpus).starmap(process_chunk_final, arguments)
+    # else:
+    #     arguments = zip(repeat(city_name),
+    #                     repeat(args.source),
+    #                     repeat(trajectories_),
+    #                     repeat(trajectories_ped_),
+    #                     repeat(lanes_),
+    #                     repeat(sat_image_),
+    #                     repeat(tracklets_image),
+    #                     repeat(out_path_root),
+    #                     repeat(args.max_num_samples),
+    #                     )
+    #
+    #
+    #     Pool(num_cpus).starmap(process_chunk_final, arguments)
 
 
 

@@ -96,6 +96,7 @@ class Trainer():
         for step, data in enumerate(train_progress):
 
             mask_pedestrian = data["mask_pedestrian"].cuda()
+            drivable_gt = data["drivable_gt"].cuda()
             pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
@@ -143,13 +144,16 @@ class Trainer():
 
                 sdf_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
                 sdf_target = sdf_target[0, 0].cpu().detach().numpy()
+                drivable_gt = drivable_gt[0].cpu().detach().numpy()
 
                 sdf_pred = np.concatenate([sdf_pred[..., np.newaxis], sdf_pred[..., np.newaxis], sdf_pred[..., np.newaxis]], axis=2)
                 sdf_target = np.concatenate([sdf_target[..., np.newaxis], sdf_target[..., np.newaxis], sdf_target[..., np.newaxis]], axis=2)
                 sdf_target = (sdf_target > 0.3).astype(np.uint8) * 255
+                drivable_gt = np.concatenate([drivable_gt[..., np.newaxis], drivable_gt[..., np.newaxis], drivable_gt[..., np.newaxis]], axis=2)
 
                 cv2.imshow("sdf_target", sdf_target)
                 cv2.imshow("sdf_pred", sdf_pred)
+                cv2.imshow("drivable_gt", drivable_gt)
                 cv2.waitKey(1)
 
             text = 'Epoch {} / {}, it {} / {}, it global {}, train loss = {:03f}'.\
@@ -171,6 +175,7 @@ class Trainer():
         val_losses = []
         sdf_preds = []
         sdf_targets = []
+        drivable_gts = []
 
         target_overlay_list = []
         pred_overlay_list = []
@@ -179,6 +184,7 @@ class Trainer():
         for step, data in enumerate(eval_progress):
 
             mask_pedestrian = data["mask_pedestrian"].cuda()
+            drivable_gt = data["drivable_gt"].cuda()
             pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
@@ -199,6 +205,7 @@ class Trainer():
                 sdf_target = data["mask_successor"].cuda()
 
             sdf_target = sdf_target.unsqueeze(1)
+            drivable_gt = drivable_gt.unsqueeze(1)
 
             with torch.no_grad():
                 (pred, features) = self.model(in_tensor)
@@ -207,6 +214,7 @@ class Trainer():
 
             sdf_targets.append(sdf_target)
             sdf_preds.append(pred_sdf)
+            drivable_gts.append(drivable_gt)
 
 
             # visualization
@@ -232,8 +240,10 @@ class Trainer():
 
         val_loss = np.nanmean(val_losses)
 
-        metrics_sdf = calc_torchmetrics(sdf_preds, sdf_targets, name="sdf")
-        metrics_sdf["eval/loss"] = val_loss
+        metrics_tracklet = calc_torchmetrics(sdf_preds, sdf_targets, name="tracklet")
+        metrics_gt_annot = calc_torchmetrics(sdf_preds, drivable_gts, name="gt_annot")
+
+        metrics_tracklet["eval/loss"] = val_loss
 
 
         # Make grid of images
@@ -241,7 +251,8 @@ class Trainer():
         pred_overlay_grid = make_image_grid(pred_overlay_list, nrow=8, ncol=8)
 
         if not self.params.main.disable_wandb:
-            wandb.log(metrics_sdf)
+            wandb.log(metrics_tracklet)
+            wandb.log(metrics_gt_annot)
             wandb.log({"Samples eval": [wandb.Image(target_overlay_grid, caption="GT"),
                                         wandb.Image(pred_overlay_grid, caption="Pred")],
                        })
@@ -249,9 +260,10 @@ class Trainer():
         cv2.imwrite("viz/target_overlay_grid-e{}.png".format(epoch), target_overlay_grid)
         cv2.imwrite("viz/pred_overlay_grid-e{}.png".format(epoch), pred_overlay_grid)
 
-        print(metrics_sdf)
+        print(metrics_tracklet)
+        print(metrics_gt_annot)
 
-        return metrics_sdf
+        return metrics_gt_annot
 
 
     def inference(self):
@@ -405,8 +417,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '1302', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, '1302', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, '1702', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, '1702', "*", "val")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train')
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val')
@@ -444,8 +456,11 @@ def main():
                 else:
                     wandb_run_name = "local_run_full"
 
-            fname = 'reg_{}.pth'.format(wandb_run_name)
+            os.makedirs(params.paths.checkpoints, exist_ok=True)
+
+            fname = '{}/-e{:02d}.pth'.format(wandb_run_name, epoch)
             checkpoint_path = os.path.join(params.paths.checkpoints, fname)
+
             print("Saving checkpoint to {}".format(checkpoint_path))
 
             torch.save(model.state_dict(), checkpoint_path)

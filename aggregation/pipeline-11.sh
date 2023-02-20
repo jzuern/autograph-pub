@@ -1,20 +1,18 @@
 export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 
 # iterate over all cities
-CITIES=(pittsburgh miami washington paloalto austin detroit)
-#CITIES=(pittsburgh)
-
+#CITIES=(pittsburgh washington paloalto austin detroit miami)
+CITIES=(pittsburgh washington paloalto austin detroit miami)
+#CITIES=(austin)
+NUM_PARALLEL=4
 
 for CITY in "${CITIES[@]}"; do
-  echo "Processing $CITY !"
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1 &
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1 &
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1 &
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1 &
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1 &
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1 &
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1 &
-  ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1502/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --num_cpus 1
+  for ((i=0; i<NUM_PARALLEL; i++)); do
+    echo "Processing $CITY, $i !"
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root /home/zuern/datasets/autograph/1702/$CITY --sat_image_root /home/zuern/datasets/lanegraph/ --source tracklets_dense --max_num_samples 1000 &
+    sleep 300 # sleep 5 min to give time start generating
+  done
+  wait
 done
 
 EXP="exp-10-01-23"
