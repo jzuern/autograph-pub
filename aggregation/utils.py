@@ -27,7 +27,7 @@ def bm0(mask1, mask2):
 def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_image):
     # Get all trajectories that go through query point
 
-    dist_thrsh = 6  # in px
+    dist_thrsh = 4  # in px
     angle_thrsh = np.pi / 4  # in rad
 
     sat_image_viz = sat_image.copy()

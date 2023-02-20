@@ -30,7 +30,7 @@ class SatelliteDriver(object):
         self.model = None
         self.crop_shape = (256, 256)
         self.canvas_log_odds = None
-        self.pose_history = [self.pose]
+        self.pose_history = np.array([self.pose])
 
     def load_model(self, model_path, type=None):
 
@@ -103,7 +103,7 @@ class SatelliteDriver(object):
         R = np.array([[np.cos(yaw), -np.sin(yaw)],
                       [np.sin(yaw), np.cos(yaw)]])
 
-        center = np.array([x, y])
+        center = np.array([x, y]) - np.array([csize, csize])
 
         # Rotate dst points
         dst_pts = (np.matmul(R, dst_pts.T).T + center).astype(np.float32)
@@ -133,26 +133,51 @@ class SatelliteDriver(object):
 
         self.canvas_log_odds += warped_pred
 
-
         # resize to smaller
         df = self.canvas_log_odds.shape[0] / 1000
         img1 = cv2.resize(colorize(self.canvas_log_odds), (1000, 1000))
         img2 = cv2.resize(self.satellite, (1000, 1000))
         canvas_viz = cv2.addWeighted(img1, 0.5, img2, 0.5, 0)
 
-        for i in range(1, len(self.pose_history)):
+        print(self.pose_history)
+
+        for i in range(1, len(self.pose_history)-1):
             x_0, y_0, _ = self.pose_history[i-1]
             x_1, y_1, _ = self.pose_history[i]
+
+            print(x_0, y_0, x_1, y_1)
+
+            x_0 -= csize
+            x_1 -= csize
+            y_0 -= csize
+            y_1 -= csize
 
             x_0 = int(x_0 / df)
             x_1 = int(x_1 / df)
             y_0 = int(y_0 / df)
             y_1 = int(y_1 / df)
 
-            cv2.line(canvas_viz, (x_0, y_0), (x_1, y_1), (0, 145, 0), 1)
+            cv2.line(canvas_viz, (x_0, y_0), (x_1, y_1), (0, 145, 0), 1, cv2.LINE_AA)
 
 
         cv2.imshow("Aggregation", canvas_viz)
+
+        # also visualize the canvas around current pose
+        width = 500
+        x_1, y_1, _ = self.pose_history[-1]
+        x_1 -= csize
+        y_1 -= csize
+        x_1 = int(x_1)
+        y_1 = int(y_1)
+
+        canvas_roi = self.canvas_log_odds[y_1 - width//2 : y_1+width//2, x_1-width//2 : x_1+width//2]
+        canvas_roi = colorize(canvas_roi)
+        satellite_roi = self.satellite[y_1 - width//2 : y_1+width//2, x_1-width//2 : x_1+width//2, :]
+        viz_roi = cv2.addWeighted(canvas_roi, 0.5, satellite_roi, 0.5, 0)
+
+        cv2.imshow("Aggregation_cropped", viz_roi)
+
+
 
 
         # warped_log_odds = np.log(warped_pred / (1 - warped_pred))
@@ -183,8 +208,8 @@ class SatelliteDriver(object):
 
         csize = self.crop_shape[0]
 
-        satellite_image = self.satellite[int(y - csize): int(y + csize),
-                                         int(x - csize): int(x + csize)].copy()
+        satellite_image = self.satellite[int(y - csize * 2): int(y + csize * 2),
+                                         int(x - csize * 2): int(x + csize * 2)].copy()
 
         # For bottom centered
         src_pts = np.array([[-128, 0],
@@ -246,7 +271,7 @@ class SatelliteDriver(object):
         elif key == Key.right:
             self.pose[2] += 0.2
 
-        self.pose_history.append(self.pose.copy())
+        self.pose_history = np.concatenate([self.pose_history, [self.pose]])
 
         pos_encoding = self.generate_pos_encoding()
         rgb = self.crop_satellite_at_pose(self.pose)
@@ -285,8 +310,8 @@ class SatelliteDriver(object):
 if __name__ == "__main__":
     driver = SatelliteDriver()
     driver.load_satellite(path="/data/lanegraph/woven-data/Pittsburgh.png")
-    driver.load_model(model_path="checkpoints/reg_thoughtful-violet-21.pth", type="full")
-    driver.load_model(model_path="checkpoints/reg_heartfelt-infatuation-22-e50.pth", type="successor")
+    driver.load_model(model_path="checkpoints/reg_major-rain-24.pth", type="full")
+    driver.load_model(model_path="checkpoints/reg_misty-resonance-25.pth", type="successor")
 
     print("Press arrow keys to drive")
 
