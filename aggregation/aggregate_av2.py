@@ -79,6 +79,12 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
         endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
     endpoints_centroids = np.array(endpoints_centroids)
 
+    # If at least 2 endpoints are found
+    if len(endpoints_centroids) < 2:
+        if np.random.rand() < 0.8:  # 80% chance to skip (cause we do not want to skip all)
+            logging.info("Too few endpoints found. Skipping")
+            return None, None, None, None, None, None
+
     # Get planning from query point to end points
     G_start = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - q, axis=1))
     G_ends = [np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - endnode, axis=1)) for endnode in endpoints_centroids]
@@ -113,9 +119,9 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
 
     path_imgs = []
 
-    if len(pos_ends) < 1:
-        logging.error("Too few endpoints found ({}). Skipping".format(len(pos_ends)))
-        return None, None, None, None, None, None
+    # if len(pos_ends) < 1:
+    #     logging.error("Too few endpoints found ({}). Skipping".format(len(pos_ends)))
+    #     return None, None, None, None, None, None
 
     for pos_end in pos_ends:
 
@@ -795,28 +801,17 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         if len(annots) < 1:
             continue
 
-        # switch axis order to x,y
-        #annots = [a[:, [1, 0]] for a in annots]
-        #annots_ped = [a[:, [1, 0]] for a in annots_ped]
-
         # Whether to export sparse or dense trajectory annotations
         if source == "tracklets_sparse":
             trajectories = annots  # not filtered
-            output_name = "sparse"
         elif source == "tracklets_dense":
-            output_name = "dense"
             trajectories = annots
         elif source == "lanes":
-            output_name = "lanes"
             trajectories = annots
         else:
             raise ValueError("Invalid source")
 
-
-        # get random query points on image
-        #query_points = np.random.randint(0, sat_image_crop.shape[0], size=(200, 2))
-        # get random query points at nonzeros of tracklet image
-
+        # Get query points
         query_points = np.argwhere(tracklet_image_crop[:, :, 2] > 0)
         np.random.shuffle(query_points)
         query_points = query_points[:50]

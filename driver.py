@@ -25,7 +25,7 @@ def colorize(mask):
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
-        self.pose = np.array([1540, 2300, -4.60])
+        self.pose = np.array([2170, 1447, -4.60])
         self.current_crop = None
         self.model = None
         self.crop_shape = (256, 256)
@@ -64,8 +64,7 @@ class SatelliteDriver(object):
         self.satellite = cv2.cvtColor(self.satellite, cv2.COLOR_BGR2RGB)
 
         # Crop
-        #self.satellite = self.satellite[27000:32000, 7000:12000, :]   # vertical, horizontal
-        top_left = [30000, 12000]  # vertical, horizontal
+        top_left = [27000, 17000]  # vertical, horizontal
         delta = [5000, 5000]
         self.satellite = self.satellite[top_left[0]:top_left[0] + delta[0], top_left[1]:top_left[1] + delta[1], :]
 

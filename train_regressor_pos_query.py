@@ -110,10 +110,10 @@ class Trainer():
                     mask_full = torch.nn.functional.interpolate(mask_full, size=rgb.shape[2:], mode='bilinear',
                                                            align_corners=True)
                     mask_full = torch.nn.Sigmoid()(mask_full)
+                    in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
                 else:
-                    mask_full = data["mask_full"].unsqueeze(1)  # get from disk
+                    in_tensor = torch.cat([rgb, pos_enc], dim=1)
 
-                in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
                 sdf_target = data["mask_successor"].cuda()
 
             sdf_target = sdf_target.unsqueeze(1)
@@ -140,7 +140,8 @@ class Trainer():
 
                 if self.params.target == "successor":
                     cv2.imshow("pos_enc", pos_enc[0].cpu().numpy().transpose(1, 2, 0))
-                    cv2.imshow("mask_full", mask_full[0, 0].cpu().numpy())
+                    if self.model_full is not None:
+                        cv2.imshow("mask_full", mask_full[0, 0].cpu().numpy())
 
                 sdf_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
                 sdf_target = sdf_target[0, 0].cpu().detach().numpy()
@@ -198,10 +199,10 @@ class Trainer():
                     mask_full = torch.nn.functional.interpolate(mask_full, size=rgb.shape[2:], mode='bilinear',
                                                            align_corners=True)
                     mask_full = torch.nn.Sigmoid()(mask_full)
+                    in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
                 else:
-                    mask_full = data["mask_full"].unsqueeze(1)  # get from disk
+                    in_tensor = torch.cat([rgb, pos_enc], dim=1)
 
-                in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
                 sdf_target = data["mask_successor"].cuda()
 
             sdf_target = sdf_target.unsqueeze(1)
@@ -375,7 +376,10 @@ def main():
     if opt.target == "full":
         num_in_channels = 3  # rgb
     elif opt.target == "successor":
-        num_in_channels = 7  # rgb, mask_sdf, pos_encoding
+        if opt.full_checkpoint is not None:
+            num_in_channels = 7  # rgb, mask_sdf, pos_encoding
+        else:
+            num_in_channels = 6  # rgb, pos_encoding
     else:
         raise ValueError("Unknown target")
     model = DeepLabv3Plus(models.resnet101(pretrained=True),
@@ -456,14 +460,17 @@ def main():
                 else:
                     wandb_run_name = "local_run_full"
 
-            os.makedirs(params.paths.checkpoints, exist_ok=True)
 
-            fname = '{}/-e{:02d}.pth'.format(wandb_run_name, epoch)
-            checkpoint_path = os.path.join(params.paths.checkpoints, fname)
+            checkpoint_path = os.path.join(params.paths.checkpoints, wandb_run_name)
 
-            print("Saving checkpoint to {}".format(checkpoint_path))
+            os.makedirs(checkpoint_path, exist_ok=True)
 
-            torch.save(model.state_dict(), checkpoint_path)
+            fname = 'e-{:02d}.pth'.format(epoch)
+            checkpoint_name = os.path.join(checkpoint_path, fname)
+
+            print("Saving checkpoint to {}".format(checkpoint_name))
+
+            torch.save(model.state_dict(), checkpoint_name)
 
 if __name__ == '__main__':
     main()
