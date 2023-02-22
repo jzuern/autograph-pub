@@ -28,27 +28,29 @@ from aggregation.utils import get_scenario_centerlines, assign_graph_traversals,
     filter_tracklet, preprocess_sample, merge_successor_trajectories, bayes_update_graph, angle_kde, bm0, \
     initialize_graph, dijkstra_trajectories
 
+
+
+
 # random shuffle seed
 #random.seed(0)
 np.random.seed(seed=int(time.time()))
 
 
 
-def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
+def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
 
     endpoints = []
 
     for t in succ_traj:
-        if np.any(np.isclose(t[-1], np.array([255, 255]), atol=10.0)) or \
-                np.any(np.isclose(t[-1], np.array([0, 0]), atol=10.0))  :
+        if np.any(np.isclose(t[-1], np.array([crop_size-1, crop_size-1]), atol=10.0)) or np.any(np.isclose(t[-1], np.array([0, 0]), atol=10.0)):
             coords = (int(t[-1, 0]), int(t[-1, 1]))
             cv2.circle(sat_image_viz, coords, 5, (255, 255, 255), -1)
             endpoints.append(coords)
 
     # sample halting points everywhere
     points = poisson_disk_sampling(r_min=r_min,
-                                   width=256,
-                                   height=256)
+                                   width=crop_size,
+                                   height=crop_size)
     edges = get_random_edges(points,
                              min_point_dist=r_min,
                              max_point_dist=2*r_min)
@@ -72,7 +74,7 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
         clustering = DBSCAN(eps=15, min_samples=2).fit(endpoints)
     except:
         logging.error("DBSCAN endpoint clustering failed. Skipping")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None
 
     endpoints_centroids = []
     for c in np.unique(clustering.labels_):
@@ -80,10 +82,11 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
     endpoints_centroids = np.array(endpoints_centroids)
 
     # If at least 2 endpoints are found
-    if len(endpoints_centroids) < 2:
-        if np.random.rand() < 0.8:  # 80% chance to skip (cause we do not want to skip all)
+    num_endpoints = len(endpoints_centroids)
+    if num_endpoints < 2:
+        if np.random.rand() < 0.9:  # 90% chance to skip (cause we do not want to skip all)
             logging.info("Too few endpoints found. Skipping")
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None
 
     # Get planning from query point to end points
     G_start = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - q, axis=1))
@@ -112,7 +115,7 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
         sdf_thin = sdf_thin - sdf_thin.min() + 1
     except:
         logging.error("SDF thinning failed. Skipping")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None, None
 
     kernel = np.zeros((20, 20), np.uint8)
     kernel = cv2.circle(kernel, (10, 10), 10, 1, -1)
@@ -137,7 +140,7 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
     mask_succ_sparse = np.max(np.array(path_imgs), axis=0)
 
 
-    return G, sat_image_viz, mask, angles, angles_viz, mask_succ_sparse
+    return G, sat_image_viz, mask, angles, angles_viz, mask_succ_sparse, num_endpoints
 
 
 
@@ -654,10 +657,7 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10):
 #     np.save("data/roi_usable_{}.npy".format(city_name), roi_usable)
 
 
-def random_cropping(sat_image, tracklet_image, drivable_gt):
-
-    crop_size = 256
-
+def random_cropping(sat_image, tracklet_image, drivable_gt, crop_size):
 
     while True:
 
@@ -674,19 +674,21 @@ def random_cropping(sat_image, tracklet_image, drivable_gt):
                                           center_x - crop_size:center_x + crop_size].copy()
 
         # check if tracklet image is empty in central region
-        half = sat_image_precrop.shape[1] // 2
+        center = sat_image_precrop.shape[1] // 2
 
-        if np.sum(tracklet_image_precrop[half - 64:half + 64, half - 64:half + 64, 0]) == 0:
+        if np.sum(tracklet_image_precrop[center - center//4:center + center//4, center - center//4:center + center//4, 0]) == 0:
             continue
 
+        half = crop_size // 2
+
         # get crop at center and with angle
-        M = cv2.getRotationMatrix2D((256, 256), angle * 180 / np.pi, 1)
-        sat_image_crop = cv2.warpAffine(sat_image_precrop, M, (512, 512))[256 - 128:256 + 128,
-                                                                          256 - 128:256 + 128]
-        tracklet_image_crop = cv2.warpAffine(tracklet_image_precrop, M, (512, 512), cv2.INTER_NEAREST)[256 - 128:256 + 128,
-                                                                                                       256 - 128:256 + 128]
-        drivable_gt_crop = cv2.warpAffine(drivable_gt_precrop, M, (512, 512), cv2.INTER_NEAREST)[256 - 128:256 + 128,
-                                                                                                 256 - 128:256 + 128]
+        M = cv2.getRotationMatrix2D((crop_size, crop_size), angle * 180 / np.pi, 1)
+        sat_image_crop = cv2.warpAffine(sat_image_precrop, M, (crop_size*2, crop_size*2))[crop_size - half:crop_size + half,
+                                                                                          crop_size - half:crop_size + half]
+        tracklet_image_crop = cv2.warpAffine(tracklet_image_precrop, M, (crop_size*2, crop_size*2), cv2.INTER_NEAREST)[crop_size - half:crop_size + half,
+                                                                                                       crop_size - half:crop_size + half]
+        drivable_gt_crop = cv2.warpAffine(drivable_gt_precrop, M, (crop_size*2, crop_size*2), cv2.INTER_NEAREST)[crop_size - half:crop_size + half,
+                                                                                                                 crop_size - half:crop_size + half]
 
         return sat_image_crop, tracklet_image_crop, drivable_gt_crop, [center_x, center_y, angle]
 
@@ -695,7 +697,7 @@ def random_cropping(sat_image, tracklet_image, drivable_gt):
 
 def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lanes_,
                         sat_image_, tracklets_image, drivable_gt, out_path_root,
-                        max_num_samples=100):
+                        max_num_samples=100, crop_size=256):
 
     if "tracklets" in source:
         annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
@@ -713,11 +715,9 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
     sample_num = 0
     while sample_num < max_num_samples:
 
-        print(sample_num)
-
         # this is not guaranteed to give valid crops
         sat_image_crop, tracklet_image_crop, drivable_gt_crop, crop_pose = \
-            random_cropping(sat_image_, tracklets_image, drivable_gt)
+            random_cropping(sat_image_, tracklets_image, drivable_gt, crop_size=crop_size)
 
         angle = crop_pose[2]
         R = np.array([[np.cos(angle), -np.sin(angle)],
@@ -750,11 +750,12 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         #     plt.plot(annot_transformed[:, 0], annot_transformed[:, 1], c='g')
         # plt.show()
 
+
         annots = []
         for annot in annot_candidates:
             # transform to crop coordinates
             annot = np.array(annot)
-            annot = np.dot(annot - [crop_pose[0], crop_pose[1]], R)  + [128, 128]
+            annot = np.dot(annot - [crop_pose[0], crop_pose[1]], R) + [crop_size//2, crop_size//2]
 
             is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image_crop.shape[1])
             if not np.any(is_in_roi):
@@ -775,7 +776,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         annots_ped = []
         for annot in annot_ped_candidates:
             annot = np.array(annot)
-            annot = np.dot(annot - [crop_pose[0], crop_pose[1]], R) + [128, 128]
+            annot = np.dot(annot - [crop_pose[0], crop_pose[1]], R) + [crop_size//2, crop_size//2]
 
             # filter trajectories according to current roi_xxyy
             is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image_crop.shape[1])
@@ -814,7 +815,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         # Get query points
         query_points = np.argwhere(tracklet_image_crop[:, :, 0] > 0)
         np.random.shuffle(query_points)
-        query_points = query_points[:50]
+        query_points = query_points[:200]
 
         # Debug plot
         # plt.imshow(sat_image_crop)
@@ -834,14 +835,21 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
                 logging.info("Too few successor trajectories")
                 continue
 
-            G, sat_image_viz, sdf, angles, angles_viz, mask_succ_sparse = get_succ_graph(q, succ_traj,  sat_image_viz, r_min=r_min)
+            G, sat_image_viz, sdf, angles, angles_viz, mask_succ_sparse, num_endpoints = \
+                get_succ_graph(q, succ_traj,  sat_image_viz, r_min=r_min, crop_size=crop_size)
+
+            if G is None:
+                logging.info("Successor graph is None. Skipping")
+                continue
+
+
             if G is None:
                 logging.info("Successor graph is None. Skipping")
                 continue
 
             # Minimum of X percent of pixels must be covered by the trajectory
             sdf = sdf[:, :, 0]
-            if np.sum(sdf > 0.01) < 0.02 * np.prod(sdf.shape):
+            if np.sum(sdf > 0.01) < 0.01 * np.prod(sdf.shape):
                 logging.info("Not enough pixels covered with successor graph. Skipping")
                 continue
 
@@ -889,7 +897,12 @@ if __name__ == "__main__":
     parser.add_argument("--num_cpus", type=int, default=1)
     parser.add_argument("--source", type=str, default="tracklets_sparse", choices=["tracklets_sparse", "tracklets_dense", "lanes"])
     parser.add_argument("--max_num_samples", type=int, default=100, help="Number of samples to generate per city")
+    parser.add_argument("--crop_size", type=int, default=512, help="Size of the BEV image crop")
     args = parser.parse_args()
+
+    print("Parsing config:", args)
+
+    logging.basicConfig(level=logging.INFO)
 
     out_path_root = args.out_path_root
     city_name = args.city_name.capitalize()
@@ -917,7 +930,6 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(out_path_root, 'val'), exist_ok=True)
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
-    # centerline_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_centerlines.png".format(city_name))))
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -1113,6 +1125,7 @@ if __name__ == "__main__":
                             drivable_gt,
                             out_path_root,
                             args.max_num_samples,
+                            crop_size=args.crop_size,
                             )
     # else:
     #     arguments = zip(repeat(city_name),
