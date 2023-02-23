@@ -421,8 +421,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '1702', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, '1702', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, '2202', "*", "train")
+    val_path = os.path.join(params.paths.dataroot, '2202', "*", "val")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train')
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val')
@@ -460,7 +460,6 @@ def main():
                 else:
                     wandb_run_name = "local_run_full"
 
-
             checkpoint_path = os.path.join(params.paths.checkpoints, wandb_run_name)
 
             os.makedirs(checkpoint_path, exist_ok=True)
@@ -469,7 +468,6 @@ def main():
             checkpoint_name = os.path.join(checkpoint_path, fname)
 
             print("Saving checkpoint to {}".format(checkpoint_name))
-
             torch.save(model.state_dict(), checkpoint_name)
 
 if __name__ == '__main__':

@@ -918,7 +918,6 @@ if __name__ == "__main__":
         "DTW": "Detroit",
     }
 
-
     export_final = args.export_final
 
     # parameters
@@ -1083,6 +1082,18 @@ if __name__ == "__main__":
     print("pedestrian trajectories: ",  trajectories_ped_.shape)
 
 
+    if city_name == "Austin":
+        print("Performing Austin specific cropping for low RAM usage!")
+        y_min_cut = 17000
+        y_max_cut = 52000
+        print(sat_image_.shape)
+        sat_image_ = np.ascontiguousarray(sat_image_[y_min_cut:y_max_cut, :, :])
+        print(sat_image_.shape)
+
+        trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
+        trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
+        print("done")
+
     # Visualize tracklets
     sat_image_viz = sat_image_.copy()
 
@@ -1094,7 +1105,7 @@ if __name__ == "__main__":
         for i in range(len(t)-1):
             cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
             cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
-    for t in trajectories_ped_pred_:
+    for t in trajectories_ped_:
         rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
         rc = (int(rc[0]), int(rc[1]), int(rc[2]))
         for i in range(len(t)-1):
@@ -1107,6 +1118,8 @@ if __name__ == "__main__":
     print("Saved tracklet visualization to {}".format(viz_file))
     cv2.imwrite(tracklet_file, tracklets_image)
     print("Saved tracklet visualization to {}".format(tracklet_file))
+
+    del sat_image_viz
 
     drivable_gt = np.asarray(
         Image.open(os.path.join(args.sat_image_root, "{}_drivable.png".format(city_name)))).astype(np.uint8)
