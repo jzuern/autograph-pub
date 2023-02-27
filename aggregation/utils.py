@@ -15,7 +15,48 @@ from av2.map.map_api import ArgoverseStaticMap
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_angles,  get_oriented_crop, transform2vgg
 
 
-def bm0(mask1, mask2):
+class Cropper:
+    def __init__(self, crop_size):
+        self.crop_size = crop_size
+
+    def crop(self, image, center, angle):
+        pass
+
+    def crop_batch(self, images, centers, angles):
+        pass
+
+    def filter_roi(self, trajectories, center_x, center_y, angle):
+        pass
+
+
+# Smooth trajectories with a median filter
+def smooth_trajectory(traj, window_size):
+    """
+    Smooths a 2D trajectory using a moving average filter.
+
+    Parameters:
+    traj (ndarray): A 2D numpy array of shape (N, 2), where N is the number of points in the trajectory.
+    window_size (int): The size of the moving window used to compute the moving average. Default is 5.
+
+    Returns:
+    smoothed_traj (ndarray): A 2D numpy array of shape (N, 2), where N is the number of points in the trajectory,
+    with the smoothed x and y coordinates.
+    """
+
+    # Pad the trajectory with zeros at the beginning and end to handle edge cases
+    padded_traj = np.pad(traj, ((window_size // 2, window_size // 2), (0, 0)), mode='edge')
+
+    # Compute the moving average of the x and y coordinates separately
+    smoothed_x = np.convolve(padded_traj[:, 0], np.ones(window_size) / window_size, mode='valid')
+    smoothed_y = np.convolve(padded_traj[:, 1], np.ones(window_size) / window_size, mode='valid')
+
+    # Combine the smoothed x and y coordinates into a single trajectory
+    smoothed_traj = np.column_stack((smoothed_x, smoothed_y))
+
+    return smoothed_traj
+
+
+def iou_mask(mask1, mask2):
     # Calculates IoU between two binary masks
     mask1_area = np.count_nonzero(mask1 == 1)
     mask2_area = np.count_nonzero(mask2 == 1)
@@ -155,7 +196,6 @@ def filter_tracklet(tracklet):
     # Remove big jumps in trajectory
     if np.max(np.linalg.norm(traj[1:] - traj[:-1], axis=1)) > MAX_JUMPSIZE:
         return None
-
 
     tracklet.path = traj
 

@@ -199,11 +199,6 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         # convert from angles to unit circle xy coordinates
         # to hsv to get hue
-        #angles_mask = (angles[:, :, 1] > 0).astype(np.uint8)
-        #angles = angles[:, :, 0] / 255.0
-
-        #angles_x = np.cos(angles)
-        #angles_y = np.sin(angles)
 
         mask_full = mask[:, :, 1]
         mask_successor = mask[:, :, 2]

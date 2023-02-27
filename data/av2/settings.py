@@ -1,6 +1,21 @@
 import numpy as np
 
 
+# PREPROCESSING FILTERING SETTINGS
+
+DBSCAN_MIN_N_SAMPLES = 2  # minimum number of endpoints to be considered a cluster
+NUM_ENDPOINTS_MIN = 1  # minimum number of endpoints to be kept
+NUM_QUERY_POINTS = 50   # number of query points to be sampled from the rendered trajectory image used to generate successor images
+IOU_SIMILARITY_THRESHOLD = 0.7 # minimum iou similarity between two successor trajectories rendered as images to be considered similar
+
+
+N_MIN_SUCC_TRAJECTORIES = 3  # minimum number of trajectories that have to be connected to a query position to be considered good sample
+FRAC_SUCC_GRAPH_PIXELS = 0.03  # fraction of pixels in the successor visualization that have to be connected to a query position to be considered good sample
+
+
+# END PREPROCESSING FILTERING SETTINGS
+
+
 def kabsch_umeyama(A, B):
 
     '''
@@ -23,6 +38,7 @@ def kabsch_umeyama(A, B):
     t = EA - c * R @ EB
 
     return R, c, t
+
 
 
 

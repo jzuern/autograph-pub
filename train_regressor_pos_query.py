@@ -421,8 +421,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '2202', "*", "train")
-    val_path = os.path.join(params.paths.dataroot, '2202', "*", "val")
+    train_path = os.path.join(params.paths.dataroot, '2602', "austin", "train")
+    val_path = os.path.join(params.paths.dataroot, '2602', "austin", "val")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train')
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val')
@@ -447,9 +447,7 @@ def main():
         # Evaluate
         trainer.train(epoch)
 
-        #if not params.main.disable_wandb:
         if epoch % 1 == 0:
-
             trainer.evaluate(epoch)
 
             try:

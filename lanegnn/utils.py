@@ -1127,8 +1127,6 @@ def get_ego_regression_target(params, data, split):
 
 
 
-
-
 def get_oriented_crop(edge_angle, mid_x, mid_y, rgb_context):
     # Size of quadratic destination image
     crop_size = 100

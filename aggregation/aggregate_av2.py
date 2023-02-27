@@ -22,18 +22,185 @@ import pickle
 import time
 
 from lanegnn.utils import poisson_disk_sampling, get_random_edges
-from data.av2.settings import get_transform_params
+from data.av2.settings import *
 from lanegnn.utils import visualize_angles
 from aggregation.utils import get_scenario_centerlines, assign_graph_traversals, resample_trajectory, Tracklet, \
-    filter_tracklet, preprocess_sample, merge_successor_trajectories, bayes_update_graph, angle_kde, bm0, \
-    initialize_graph, dijkstra_trajectories
-
-
+    filter_tracklet, preprocess_sample, merge_successor_trajectories, bayes_update_graph, angle_kde, iou_mask, \
+    initialize_graph, dijkstra_trajectories, smooth_trajectory
 
 
 # random shuffle seed
-#random.seed(0)
 np.random.seed(seed=int(time.time()))
+
+
+# def crop_satellite_at_pose(satellite, pose, crop_shape):
+#     x, y, yaw = pose
+#
+#     csize = crop_shape[0]
+#     csize_half = csize // 2
+#
+#     satellite_image = satellite[int(y - csize * 2): int(y + csize * 2),
+#                                 int(x - csize * 2): int(x + csize * 2)].copy()
+#
+#     # For bottom centered
+#     src_pts = np.array([[-csize_half, 0],
+#                         [-csize_half, -csize + 1],
+#                         [csize_half - 1, -csize + 1],
+#                         [csize_half - 1, 0]])
+#
+#     R = np.array([[np.cos(yaw), -np.sin(yaw)],
+#                   [np.sin(yaw), np.cos(yaw)]])
+#
+#     center = np.array([csize, csize])
+#
+#     # Rotate source points
+#     src_pts = (np.matmul(R, src_pts.T).T + center).astype(np.float32)
+#
+#     # Destination points are simply the corner points
+#     dst_pts = np.array([[0, csize - 1],
+#                         [0, 0],
+#                         [csize - 1, 0],
+#                         [csize - 1, csize - 1]],
+#                        dtype="float32")
+#
+#     M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+#
+#     try:
+#         rgb = cv2.warpPerspective(satellite_image, M, (csize, csize), cv2.INTER_LINEAR,
+#                                   borderMode=cv2.BORDER_TRANSPARENT)
+#         return rgb
+#     except:
+#         logging.debug("Perspective transform failed. Skipping", exc_info=True)
+#         return None
+
+def crop_img_at_pose(img, pose, crop_size):
+
+    crop_size_large = crop_size * 2
+
+    x, y, yaw = pose
+    R = np.array([[np.cos(yaw), -np.sin(yaw)],
+                  [np.sin(yaw), np.cos(yaw)]])
+
+    # Crop source and dest points
+    img_crop_ = img[int(y - crop_size_large):int(y + crop_size_large),
+                    int(x - crop_size_large):int(x + crop_size_large)].copy()
+
+    # Source points are around center in satellite image crop
+    center = np.array([crop_size_large, crop_size_large])
+
+    # For bottom centered
+    src_pts = np.array([[-crop_size//2,   0],
+                        [-crop_size//2,   -crop_size + 1],
+                        [ crop_size//2-1, -crop_size + 1],
+                        [ crop_size//2-1, 0]])
+
+    # src_pts_context = np.array([[-256, 128],
+    #                             [-256, -383],
+    #                             [ 255, -383],
+    #                             [ 255, 128]])
+
+    # Rotate source points
+    src_pts = (np.matmul(R, src_pts.T).T + center).astype(np.float32)
+    # src_pts_context = (np.matmul(R, src_pts_context.T).T + center).astype(np.float32)
+
+    # Destination points are simply the corner points
+    dst_pts = np.array([[0, crop_size - 1],
+                        [0, 0],
+                        [crop_size - 1, 0],
+                        [crop_size - 1, crop_size - 1]],
+                       dtype="float32")
+
+    # dst_pts_context = np.array([[0, crop_size - 1],
+    #                             [0, 0],
+    #                             [crop_size - 1, 0],
+    #                             [crop_size - 1, crop_size - 1]],
+    #                            dtype="float32")
+
+    # the perspective transformation matrix
+    M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+    # M_context = cv2.getPerspectiveTransform(src_pts_context, dst_pts_context)
+
+    # directly warp the rotated rectangle to get the straightened rectangle
+    try:
+        img_crop = cv2.warpPerspective(img_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
+        return img_crop
+    except:
+        logging.debug("Perspective transform failed. Skipping", exc_info=True)
+        return None
+
+
+def get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
+
+    endpoints = []
+
+    # find endpoints by checking if they are close to the image border
+    for t in succ_traj:
+        if np.any(np.isclose(t[-1], np.array([crop_size-1, crop_size-1]), atol=10.0)) or np.any(np.isclose(t[-1], np.array([0, 0]), atol=10.0)):
+            coords = (int(t[-1, 0]), int(t[-1, 1]))
+            cv2.circle(sat_image_viz, coords, 5, (255, 255, 255), -1)
+        else:
+            coords = (int(t[-1, 0]), int(t[-1, 1]))
+            cv2.circle(sat_image_viz, coords, 5, (129, 129, 129), -1)
+        endpoints.append(coords)
+    endpoints = np.array(endpoints)
+
+    mask_thin = np.zeros(sat_image_viz.shape[0:2], dtype=np.uint8)
+    for t in succ_traj:
+        for i in range(len(t) - 1):
+            x1 = int(t[i][0])
+            y1 = int(t[i][1])
+            x2 = int(t[i + 1][0])
+            y2 = int(t[i + 1][1])
+            cv2.line(mask_thin, (x1, y1), (x2, y2), 1, thickness=2)
+
+    # Cluster endpoints
+    try:
+        clustering = DBSCAN(eps=15, min_samples=DBSCAN_MIN_N_SAMPLES).fit(endpoints)
+    except:
+        logging.debug("DBSCAN endpoint clustering failed. Skipping", exc_info=True)
+        return None, None, None
+
+    endpoints_centroids = []
+    for c in np.unique(clustering.labels_):
+        endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
+    endpoints_centroids = np.array(endpoints_centroids)
+
+    # If at least 2 endpoints are found
+    num_endpoints = len(endpoints_centroids)
+    if num_endpoints <= NUM_ENDPOINTS_MIN:
+        logging.debug("Too few endpoints found. Skipping")
+        return None, None, None
+
+    cv2.circle(sat_image_viz, (int(q[0]), int(q[1])), 4, (0, 255, 0), -1)
+    [cv2.circle(sat_image_viz, (int(p[0]), int(p[1])), 4, (0, 0, 0), -1) for p in endpoints_centroids]
+
+    try:
+        sdf_thin = skfmm.distance(1 - mask_thin) - skfmm.distance(mask_thin)
+        sdf_thin = sdf_thin - sdf_thin.min() + 1
+    except:
+        logging.debug("SDF thinning failed. Skipping")
+        return None, None, None
+
+    kernel = cv2.circle(np.zeros((20, 20), np.uint8), (10, 10), 10, 1, -1)
+
+    path_imgs = []
+
+    for pos_end in endpoints_centroids:
+
+        path, cost = skimage.graph.route_through_array(sdf_thin.T,
+                                                       start=tuple(q.astype(np.int32)),
+                                                       end=tuple(pos_end.astype(np.int32)),
+                                                       fully_connected=True)
+        path = np.stack(path, axis=-1)
+        path_img = np.zeros(sat_image_viz.shape[0:2], dtype=np.uint8)
+        path_img[path[1], path[0]] = 1
+        path_imgs.append(cv2.dilate(path_img.astype(np.uint8), kernel, iterations=1))
+
+    mask_succ_sparse = np.max(np.array(path_imgs), axis=0)
+
+    return sat_image_viz, mask_succ_sparse, mask_thin
+
+
 
 
 
@@ -46,6 +213,7 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
             coords = (int(t[-1, 0]), int(t[-1, 1]))
             cv2.circle(sat_image_viz, coords, 5, (255, 255, 255), -1)
             endpoints.append(coords)
+    endpoints = np.array(endpoints)
 
     # sample halting points everywhere
     points = poisson_disk_sampling(r_min=r_min,
@@ -68,10 +236,8 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
     mask = (mask / 255.).astype(np.float32)
 
     # Cluster endpoints
-    endpoints = np.array(endpoints)
-
     try:
-        clustering = DBSCAN(eps=15, min_samples=2).fit(endpoints)
+        clustering = DBSCAN(eps=15, min_samples=DBSCAN_MIN_N_SAMPLES).fit(endpoints)
     except:
         logging.error("DBSCAN endpoint clustering failed. Skipping")
         return None, None, None, None, None, None, None
@@ -278,7 +444,7 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
 #                 continue
 #
 #             # Must be sufficiently dissimilar from any previous sample
-#             max_iou = max([bm0(mask_succ_sparse, m) for m in tracklets_im_list]) if len(tracklets_im_list) > 0 else 0
+#             max_iou = max([iou_mask(mask_succ_sparse, m) for m in tracklets_im_list]) if len(tracklets_im_list) > 0 else 0
 #             if max_iou > 0.7:
 #                 logging.info("Sample too similar to previous samples. Skipping")
 #                 continue
@@ -657,46 +823,38 @@ def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
 #     np.save("data/roi_usable_{}.npy".format(city_name), roi_usable)
 
 
-def random_cropping(sat_image, tracklet_image, drivable_gt, crop_size):
+def random_cropping(sat_image, tracklet_image, drivable_gt, intersection_gt, trajectories_, crop_size):
 
     while True:
+        # get center_x, center_y, angle from annotations_centers
+        randint = np.random.randint(0, len(trajectories_))
 
-        # random center position
-        center_x = np.random.randint(crop_size // 2, sat_image.shape[1] - crop_size // 2)
-        center_y = np.random.randint(crop_size // 2, sat_image.shape[0] - crop_size // 2)
-        angle = np.random.uniform(0, 2 * np.pi)
+        pos_x = int(trajectories_[randint][0, 0])
+        pos_y = int(trajectories_[randint][0, 1])
 
-        sat_image_precrop = sat_image[center_y - crop_size:center_y + crop_size,
-                                      center_x - crop_size:center_x + crop_size, :].copy()
-        tracklet_image_precrop = tracklet_image[center_y - crop_size:center_y + crop_size,
-                                                center_x - crop_size:center_x + crop_size, :].copy()
-        drivable_gt_precrop = drivable_gt[center_y - crop_size:center_y + crop_size,
-                                          center_x - crop_size:center_x + crop_size].copy()
+        # get angle from annotation
+        next_x = int(trajectories_[randint][1, 0])
+        next_y = int(trajectories_[randint][1, 1])
+        angle = np.arctan2(next_y - pos_y, next_x - pos_x)
+        angle = angle + np.pi / 2
 
-        # check if tracklet image is empty in central region
-        center = sat_image_precrop.shape[1] // 2
+        sat_image_crop = crop_img_at_pose(sat_image, [pos_x, pos_y, angle], crop_size)
+        tracklet_image_crop = crop_img_at_pose(tracklet_image, [pos_x, pos_y, angle], crop_size)
+        drivable_gt_crop = crop_img_at_pose(drivable_gt, [pos_x, pos_y, angle], crop_size)
 
-        if np.sum(tracklet_image_precrop[center - center//4:center + center//4, center - center//4:center + center//4, 0]) == 0:
-            continue
+        if sat_image_crop is not None:
+            break
 
-        half = crop_size // 2
+    crop_center_x = int(pos_x + np.sin(angle) * crop_size / 2)
+    crop_center_y = int(pos_y - np.cos(angle) * crop_size / 2)
 
-        # get crop at center and with angle
-        M = cv2.getRotationMatrix2D((crop_size, crop_size), angle * 180 / np.pi, 1)
-        sat_image_crop = cv2.warpAffine(sat_image_precrop, M, (crop_size*2, crop_size*2))[crop_size - half:crop_size + half,
-                                                                                          crop_size - half:crop_size + half]
-        tracklet_image_crop = cv2.warpAffine(tracklet_image_precrop, M, (crop_size*2, crop_size*2), cv2.INTER_NEAREST)[crop_size - half:crop_size + half,
-                                                                                                       crop_size - half:crop_size + half]
-        drivable_gt_crop = cv2.warpAffine(drivable_gt_precrop, M, (crop_size*2, crop_size*2), cv2.INTER_NEAREST)[crop_size - half:crop_size + half,
-                                                                                                                 crop_size - half:crop_size + half]
+    print("Agent pose: ", pos_x, pos_y, angle, "Crop center: ", crop_center_x, crop_center_y, angle, "Crop size: ", crop_size)
 
-        return sat_image_crop, tracklet_image_crop, drivable_gt_crop, [center_x, center_y, angle]
-
-
+    return sat_image_crop, tracklet_image_crop, drivable_gt_crop, [crop_center_x, crop_center_y, angle]
 
 
 def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lanes_,
-                        sat_image_, tracklets_image, drivable_gt, out_path_root,
+                        sat_image_, tracklets_image, drivable_gt, intersection_gt, out_path_root,
                         max_num_samples=100, crop_size=256):
 
     if "tracklets" in source:
@@ -710,16 +868,14 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
     else:
         raise ValueError("Invalid annotation source")
 
-    print("here")
-
     sample_num = 0
     while sample_num < max_num_samples:
 
         # this is not guaranteed to give valid crops
-        sat_image_crop, tracklet_image_crop, drivable_gt_crop, crop_pose = \
-            random_cropping(sat_image_, tracklets_image, drivable_gt, crop_size=crop_size)
+        sat_image_crop, tracklet_image_crop, drivable_gt_crop, crop_center = \
+            random_cropping(sat_image_, tracklets_image, drivable_gt, intersection_gt, trajectories_, crop_size=crop_size)  # [15729, 25061]
 
-        angle = crop_pose[2]
+        angle = crop_center[2]
         R = np.array([[np.cos(angle), -np.sin(angle)],
                       [np.sin(angle), np.cos(angle)]])
 
@@ -728,7 +884,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         else:
             out_path = os.path.join(out_path_root, "train")
 
-        sample_id = "{}-{}-{}".format(city_name, crop_pose[0], crop_pose[1])
+        sample_id = "{}-{}-{}".format(city_name, crop_center[0], crop_center[1])
 
         if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
             continue
@@ -736,26 +892,18 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         annot_candidates = []
         annot_ped_candidates = []
         for i in range(len(annot_)):
-            if np.linalg.norm(annotations_centers[i] - [crop_pose[0], crop_pose[1]]) < 500:
+            if np.linalg.norm(annotations_centers[i] - [crop_center[0], crop_center[1]]) < 512:
                 annot_candidates.append(annot_[i])
         for i in range(len(annot_ped_)):
-            if np.linalg.norm(annotations_ped_centers[i] - [crop_pose[0], crop_pose[1]]) < 500:
+            if np.linalg.norm(annotations_ped_centers[i] - [crop_center[0], crop_center[1]]) < 512:
                 annot_ped_candidates.append(annot_ped_[i])
-
-        # Debug
-        # plt.imshow(sat_image_crop)
-        # plt.imshow(tracklet_image_crop, alpha=0.5)
-        # for annot in annot_candidates:
-        #     annot_transformed = np.dot(annot - [crop_pose[0], crop_pose[1]], R) + [128, 128]
-        #     plt.plot(annot_transformed[:, 0], annot_transformed[:, 1], c='g')
-        # plt.show()
 
 
         annots = []
         for annot in annot_candidates:
             # transform to crop coordinates
             annot = np.array(annot)
-            annot = np.dot(annot - [crop_pose[0], crop_pose[1]], R) + [crop_size//2, crop_size//2]
+            annot = np.dot(annot - [crop_center[0], crop_center[1]], R) + [crop_size//2, crop_size//2]
 
             is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image_crop.shape[1])
             if not np.any(is_in_roi):
@@ -776,7 +924,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         annots_ped = []
         for annot in annot_ped_candidates:
             annot = np.array(annot)
-            annot = np.dot(annot - [crop_pose[0], crop_pose[1]], R) + [crop_size//2, crop_size//2]
+            annot = np.dot(annot - [crop_center[0], crop_center[1]], R) + [crop_size//2, crop_size//2]
 
             # filter trajectories according to current roi_xxyy
             is_in_roi = np.logical_and(annot[:, 0] > 0, annot[:, 0] < sat_image_crop.shape[1])
@@ -812,53 +960,84 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
         else:
             raise ValueError("Invalid source")
 
+        do_debugging = False
+        if do_debugging:
+            sat_image_crop = cv2.cvtColor(sat_image_crop, cv2.COLOR_BGR2RGB)
+            cv2.imshow('sat_image_viz', sat_image_crop)
+            cv2.waitKey(10)
+
+            def viz(event, mouseX, mouseY, flags, param):
+                if event == cv2.EVENT_LBUTTONDOWN:
+                    now = time.time()
+                    q = np.array([mouseX, mouseY])
+                    print(q)
+
+                    succ_traj, mask_total, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
+
+                    sat_image_viz, mask_succ_sparse, mask_thin = get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=r_min, crop_size=crop_size)
+
+                    if sat_image_viz is not None:
+
+                        sat_image_viz = cv2.circle(sat_image_viz, (mouseX, mouseY), 5, (0, 0, 0), -1)
+
+                        print("Inference time: {:.4f} s".format(time.time() - now))
+                        cv2.imshow('sat_image_viz', sat_image_viz)
+                        cv2.imshow('mask_succ_sparse', mask_succ_sparse * 255)
+
+            cv2.namedWindow('sat_image_viz')
+            cv2.setMouseCallback('sat_image_viz', viz)
+            cv2.waitKey(1)
+            cv2.waitKey(0)
+
+
         # Get query points
         query_points = np.argwhere(tracklet_image_crop[:, :, 0] > 0)
-        np.random.shuffle(query_points)
-        query_points = query_points[:200]
+        query_points = np.fliplr(query_points)
 
-        # Debug plot
+        np.random.shuffle(query_points)
+        query_points = query_points[:NUM_QUERY_POINTS]
+        # query_points = np.array([[512, 256]])
+
         # plt.imshow(sat_image_crop)
-        # plt.imshow(tracklet_image_crop, alpha=0.5)
+        # plt.imshow(tracklet_image_crop[:, :, 0], alpha=0.5)
         # plt.scatter(query_points[:, 1], query_points[:, 0], c='r')
-        # for t in trajectories:
-        #     plt.plot(t[:, 0], t[:, 1], c='g')
         # plt.show()
 
         tracklets_im_list = []
 
         for i_query, q in enumerate(query_points):
 
+            print("{}/{}-{}".format(out_path, sample_id, i_query))
+
             succ_traj, mask_total, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
 
-            if len(succ_traj) < 3:
-                logging.info("Too few successor trajectories")
+            if len(succ_traj) < N_MIN_SUCC_TRAJECTORIES:
+                logging.debug("Too few successor trajectories")
                 continue
 
-            G, sat_image_viz, sdf, angles, angles_viz, mask_succ_sparse, num_endpoints = \
-                get_succ_graph(q, succ_traj,  sat_image_viz, r_min=r_min, crop_size=crop_size)
+            # G, sat_image_viz, sdf, angles, angles_viz, mask_succ_sparse, num_endpoints = \
+            #     get_succ_graph(q, succ_traj,  sat_image_viz, r_min=r_min, crop_size=crop_size)
+            sat_image_viz, mask_succ_sparse, _ = get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=r_min, crop_size=crop_size)
 
-            if G is None:
-                logging.info("Successor graph is None. Skipping")
-                continue
-
-
-            if G is None:
-                logging.info("Successor graph is None. Skipping")
+            if sat_image_viz is None:
+                logging.debug("Successor graph is None. Skipping")
                 continue
 
             # Minimum of X percent of pixels must be covered by the trajectory
-            sdf = sdf[:, :, 0]
-            if np.sum(sdf > 0.01) < 0.01 * np.prod(sdf.shape):
-                logging.info("Not enough pixels covered with successor graph. Skipping")
+            if np.sum(mask_succ_sparse > 0.01) < FRAC_SUCC_GRAPH_PIXELS * np.prod(mask_succ_sparse.shape):
+                logging.debug("Not enough pixels covered with successor graph. Skipping")
                 continue
 
             # Must be sufficiently dissimilar from any previous sample
-            max_iou = max([bm0(mask_succ_sparse, m) for m in tracklets_im_list]) if len(tracklets_im_list) > 0 else 0
-            if max_iou > 0.7:
+            max_iou = max([iou_mask(mask_succ_sparse, m) for m in tracklets_im_list]) if len(tracklets_im_list) > 0 else 0
+            if max_iou > IOU_SIMILARITY_THRESHOLD:
                 logging.info("Sample too similar to previous samples. Skipping")
                 continue
+
             tracklets_im_list.append(mask_succ_sparse)
+
+            [cv2.circle(sat_image_viz, (qq[0], qq[1]), 2, (0, 150, 255), -1) for qq in query_points]
+
 
             # Build 3 channel mask
             mask_all = np.zeros(sat_image_crop.shape, dtype=np.uint8)
@@ -873,7 +1052,8 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
             pos_encoding[..., 2] = np.abs((y - q[1])) / sat_image_crop.shape[0]
             pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
-            print("-------------\nSaving to {}/{}-{}".format(out_path, sample_id, i_query))
+            sample_num += 1
+            print("-------------\nSaving to {}/{}-{} | Sample {} / {}".format(out_path, sample_id, i_query, sample_num, max_num_samples))
 
             Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding.png".format(out_path, sample_id, i_query))
             Image.fromarray(sat_image_crop).save("{}/{}-{}-rgb.png".format(out_path, sample_id, i_query))
@@ -881,8 +1061,6 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
             Image.fromarray((mask_all).astype(np.uint8)).save("{}/{}-{}-masks.png".format(out_path, sample_id, i_query))
             Image.fromarray((drivable_gt_crop).astype(np.uint8)).save("{}/{}-{}-drivable-gt.png".format(out_path, sample_id, i_query))
 
-            sample_num += 1
-            print("Generated sample {} / {}".format(sample_num, max_num_samples))
 
 
 
@@ -902,7 +1080,7 @@ if __name__ == "__main__":
 
     print("Parsing config:", args)
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG, filename='aggregate_av2.log', filemode='w')
 
     out_path_root = args.out_path_root
     city_name = args.city_name.capitalize()
@@ -929,6 +1107,12 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(out_path_root, 'val'), exist_ok=True)
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
+
+    drivable_gt = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_drivable.png".format(city_name)))).astype(np.uint8)
+    drivable_gt[drivable_gt > 1] = 255
+
+    intersection_gt = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_intersections.png".format(city_name)))).astype(np.uint8)
+    intersection_gt[intersection_gt > 1] = 255
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -1006,6 +1190,7 @@ if __name__ == "__main__":
     if not os.path.exists("data/trajectories_pred_{}.npy".format(city_name)):
         trajectories_pred_ = []
         trajectories_ped_pred_ = []
+        num_removed_trajectories = 0; num_kept_trajectories = 0
 
         for fcounter, p in tqdm(enumerate(all_tracking_files), total=len(all_tracking_files)):
             with open(p, "rb") as f:
@@ -1046,17 +1231,20 @@ if __name__ == "__main__":
                     else:
                         tracklet.label = 2  # pedestrian
 
-
                     tracklet.transform(transform_t, transform_c, transform_R)
 
                     tracklet = filter_tracklet(tracklet)
-
+                    if tracklet is None:
+                        num_removed_trajectories += 1
                     if tracklet is not None:
-
+                        num_kept_trajectories += 1
                         if tracklet.label == 1: # vehicle
                             trajectories_pred_.append(tracklet.path)
                         else:
                             trajectories_ped_pred_.append(tracklet.path)
+
+        print("num_removed_trajectories: ", num_removed_trajectories)
+        print("num_kept_trajectories: ", num_kept_trajectories)
 
         trajectories_pred_ = np.array(trajectories_pred_)
         trajectories_ped_pred_ = np.array(trajectories_ped_pred_)
@@ -1071,59 +1259,57 @@ if __name__ == "__main__":
     trajectories_ = trajectories_pred_
     trajectories_ped_ = trajectories_ped_pred_
 
-
     # OR USE GT TRAJETORIES
     #trajectories_ = trajectories_gt_
 
     print("vehicle trajectories: ",  len(trajectories_))
     print("pedestrian trajectories: ",  len(trajectories_ped_))
 
-    print("vehicle trajectories: ",  trajectories_.shape)
-    print("pedestrian trajectories: ",  trajectories_ped_.shape)
-
+    trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
+    trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
 
     if city_name == "Austin":
         print("Performing Austin specific cropping for low RAM usage!")
-        y_min_cut = 17000
+        # y_min_cut = 17000
+        y_min_cut = 0
         y_max_cut = 52000
-        print(sat_image_.shape)
         sat_image_ = np.ascontiguousarray(sat_image_[y_min_cut:y_max_cut, :, :])
-        print(sat_image_.shape)
+        drivable_gt = np.ascontiguousarray(drivable_gt[y_min_cut:y_max_cut, :])
+        intersection_gt = np.ascontiguousarray(intersection_gt[y_min_cut:y_max_cut, :])
 
         trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
         trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
         print("done")
 
-    # Visualize tracklets
-    sat_image_viz = sat_image_.copy()
-
-    tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
-
-    for t in trajectories_:
-        rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
-        rc = (int(rc[0]), int(rc[1]), int(rc[2]))
-        for i in range(len(t)-1):
-            cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
-            cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
-    for t in trajectories_ped_:
-        rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
-        rc = (int(rc[0]), int(rc[1]), int(rc[2]))
-        for i in range(len(t)-1):
-            cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
-            cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (0, 255, 0), 3)
-
     viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
     tracklet_file = os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))
-    cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
-    print("Saved tracklet visualization to {}".format(viz_file))
-    cv2.imwrite(tracklet_file, tracklets_image)
-    print("Saved tracklet visualization to {}".format(tracklet_file))
 
-    del sat_image_viz
+    # # Visualize tracklets
+    # sat_image_viz = sat_image_.copy()
+    #
+    # tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
+    #
+    # for t in tqdm(trajectories_):
+    #     rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
+    #     rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+    #     for i in range(len(t)-1):
+    #         cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+    #         cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
+    # for t in tqdm(trajectories_ped_):
+    #     rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
+    #     rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+    #     for i in range(len(t)-1):
+    #         cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+    #         cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (0, 255, 0), 3)
+    #
+    # cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
+    # print("Saved tracklet visualization to {}".format(viz_file))
+    # cv2.imwrite(tracklet_file, tracklets_image)
+    # print("Saved tracklet visualization to {}".format(tracklet_file))
+    # del sat_image_viz
 
-    drivable_gt = np.asarray(
-        Image.open(os.path.join(args.sat_image_root, "{}_drivable.png".format(city_name)))).astype(np.uint8)
-    drivable_gt[drivable_gt > 1] = 255
+    tracklets_image = np.asarray(Image.open(tracklet_file)).astype(np.uint8)
+    tracklets_image = cv2.cvtColor(tracklets_image, cv2.COLOR_BGR2RGB)
 
 
     # single core
@@ -1136,6 +1322,7 @@ if __name__ == "__main__":
                             sat_image_,
                             tracklets_image,
                             drivable_gt,
+                            intersection_gt,
                             out_path_root,
                             args.max_num_samples,
                             crop_size=args.crop_size,
