@@ -115,7 +115,7 @@ class RegressorDataset(torch.utils.data.Dataset):
 
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
-    def __init__(self, params, path, split):
+    def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5):
         self.path = path
         self.params = params
 
@@ -147,6 +147,37 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         assert len(self.sdf_files) == len(self.rgb_files)
 
         self.split = split
+
+
+        # Now we can share the files between type branch and straight
+        rgb_branch = [i for i in self.rgb_files if "branching" in i]
+        sdf_branch = [i for i in self.sdf_files if "branching" in i]
+        pos_enc_branch = [i for i in self.pos_enc_files if "branching" in i]
+        drivable_gt_branch = [i for i in self.drivable_gt_files if "branching" in i]
+
+        rgb_straight = [i for i in self.rgb_files if "straight" in i]
+        sdf_straight = [i for i in self.sdf_files if "straight" in i]
+        pos_enc_straight = [i for i in self.pos_enc_files if "straight" in i]
+        drivable_gt_straight = [i for i in self.drivable_gt_files if "straight" in i]
+
+        if frac_branch * len(rgb_branch) < frac_straight * len(rgb_straight):
+            frac_straight_eff = 2 * frac_branch * len(rgb_branch) / len(rgb_straight)
+            frac_branch_eff = 2 * frac_branch
+        else:
+            frac_branch_eff = 2 * frac_straight * len(rgb_straight) / len(rgb_branch)
+            frac_straight_eff = 2 * frac_straight
+
+        print("frac_branch = {}, frac_straight = {}".format(frac_branch, frac_straight))
+        print("Using {}% branch and {}% straight effectively".format(frac_branch_eff * 100, frac_straight_eff * 100))
+
+        self.rgb_files = rgb_branch[:int(frac_branch_eff * len(rgb_branch))] + \
+                         rgb_straight[:int(frac_straight_eff * len(rgb_straight))]
+        self.sdf_files = sdf_branch[:int(frac_branch_eff * len(sdf_branch))] + \
+                         sdf_straight[:int(frac_straight_eff * len(sdf_straight))]
+        self.pos_enc_files = pos_enc_branch[:int(frac_branch_eff * len(pos_enc_branch))] + \
+                             pos_enc_straight[:int(frac_straight_eff * len(pos_enc_straight))]
+        self.drivable_gt_files = drivable_gt_branch[:int(frac_branch_eff * len(drivable_gt_branch))] + \
+                                 drivable_gt_straight[:int(frac_straight_eff * len(drivable_gt_straight))]
 
         print("Loaded {} {} files".format(len(self.sdf_files), self.split))
 

@@ -424,11 +424,11 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '0203', "austin", "train")
-    val_path = os.path.join(params.paths.dataroot, '0203', "austin", "val")
+    train_path = os.path.join(params.paths.dataroot, '0703', "austin", "train", "*")
+    val_path = os.path.join(params.paths.dataroot, '0703', "austin", "val", "*")
 
-    dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train')
-    dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val')
+    dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5, frac_straight=0.5)
+    dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val', frac_branch=0.5, frac_straight=0.5)
 
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,
