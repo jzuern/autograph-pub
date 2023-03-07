@@ -1,15 +1,9 @@
-import random
-import numpy as np
 from pathlib import Path
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
 import os
 import networkx as nx
-from scipy.spatial.distance import cdist
-from itertools import repeat
-from ray.util.multiprocessing import Pool
 import cv2
 import skfmm
 import argparse
@@ -21,12 +15,12 @@ from av2.datasets.motion_forecasting import scenario_serialization
 import pickle
 import time
 
+
 from lanegnn.utils import poisson_disk_sampling, get_random_edges
 from data.av2.settings import *
 from lanegnn.utils import visualize_angles
 from aggregation.utils import get_scenario_centerlines, assign_graph_traversals, resample_trajectory, Tracklet, \
-    filter_tracklet, preprocess_sample, merge_successor_trajectories, bayes_update_graph, angle_kde, iou_mask, \
-    initialize_graph, dijkstra_trajectories, smooth_trajectory
+    filter_tracklet, merge_successor_trajectories, iou_mask, smooth_trajectory, get_endpoints
 
 
 # random shuffle seed
@@ -828,15 +822,21 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, intersection_gt, tra
     while True:
         # get center_x, center_y, angle from annotations_centers
         randint = np.random.randint(0, len(trajectories_))
+        rand_traj = trajectories_[randint]
+        rand_point_in_traj = rand_traj[np.random.randint(0, len(rand_traj)-1)]
 
-        pos_x = int(trajectories_[randint][0, 0])
-        pos_y = int(trajectories_[randint][0, 1])
+        pos_x = int(rand_point_in_traj[0])
+        pos_y = int(rand_point_in_traj[1])
 
         # get angle from annotation
         next_x = int(trajectories_[randint][1, 0])
         next_y = int(trajectories_[randint][1, 1])
         angle = np.arctan2(next_y - pos_y, next_x - pos_x)
-        angle = angle + np.pi / 2
+        angle = angle - np.pi / 2
+
+
+        # random alteration of angle uniform between -pi/4 and pi/4
+        angle = angle + np.random.uniform(-np.pi/4, np.pi/4)
 
         sat_image_crop = crop_img_at_pose(sat_image, [pos_x, pos_y, angle], crop_size)
         tracklet_image_crop = crop_img_at_pose(tracklet_image, [pos_x, pos_y, angle], crop_size)
@@ -848,23 +848,23 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, intersection_gt, tra
     crop_center_x = int(pos_x + np.sin(angle) * crop_size / 2)
     crop_center_y = int(pos_y - np.cos(angle) * crop_size / 2)
 
-    print("Agent pose: ", pos_x, pos_y, angle, "Crop center: ", crop_center_x, crop_center_y, angle, "Crop size: ", crop_size)
+    # print("Agent pose: ", pos_x, pos_y, angle, "Crop center: ", crop_center_x, crop_center_y, angle, "Crop size: ", crop_size)
 
     return sat_image_crop, tracklet_image_crop, drivable_gt_crop, [crop_center_x, crop_center_y, angle]
 
 
-def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lanes_,
+def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_ped_, lanes_,
                         sat_image_, tracklets_image, drivable_gt, intersection_gt, out_path_root,
                         max_num_samples=100, crop_size=256):
 
-    if "tracklets" in source:
-        annotations_centers = [np.mean(t, axis=0) for t in trajectories_]
-        annotations_ped_centers = [np.mean(t, axis=0) for t in trajectories_ped_]
-        annot_ = trajectories_
+    tracklets_vehicles_centers = [np.mean(t, axis=0) for t in trajectories_vehicles_]
+    tracklets_ped_centers = [np.mean(t, axis=0) for t in trajectories_ped_]
+
+    if "tracklets" in args.source:
+        annot_veh_ = trajectories_
         annot_ped_ = trajectories_ped_
-    elif "lanes" in source:
-        annotations_centers = [np.mean(t, axis=0) for t in lanes_]
-        annot_ = lanes_
+    elif "lanes" in args.source:
+        annot_veh_ = lanes_
     else:
         raise ValueError("Invalid annotation source")
 
@@ -873,7 +873,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
 
         # this is not guaranteed to give valid crops
         sat_image_crop, tracklet_image_crop, drivable_gt_crop, crop_center = \
-            random_cropping(sat_image_, tracklets_image, drivable_gt, intersection_gt, trajectories_, crop_size=crop_size)  # [15729, 25061]
+            random_cropping(sat_image_, tracklets_image, drivable_gt, intersection_gt, trajectories_, crop_size=crop_size)
 
         angle = crop_center[2]
         R = np.array([[np.cos(angle), -np.sin(angle)],
@@ -891,11 +891,11 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
 
         annot_candidates = []
         annot_ped_candidates = []
-        for i in range(len(annot_)):
-            if np.linalg.norm(annotations_centers[i] - [crop_center[0], crop_center[1]]) < 512:
-                annot_candidates.append(annot_[i])
+        for i in range(len(annot_veh_)):
+            if np.linalg.norm(tracklets_vehicles_centers[i] - [crop_center[0], crop_center[1]]) < 512:
+                annot_candidates.append(annot_veh_[i])
         for i in range(len(annot_ped_)):
-            if np.linalg.norm(annotations_ped_centers[i] - [crop_center[0], crop_center[1]]) < 512:
+            if np.linalg.norm(tracklets_ped_centers[i] - [crop_center[0], crop_center[1]]) < 512:
                 annot_ped_candidates.append(annot_ped_[i])
 
 
@@ -951,11 +951,11 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
             continue
 
         # Whether to export sparse or dense trajectory annotations
-        if source == "tracklets_sparse":
+        if args.source == "tracklets_sparse":
             trajectories = annots  # not filtered
-        elif source == "tracklets_dense":
+        elif args.source == "tracklets_dense":
             trajectories = annots
-        elif source == "lanes":
+        elif args.source == "lanes":
             trajectories = annots
         else:
             raise ValueError("Invalid source")
@@ -974,7 +974,9 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
 
                     succ_traj, mask_total, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
 
-                    sat_image_viz, mask_succ_sparse, mask_thin = get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=r_min, crop_size=crop_size)
+                    mask_succ_sparse = mask_total[0].copy()
+
+                    # sat_image_viz, mask_succ_sparse, mask_thin = get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=r_min, crop_size=crop_size)
 
                     if sat_image_viz is not None:
 
@@ -982,7 +984,7 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
 
                         print("Inference time: {:.4f} s".format(time.time() - now))
                         cv2.imshow('sat_image_viz', sat_image_viz)
-                        cv2.imshow('mask_succ_sparse', mask_succ_sparse * 255)
+                        cv2.imshow('mask_succ_sparse', mask_succ_sparse)
 
             cv2.namedWindow('sat_image_viz')
             cv2.setMouseCallback('sat_image_viz', viz)
@@ -991,17 +993,16 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
 
 
         # Get query points
-        query_points = np.argwhere(tracklet_image_crop[:, :, 0] > 0)
-        query_points = np.fliplr(query_points)
+        if args.query_points == "random":
+            query_points = np.argwhere(tracklet_image_crop[:, :, 0] > 0)
+            query_points = np.fliplr(query_points)
 
-        np.random.shuffle(query_points)
-        query_points = query_points[:NUM_QUERY_POINTS]
-        # query_points = np.array([[512, 256]])
-
-        # plt.imshow(sat_image_crop)
-        # plt.imshow(tracklet_image_crop[:, :, 0], alpha=0.5)
-        # plt.scatter(query_points[:, 1], query_points[:, 0], c='r')
-        # plt.show()
+            np.random.shuffle(query_points)
+            query_points = query_points[:NUM_QUERY_POINTS]
+        elif args.query_points == "ego":
+            query_points = np.array([[crop_size//2, crop_size-1]])
+        else:
+            raise ValueError("Invalid query_points mode")
 
         tracklets_im_list = []
 
@@ -1011,20 +1012,30 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
 
             succ_traj, mask_total, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
 
+            num_clusters = get_endpoints(succ_traj, crop_size)
+
+            if num_clusters > 1:
+                sample_type = "branching"
+            else:
+                sample_type = "straight"
+
+
             if len(succ_traj) < N_MIN_SUCC_TRAJECTORIES:
                 logging.debug("Too few successor trajectories")
                 continue
 
             # G, sat_image_viz, sdf, angles, angles_viz, mask_succ_sparse, num_endpoints = \
             #     get_succ_graph(q, succ_traj,  sat_image_viz, r_min=r_min, crop_size=crop_size)
-            sat_image_viz, mask_succ_sparse, _ = get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=r_min, crop_size=crop_size)
+            # sat_image_viz, mask_succ_sparse, _ = get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=r_min, crop_size=crop_size)
 
-            if sat_image_viz is None:
-                logging.debug("Successor graph is None. Skipping")
-                continue
+            # if sat_image_viz is None:
+            #     logging.debug("Successor graph is None. Skipping")
+            #     continue
+
+            mask_succ_sparse = mask_total[0].copy()
 
             # Minimum of X percent of pixels must be covered by the trajectory
-            if np.sum(mask_succ_sparse > 0.01) < FRAC_SUCC_GRAPH_PIXELS * np.prod(mask_succ_sparse.shape):
+            if np.sum(mask_succ_sparse > 128) < FRAC_SUCC_GRAPH_PIXELS * np.prod(mask_succ_sparse.shape):
                 logging.debug("Not enough pixels covered with successor graph. Skipping")
                 continue
 
@@ -1036,14 +1047,9 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
 
             tracklets_im_list.append(mask_succ_sparse)
 
+
             [cv2.circle(sat_image_viz, (qq[0], qq[1]), 2, (0, 150, 255), -1) for qq in query_points]
 
-
-            # Build 3 channel mask
-            mask_all = np.zeros(sat_image_crop.shape, dtype=np.uint8)
-            mask_all[:, :, 0] = (mask_succ_sparse * 255.).astype(np.uint8)
-            mask_all[:, :, 1] = mask_total[:, :, 1]
-            mask_all[:, :, 2] = mask_total[:, :, 2]
 
             pos_encoding = np.zeros(sat_image_crop.shape, dtype=np.float32)
             x, y = np.meshgrid(np.arange(sat_image_crop.shape[1]), np.arange(sat_image_crop.shape[0]))
@@ -1053,13 +1059,15 @@ def process_chunk_final(city_name, source, trajectories_, trajectories_ped_, lan
             pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
             sample_num += 1
-            print("-------------\nSaving to {}/{}-{} | Sample {} / {}".format(out_path, sample_id, i_query, sample_num, max_num_samples))
+            print("-------------\nSaving to {}/{}/{}-{} | Sample {} / {}".format(out_path, sample_type, sample_id, i_query, sample_num, max_num_samples))
 
-            Image.fromarray(pos_encoding).save("{}/{}-{}-pos-encoding.png".format(out_path, sample_id, i_query))
-            Image.fromarray(sat_image_crop).save("{}/{}-{}-rgb.png".format(out_path, sample_id, i_query))
-            Image.fromarray(sat_image_viz).save("{}/{}-{}-rgb-viz.png".format(out_path, sample_id, i_query))
-            Image.fromarray((mask_all).astype(np.uint8)).save("{}/{}-{}-masks.png".format(out_path, sample_id, i_query))
-            Image.fromarray((drivable_gt_crop).astype(np.uint8)).save("{}/{}-{}-drivable-gt.png".format(out_path, sample_id, i_query))
+            Image.fromarray(pos_encoding).save("{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
+            Image.fromarray(sat_image_crop).save("{}/{}/{}-{}-rgb.png".format(out_path, sample_type, sample_id, i_query))
+            Image.fromarray(sat_image_viz).save("{}/{}/{}-{}-rgb-viz.png".format(out_path, sample_type, sample_id, i_query))
+            Image.fromarray(mask_total).save("{}/{}/{}-{}-masks.png".format(out_path, sample_type, sample_id, i_query))
+            Image.fromarray(drivable_gt_crop.astype(np.uint8)).save("{}/{}/{}-{}-drivable-gt.png".format(out_path, sample_type, sample_id, i_query))
+
+
 
 
 
@@ -1076,6 +1084,7 @@ if __name__ == "__main__":
     parser.add_argument("--source", type=str, default="tracklets_sparse", choices=["tracklets_sparse", "tracklets_dense", "lanes"])
     parser.add_argument("--max_num_samples", type=int, default=100, help="Number of samples to generate per city")
     parser.add_argument("--crop_size", type=int, default=512, help="Size of the BEV image crop")
+    parser.add_argument("--query_points", type=str, default=None, choices=[None, "ego", "random"])
     args = parser.parse_args()
 
     print("Parsing config:", args)
@@ -1100,11 +1109,13 @@ if __name__ == "__main__":
 
     # parameters
     num_cpus = args.num_cpus
-    r_min = 7  # minimum radius of the circle for poisson disc sampling
 
     os.makedirs(os.path.join(out_path_root), exist_ok=True)
-    os.makedirs(os.path.join(out_path_root, 'train'), exist_ok=True)
-    os.makedirs(os.path.join(out_path_root, 'val'), exist_ok=True)
+    os.makedirs(os.path.join(out_path_root, 'train', 'branching'), exist_ok=True)
+    os.makedirs(os.path.join(out_path_root, 'train', 'straight'), exist_ok=True)
+    os.makedirs(os.path.join(out_path_root, 'val', 'branching'), exist_ok=True)
+    os.makedirs(os.path.join(out_path_root, 'val', 'straight'), exist_ok=True)
+
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
 
@@ -1269,7 +1280,6 @@ if __name__ == "__main__":
     trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
 
     if city_name == "Austin":
-        print("Performing Austin specific cropping for low RAM usage!")
         # y_min_cut = 17000
         y_min_cut = 0
         y_max_cut = 52000
@@ -1279,7 +1289,7 @@ if __name__ == "__main__":
 
         trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
         trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
-        print("done")
+
 
     viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
     tracklet_file = os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))
@@ -1314,8 +1324,8 @@ if __name__ == "__main__":
 
     # single core
     if num_cpus <= 1:
-        process_chunk_final(city_name,
-                            args.source,
+        process_chunk_final(args,
+                            city_name,
                             trajectories_,
                             trajectories_ped_,
                             lanes_,
