@@ -36,8 +36,12 @@ f1 = F1Score(task="binary", average='none', mdmc_average='global', num_classes=2
 
 def calc_torchmetrics(seg_preds, seg_gts, name):
 
-    seg_preds = torch.round(torch.cat(seg_preds)).squeeze().cpu().int()
-    seg_gts = torch.round(torch.cat(seg_gts)).squeeze().cpu().int()
+    # move all to GPU
+    seg_preds = [seg_pred.cpu() for seg_pred in seg_preds]
+    seg_gts = [seg_gt.cpu() for seg_gt in seg_gts]
+
+    seg_preds = torch.round(torch.cat(seg_preds)).squeeze().int()
+    seg_gts = torch.round(torch.cat(seg_gts)).squeeze().int()
 
     p = precision(seg_preds, seg_gts).numpy()
     r = recall(seg_preds, seg_gts).numpy()
@@ -208,10 +212,9 @@ class Trainer():
             sdf_target = sdf_target.unsqueeze(1)
             drivable_gt = drivable_gt.unsqueeze(1)
 
-            with torch.no_grad():
-                (pred, features) = self.model(in_tensor)
-                pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[2:], mode='bilinear', align_corners=True)
-                pred_sdf = torch.nn.Sigmoid()(pred)
+            (pred, features) = self.model(in_tensor)
+            pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[2:], mode='bilinear', align_corners=True)
+            pred_sdf = torch.nn.Sigmoid()(pred)
 
             sdf_targets.append(sdf_target)
             sdf_preds.append(pred_sdf)
@@ -448,7 +451,8 @@ def main():
         trainer.train(epoch)
 
         if epoch % 1 == 0:
-            trainer.evaluate(epoch)
+            with torch.no_grad():
+                trainer.evaluate(epoch)
 
             try:
                 wandb_run_name = wandb.run.name
