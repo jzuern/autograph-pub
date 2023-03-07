@@ -13,8 +13,8 @@ POISSON_DISK_R_MIN = 7 # minimum distance between two randomly sampled points
 
 
 N_MIN_SUCC_TRAJECTORIES = 2  # minimum number of trajectories that have to be connected to a query position to be considered good sample
-FRAC_SUCC_GRAPH_PIXELS = 0.08  # fraction of pixels in the successor visualization that have to be connected to a query position to be considered good sample
-                              # 0.05 is a good value for 256x256 images, for 512x512 images use 0.01
+FRAC_SUCC_GRAPH_PIXELS = 0.03  # fraction of pixels in the successor visualization that have to be connected to a query position to be considered good sample
+                              # 0.03 is a good value for 256x256 images, for 512x512 images use 0.01
 
 
 # END PREPROCESSING FILTERING SETTINGS
