@@ -25,11 +25,12 @@ def colorize(mask):
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
-        self.pose = np.array([2871.6, 1594.9, -11.60])
+        self.init_pose = np.array([1945.6, 2860, -4.43])
+        self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
-        #self.crop_shape = (256, 256)
-        self.crop_shape = (512, 512)
+        self.crop_shape = (256, 256)
+        #self.crop_shape = (512, 512)
         self.canvas_log_odds = None
         self.pose_history = np.array([self.pose])
 
@@ -49,14 +50,14 @@ class SatelliteDriver(object):
                                            num_in_channels=3,
                                            num_classes=1).cuda()
             self.model_full.load_state_dict(new_state_dict)
-            self.model_full.eval()
+            # self.model_full.eval()
 
         elif type == "successor":
             self.model_succ = DeepLabv3Plus(models.resnet101(pretrained=True),
                                            num_in_channels=7,
                                            num_classes=1).cuda()
             self.model_succ.load_state_dict(new_state_dict)
-            self.model_succ.eval()
+            # self.model_succ.eval()
 
         print("Model loaded")
 
@@ -74,7 +75,8 @@ class SatelliteDriver(object):
         print("Satellite loaded")
 
     def generate_pos_encoding(self):
-        q = [255, 127]
+        q = [self.crop_shape[0]-1,
+             self.crop_shape[1]//2 - 1]
 
         pos_encoding = np.zeros([self.crop_shape[0], self.crop_shape[1], 3], dtype=np.float32)
         x, y = np.meshgrid(np.arange(self.crop_shape[1]), np.arange(self.crop_shape[0]))
@@ -85,6 +87,19 @@ class SatelliteDriver(object):
         pos_encoding = cv2.cvtColor(pos_encoding, cv2.COLOR_BGR2RGB)
 
         return pos_encoding
+
+
+    def skeletonize_prediction(self, pred, threshold=0.5):
+
+        # first, convert to binary
+        pred = (pred > threshold).astype(np.uint8)
+
+        # then, skeletonize
+        pred = cv2.ximgproc.thinning(pred, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
+
+        return pred
+
+
 
 
     def add_pred_to_canvas(self, pred, pose):
@@ -233,7 +248,7 @@ class SatelliteDriver(object):
             rgb = cv2.warpPerspective(satellite_image, M, (csize, csize), cv2.INTER_LINEAR, borderMode=cv2.BORDER_TRANSPARENT)
         except:
             print("Error in warpPerspective. Resetting position")
-            self.pose = np.array([2871.6, 1594.9, -11.60])
+            self.pose = self.init_pose
             rgb = self.crop_satellite_at_pose(self.pose)
 
         return rgb
@@ -253,6 +268,8 @@ class SatelliteDriver(object):
 
         forward_vector = np.array([np.cos(self.pose[2]),
                                   -np.sin(self.pose[2])])
+        sideways_vector = np.array([np.cos(self.pose[2] + np.pi / 2),
+                                   -np.sin(self.pose[2] + np.pi / 2)])
 
         # arrow key pressed
         if key == Key.up:
@@ -268,6 +285,12 @@ class SatelliteDriver(object):
             self.pose[2] -= 0.2
         elif key == Key.right:
             self.pose[2] += 0.2
+        elif key == Key.page_up:
+            delta = s * sideways_vector
+            self.pose[0:2] += np.array([delta[1], delta[0]])
+        elif key == Key.page_down:
+            delta = s * sideways_vector
+            self.pose[0:2] -= np.array([delta[1], delta[0]])
 
         self.pose_history = np.concatenate([self.pose_history, [self.pose]])
 
@@ -279,39 +302,55 @@ class SatelliteDriver(object):
 
         if self.model_full is not None:
             with torch.no_grad():
-                (tracklet_image_torch, _) = self.model_full(rgb_torch)
-                tracklet_image_torch = torch.nn.functional.interpolate(tracklet_image_torch,
-                                                                       size=rgb_torch.shape[2:],
-                                                                       mode='bilinear',
-                                                                       align_corners=True)
-                tracklet_image_torch = torch.nn.Sigmoid()(tracklet_image_torch)
+                (sdf_full, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
+                sdf_full = torch.nn.functional.interpolate(sdf_full,
+                                                           size=rgb_torch.shape[2:],
+                                                           mode='bilinear',
+                                                           align_corners=True)
+                sdf_full = torch.nn.Sigmoid()(sdf_full)[0:1]
 
-        in_tensor = torch.cat([rgb_torch, tracklet_image_torch, pos_encoding_torch], dim=1)
+        in_tensor = torch.cat([rgb_torch, sdf_full, pos_encoding_torch], dim=1)
         in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
 
-        (pred, features) = self.model_succ(in_tensor)
-        pred = torch.nn.functional.interpolate(pred,
+        (sdf_succ, features) = self.model_succ(in_tensor)
+        sdf_succ = torch.nn.functional.interpolate(sdf_succ,
                                                size=rgb_torch.shape[2:],
                                                mode='bilinear',
                                                align_corners=True)
-        pred_sdf = torch.nn.Sigmoid()(pred)
-        pred_sdf = pred_sdf[0, 0].cpu().detach().numpy()
+        sdf_succ = torch.nn.Sigmoid()(sdf_succ)
+        sdf_succ = sdf_succ[0, 0].cpu().detach().numpy()
+        sdf_full = sdf_full[0, 0].cpu().detach().numpy()
 
-        self.add_pred_to_canvas(pred_sdf, self.pose)
+        self.add_pred_to_canvas(sdf_succ, self.pose)
 
-        pred_sdf = (pred_sdf * 255).astype(np.uint8)
-        pred_sdf_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_sdf, cv2.COLORMAP_MAGMA), 0.5, 0)
-        cv2.imshow("pred_sdf_viz", pred_sdf_viz)
+        skeleton = self.skeletonize_prediction(sdf_succ, threshold=0.2)
+        # skeleton = cv2.cvtColor(skeleton, cv2.COLOR_GRAY2BGR)
+        # skeleton = cv2.addWeighted(rgb, 0.5, skeleton, 0.5, 0)
+        cv2.imshow("skeleton", skeleton)
+
+
+        sdf_succ = (sdf_succ * 255).astype(np.uint8)
+        sdf_full = (sdf_full * 255).astype(np.uint8)
+        sdf_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(sdf_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
+        sdf_full_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(sdf_full, cv2.COLORMAP_MAGMA), 0.5, 0)
+
+
+
+
+        cv2.imshow("pred_sdf_viz", sdf_succ_viz)
+        cv2.imshow("sdf_full_viz", sdf_full_viz)
         cv2.waitKey(1)
 
 
 if __name__ == "__main__":
     driver = SatelliteDriver()
-    driver.load_satellite(path="/data/lanegraph/woven-data/Pittsburgh.png")
-    #driver.load_model(model_path="checkpoints/reg_major-rain-24.pth", type="full")
-    #driver.load_model(model_path="checkpoints/reg_misty-resonance-25.pth", type="successor")
-    driver.load_model(model_path="checkpoints/resilient-bush-32/e-150.pth", type="full")
-    driver.load_model(model_path="checkpoints/noble-bee-34/model.pth", type="successor")
+    driver.load_satellite(path="/data/lanegraph/woven-data/Austin.png")
+    # driver.load_model(model_path="/data/autograph/checkpoints/fresh-disco-47/e-07.pth", type="full")
+    # driver.load_model(model_path="/data/autograph/checkpoints/eager-forest-52/e-36.pth", type="successor")
+
+    driver.load_model(model_path="/data/autograph/checkpoints/lively-grass-55/e-90.pth", type="full")
+    driver.load_model(model_path="/data/autograph/checkpoints/smart-smoke-57/e-100.pth", type="successor")
+
 
     print("Press arrow keys to drive")
 

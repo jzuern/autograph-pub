@@ -8,7 +8,7 @@ from pathlib import Path
 from scipy.spatial.distance import cdist
 import torch
 import os
-
+from sklearn.cluster import DBSCAN
 from av2.geometry.interpolate import compute_midpoint_line
 from av2.map.map_api import ArgoverseStaticMap
 
@@ -56,6 +56,31 @@ def smooth_trajectory(traj, window_size):
     return smoothed_traj
 
 
+def get_endpoints(succ_traj, crop_size):
+    endpoints = []
+
+    # find endpoints by checking if they are close to the image border
+    for t in succ_traj:
+        if np.any(np.isclose(t[-1], np.array([crop_size - 1, crop_size - 1]), atol=10.0)) or np.any(
+                np.isclose(t[-1], np.array([0, 0]), atol=10.0)):
+            coords = (int(t[-1, 0]), int(t[-1, 1]))
+            endpoints.append(coords)
+    endpoints = np.array(endpoints)
+
+    # Cluster endpoints
+    try:
+        clustering = DBSCAN(eps=40, min_samples=2).fit(endpoints)
+    except:
+        return 0
+
+    endpoints_centroids = []
+    for c in np.unique(clustering.labels_):
+        endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
+    endpoints_centroids = np.array(endpoints_centroids)
+
+    return len(endpoints_centroids)
+
+
 def iou_mask(mask1, mask2):
     # Calculates IoU between two binary masks
     mask1_area = np.count_nonzero(mask1 == 1)
@@ -84,11 +109,7 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
 
     for t in trajectories_all:
         for i in range(len(t)-1):
-            cv2.arrowedLine(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1)
-
-    for t in trajectories_close_q:
-        for i in range(len(t)-1):
-            cv2.arrowedLine(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1)
+            cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1, cv2.LINE_AA)
 
 
     # then get all trajectories that are close to any of the trajectories
@@ -119,24 +140,34 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
 
     for t2 in trajectories_2:
         for i in range(len(t2)-1):
-            cv2.arrowedLine(sat_image_viz, tuple(t2[i].astype(int)), tuple(t2[i+1].astype(int)), (255, 0, 0), 1)
+            cv2.line(sat_image_viz, tuple(t2[i].astype(int)), tuple(t2[i+1].astype(int)), (255, 0, 0), 1, cv2.LINE_AA)
 
     mask_ped = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
     mask_veh = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
 
     for t in trajectories_all:
         for i in range(len(t)-1):
-            cv2.arrowedLine(mask_veh, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
+            cv2.line(mask_veh, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
     for t in trajectories_ped:
         for i in range(len(t)-1):
-            cv2.arrowedLine(mask_ped, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
-            cv2.arrowedLine(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1)
+            cv2.line(mask_ped, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
+            cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1, cv2.LINE_AA)
 
-    mask_total = np.zeros(sat_image.shape, dtype=np.uint8)
-    mask_total[:, :, 2] = mask_ped
-    mask_total[:, :, 1] = mask_veh
 
     succ_traj = trajectories_2 + trajectories_close_q
+
+    # visualize succ traj in sat image viz and in mask_total
+    mask_succ = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
+
+    for t in succ_traj:
+        for i in range(len(t)-1):
+            cv2.line(mask_succ, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
+            cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255, 0, 0), 1, cv2.LINE_AA)
+
+    mask_total = np.zeros(sat_image.shape, dtype=np.uint8)
+    mask_total[:, :, 0] = mask_succ
+    mask_total[:, :, 2] = mask_ped
+    mask_total[:, :, 1] = mask_veh
 
     return succ_traj,  mask_total, sat_image_viz
 

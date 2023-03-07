@@ -112,7 +112,7 @@ class Trainer():
                     with torch.no_grad():
                         (mask_full, _) = self.model_full(rgb)    # get from model
                     mask_full = torch.nn.functional.interpolate(mask_full, size=rgb.shape[2:], mode='bilinear',
-                                                           align_corners=True)
+                                                                align_corners=True)
                     mask_full = torch.nn.Sigmoid()(mask_full)
                     in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
                 else:
@@ -424,8 +424,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '2602', "austin", "train")
-    val_path = os.path.join(params.paths.dataroot, '2602', "austin", "val")
+    train_path = os.path.join(params.paths.dataroot, '0203', "austin", "train")
+    val_path = os.path.join(params.paths.dataroot, '0203', "austin", "val")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train')
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val')
