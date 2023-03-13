@@ -17,7 +17,7 @@ import torchvision.models as models
 from torchmetrics import JaccardIndex, Precision, Recall, F1Score
 from collections import OrderedDict
 from matplotlib import cm
-
+from aggregation.utils import AngleColorizer
 from data.datasets import SuccessorRegressorDataset
 from lanegnn.utils import ParamLib, make_image_grid
 import glob
@@ -27,16 +27,25 @@ def weighted_mse_loss(input, target, weight):
     return torch.mean(weight * (input - target) ** 2)
 
 
-# Calculate metrics according to torchmetrics
-precision = Precision(task="binary", average='none', mdmc_average='global')
-recall = Recall(task="binary", average='none', mdmc_average='global')
-iou = JaccardIndex(task="binary", reduction='none', num_classes=2, ignore_index=0)
-f1 = F1Score(task="binary", average='none', mdmc_average='global', num_classes=2, ignore_index=0)
+
+def torch_to_cv2(pred):
+    pred = pred[0].detach().cpu().numpy()
+    pred = np.concatenate([pred[..., np.newaxis], pred[..., np.newaxis], pred[..., np.newaxis]], axis=2)
+    pred = (pred * 255).astype(np.uint8)
+
+    return pred
 
 
-def calc_torchmetrics(seg_preds, seg_gts, name):
 
-    # move all to GPU
+def calc_torchmetrics_mask(seg_preds, seg_gts, name):
+
+    precision = Precision(task="binary", average='macro', mdmc_average='global')
+    recall = Recall(task="binary", average='none', mdmc_average='global')
+    iou = JaccardIndex(task="binary", reduction='none', num_classes=2, ignore_index=0)
+    f1 = F1Score(task="binary", average='none', mdmc_average='global', num_classes=2, ignore_index=0)
+
+
+    # move all to CPU
     seg_preds = [seg_pred.cpu() for seg_pred in seg_preds]
     seg_gts = [seg_gt.cpu() for seg_gt in seg_gts]
 
@@ -49,13 +58,56 @@ def calc_torchmetrics(seg_preds, seg_gts, name):
     f = f1(seg_preds, seg_gts).numpy()
 
     metrics = {
-        'eval/precision_{}'.format(name): p.item(),
-        'eval/recall_{}'.format(name): r.item(),
-        'eval/iou_{}'.format(name): i.item(),
-        'eval/f1_{}'.format(name): f.item(),
+        'eval/mask_precision_{}'.format(name): p.item(),
+        'eval/mask_recall_{}'.format(name): r.item(),
+        'eval/mask_iou_{}'.format(name): i.item(),
+        'eval/mask_f1_{}'.format(name): f.item(),
     }
 
     return metrics
+
+
+def calc_torchmetrics_angles(angle_preds, angle_gts, name):
+
+    # move all to CPU
+    angle_preds = [angle_pred.cpu() for angle_pred in angle_preds]
+    angle_gts = [angle_gt.cpu() for angle_gt in angle_gts]
+
+    angle_preds = torch.cat(angle_preds).squeeze().float()
+    angle_gts = torch.cat(angle_gts).squeeze().float()
+
+    angle_preds = torch.atan2(angle_preds[:, 0], angle_preds[:, 1]) + np.pi
+    angle_gts = torch.atan2(angle_gts[:, 0], angle_gts[:, 1]) + np.pi
+    angle_preds = angle_preds % (2 * np.pi)
+    angle_gts = angle_gts % (2 * np.pi)
+
+    # bin angles into N bins
+    N_bins = 8
+    angle_preds = torch.round(angle_preds / (2 * np.pi / float(N_bins))).int()
+    angle_gts = torch.round(angle_gts / (2 * np.pi / float(N_bins))).int()
+
+    # calc metrics
+    precision = Precision(task="multiclass", average='macro', num_classes=N_bins+1)
+    recall = Recall(task="multiclass", average='macro', num_classes=N_bins+1)
+    iou = JaccardIndex(task="multiclass", reduction='macro', num_classes=N_bins+1)
+    f1 = F1Score(task="multiclass", average='macro', num_classes=N_bins+1)
+
+    p = precision(angle_preds, angle_gts).numpy()
+    r = recall(angle_preds, angle_gts).numpy()
+    i = iou(angle_preds, angle_gts).numpy()
+    f = f1(angle_preds, angle_gts).numpy()
+
+    metrics = {
+        'eval/angles_precision_{}'.format(name): p.item(),
+        'eval/angles_recall_{}'.format(name): r.item(),
+        'eval/angles_iou_{}'.format(name): i.item(),
+        'eval/angles_f1_{}'.format(name): f.item(),
+    }
+
+    return metrics
+
+
+
 
 
 
@@ -74,6 +126,7 @@ class Trainer():
         self.threshold_sdf = 0.3
         self.threshold_angle = np.pi / 4.
         self.model_full = model_full
+        self.ac = AngleColorizer()
 
 
         if self.params.stego:
@@ -99,70 +152,98 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-            mask_pedestrian = data["mask_pedestrian"].cuda()
-            drivable_gt = data["drivable_gt"].cuda()
+            # mask_pedestrian = data["mask_pedestrian"].cuda()
+            # drivable_gt = data["drivable_gt"].cuda()
             pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
             if self.params.target == "full":
                 in_tensor = rgb
-                sdf_target = data["mask_full"].cuda()
+                target_drivable = data["drivable"].cuda()
+                target_angles = data["angles_xy"].cuda()
+
+                (pred, features) = self.model(in_tensor)
+                pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+                pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
+                pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
+
+                loss_dict = {
+                    'loss_drivable': torch.nn.BCELoss()(pred_drivable, target_drivable),
+                    'loss_angles': torch.nn.MSELoss()(pred_angles, target_angles),
+                }
+
+                loss_total = sum(loss_dict.values())
+
             elif self.params.target == "successor":
-                if self.model_full is not None:
-                    with torch.no_grad():
-                        (mask_full, _) = self.model_full(rgb)    # get from model
-                    mask_full = torch.nn.functional.interpolate(mask_full, size=rgb.shape[2:], mode='bilinear',
-                                                                align_corners=True)
-                    mask_full = torch.nn.Sigmoid()(mask_full)
-                    in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
-                else:
-                    in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                with torch.no_grad():
+                    (pred, _) = self.model_full(rgb)    # get from model
+                    pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+                    pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
+                    pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
-                sdf_target = data["mask_successor"].cuda()
+                in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+                target_succ = data["mask_successor"].cuda()
 
-            sdf_target = sdf_target.unsqueeze(1)
+                (pred_succ, features) = self.model(in_tensor)
 
-            (pred, features) = self.model(in_tensor)
-            pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[2:], mode='bilinear', align_corners=True)
-            pred_sdf = torch.nn.Sigmoid()(pred)
+                pred_succ = torch.nn.functional.interpolate(pred_succ, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+                pred_succ = torch.nn.Sigmoid()(pred_succ[:, 0, :, :])
 
-            loss_dict = {
-                'loss_sdf': torch.nn.BCELoss()(pred_sdf, sdf_target),
-            }
+                loss_dict = {
+                    'loss_succ': torch.nn.BCELoss()(pred_succ, target_succ),
+                }
 
-            loss = sum(loss_dict.values())
-            loss.backward()
+                loss_total = sum(loss_dict.values())
+
+
+            loss_total.backward()
 
             self.optimizer.step()
 
             if not self.params.main.disable_wandb:
-                wandb.log({"train/loss": loss.item()})
+                wandb.log({"train/loss_total": loss_total.item()})
+                [wandb.log({k: v.item()}) for k, v in loss_dict.items()]
+
 
             # Visualization
             if self.total_step % 10 == 0 and self.params.visualize:
                 cv2.imshow("rgb", rgb[0].cpu().numpy().transpose(1, 2, 0))
 
+
+                if self.params.target == "full":
+                    pred_drivable = torch_to_cv2(pred_drivable)
+                    gt_drivable = torch_to_cv2(target_drivable)
+
+                    cv2.imshow("gt_drivable", gt_drivable)
+                    cv2.imshow("pred_drivable", pred_drivable)
+
+                    angles_gt_rad = self.ac.xy_to_angle(target_angles[0].cpu().detach().numpy())
+                    angles_gt_color = self.ac.angle_to_color(angles_gt_rad)
+
+                    angles_pred_rad = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+                    angles_pred_color = self.ac.angle_to_color(angles_pred_rad)
+
+                    cv2.imshow("angles_gt", angles_gt_color)
+                    cv2.imshow("angles_pred", angles_pred_color)
+
+
                 if self.params.target == "successor":
-                    cv2.imshow("pos_enc", pos_enc[0].cpu().numpy().transpose(1, 2, 0))
-                    if self.model_full is not None:
-                        cv2.imshow("mask_full", mask_full[0, 0].cpu().numpy())
+                    pred_succ = torch_to_cv2(pred_succ)
+                    target_succ = torch_to_cv2(target_succ)
+                    cv2.imshow("pred_succ", pred_succ)
+                    cv2.imshow("target_succ", target_succ)
 
-                sdf_pred = pred_sdf[0, 0].detach().cpu().detach().numpy()
-                sdf_target = sdf_target[0, 0].cpu().detach().numpy()
-                drivable_gt = drivable_gt[0].cpu().detach().numpy()
+                    angles_pred_rad = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+                    angles_pred_color = self.ac.angle_to_color(angles_pred_rad)
 
-                sdf_pred = np.concatenate([sdf_pred[..., np.newaxis], sdf_pred[..., np.newaxis], sdf_pred[..., np.newaxis]], axis=2)
-                sdf_target = np.concatenate([sdf_target[..., np.newaxis], sdf_target[..., np.newaxis], sdf_target[..., np.newaxis]], axis=2)
-                sdf_target = (sdf_target > 0.3).astype(np.uint8) * 255
-                drivable_gt = np.concatenate([drivable_gt[..., np.newaxis], drivable_gt[..., np.newaxis], drivable_gt[..., np.newaxis]], axis=2)
+                    pred_drivable = torch_to_cv2(pred_drivable)
+                    cv2.imshow("frozen pred_drivable", pred_drivable)
+                    cv2.imshow("frozen angles_pred_color", angles_pred_color)
 
-                cv2.imshow("sdf_target", sdf_target)
-                cv2.imshow("sdf_pred", sdf_pred)
-                cv2.imshow("drivable_gt", drivable_gt)
                 cv2.waitKey(1)
 
             text = 'Epoch {} / {}, it {} / {}, it global {}, train loss = {:03f}'.\
-                format(epoch, self.params.model.num_epochs, step+1, len(self.dataloader_train), epoch * len(self.dataloader_train) + step+1, loss.item())
+                format(epoch, self.params.model.num_epochs, step+1, len(self.dataloader_train), epoch * len(self.dataloader_train) + step+1, loss_total.item())
             train_progress.set_description(text)
 
             self.total_step += 1
@@ -171,103 +252,211 @@ class Trainer():
             wandb.log({"train/epoch": epoch})
 
 
-    def evaluate(self, epoch):
+    def evaluate_full(self, epoch):
 
-        print("Evaluating...")
+        print("evaluate_full...")
 
         self.model.eval()
 
         val_losses = []
-        sdf_preds = []
-        sdf_targets = []
-        drivable_gts = []
 
-        target_overlay_list = []
-        pred_overlay_list = []
+        mask_preds = []
+        mask_targets = []
+        mask_gts = []
+
+        angle_preds = []
+        angle_targets = []
+
+        target_overlay_list_mask = []
+        pred_overlay_list_mask = []
+        target_overlay_list_angle = []
+        pred_overlay_list_angle = []
 
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
 
-            mask_pedestrian = data["mask_pedestrian"].cuda()
-            drivable_gt = data["drivable_gt"].cuda()
-            pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
-            if self.params.target == "full":
-                in_tensor = rgb
-                sdf_target = data["mask_full"].cuda()
-            elif self.params.target == "successor":
-                if self.model_full is not None:
-                    with torch.no_grad():
-                        (mask_full, _) = self.model_full(rgb)    # get from model
-                    mask_full = torch.nn.functional.interpolate(mask_full, size=rgb.shape[2:], mode='bilinear',
-                                                           align_corners=True)
-                    mask_full = torch.nn.Sigmoid()(mask_full)
-                    in_tensor = torch.cat([rgb, mask_full, pos_enc], dim=1)
-                else:
-                    in_tensor = torch.cat([rgb, pos_enc], dim=1)
-
-                sdf_target = data["mask_successor"].cuda()
-
-            sdf_target = sdf_target.unsqueeze(1)
-            drivable_gt = drivable_gt.unsqueeze(1)
+            in_tensor = rgb
+            target_drivable = data["drivable"].cuda()
+            drivable_gt = data["drivable_gt"].cuda()
+            target_angles = data["angles_xy"].cuda()
 
             (pred, features) = self.model(in_tensor)
-            pred = torch.nn.functional.interpolate(pred, size=sdf_target.shape[2:], mode='bilinear', align_corners=True)
-            pred_sdf = torch.nn.Sigmoid()(pred)
+            pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+            pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
+            pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
-            sdf_targets.append(sdf_target)
-            sdf_preds.append(pred_sdf)
-            drivable_gts.append(drivable_gt)
+            loss_dict = {
+                'loss_drivable': torch.nn.BCELoss()(pred_drivable, target_drivable),
+                'loss_angles': torch.nn.MSELoss()(pred_angles, target_angles),
+            }
 
+            loss_total = sum(loss_dict.values()).item()
+
+            mask_preds.append(pred_drivable)
+            mask_targets.append(target_drivable)
+            mask_gts.append(drivable_gt)
+
+            angle_preds.append(pred_angles)
+            angle_targets.append(target_angles)
 
             # visualization
-            pred_viz = (cm.plasma(pred_sdf.cpu().detach().numpy()[0, 0])[:, :, 0:3] * 255).astype(np.uint8)
-            target_viz = (cm.plasma(sdf_target.cpu().detach().numpy()[0, 0])[:, :, 0:3] * 255).astype(np.uint8)
-
             rgb_viz = np.transpose(rgb.cpu().numpy()[0], (1, 2, 0))
             rgb_viz = (rgb_viz * 255.).astype(np.uint8)
 
-            target_overlay = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(target_viz), 0.5, 0)
-            pred_overlay = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(pred_viz), 0.5, 0)
+            pred_viz = (cm.plasma(pred_drivable.cpu().detach().numpy()[0])[:, :, 0:3] * 255).astype(np.uint8)
+            target_viz = (cm.plasma(target_drivable.cpu().detach().numpy()[0])[:, :, 0:3] * 255).astype(np.uint8)
 
-            target_overlay_list.append(target_overlay)
-            pred_overlay_list.append(pred_overlay)
+            angles_gt_rad = self.ac.xy_to_angle(target_angles[0].cpu().detach().numpy())
+            angles_gt_color = self.ac.angle_to_color(angles_gt_rad)
 
+            angles_pred_rad = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+            angles_pred_color = self.ac.angle_to_color(angles_pred_rad)
 
-            loss_dict = {
-                'loss_sdf': torch.nn.BCELoss()(pred_sdf, sdf_target),
-            }
+            target_overlay_angles = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(angles_gt_color), 0.5, 0)
+            pred_overlay_angles = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(angles_pred_color), 0.5, 0)
 
-            loss = sum(loss_dict.values()).cpu().numpy().item()
-            val_losses.append(loss)
+            target_overlay_list_angle.append(target_overlay_angles)
+            pred_overlay_list_angle.append(pred_overlay_angles)
+
+            target_viz = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(target_viz), 0.5, 0)
+            pred_viz = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(pred_viz), 0.5, 0)
+
+            target_overlay_list_mask.append(target_viz)
+            pred_overlay_list_mask.append(pred_viz)
+
+            # Val loss
+            val_losses.append(loss_total)
 
         val_loss = np.nanmean(val_losses)
 
-        metrics_tracklet = calc_torchmetrics(sdf_preds, sdf_targets, name="tracklet")
-        metrics_gt_annot = calc_torchmetrics(sdf_preds, drivable_gts, name="gt_annot")
+        # Get metrics
+        metrics_tracklet_drivable = calc_torchmetrics_mask(mask_preds, mask_targets, name="drivable_tracklet")
+        metrics_gt_drivable = calc_torchmetrics_mask(mask_preds, mask_gts, name="drivable_gt")
+        metrics_tracklet_angles = calc_torchmetrics_angles(angle_preds, angle_targets, name="angles_tracklet")
 
-        metrics_tracklet["eval/loss"] = val_loss
+        # Make grid of images
+        target_overlay_grid_mask = make_image_grid(target_overlay_list_mask, nrow=10, ncol=10)
+        pred_overlay_grid_mask = make_image_grid(pred_overlay_list_mask, nrow=10, ncol=10)
+
+        if self.params.target == "full":
+            target_overlay_grid_angles = make_image_grid(target_overlay_list_angle, nrow=10, ncol=10)
+            pred_overlay_grid_angles = make_image_grid(pred_overlay_list_angle, nrow=10, ncol=10)
+
+
+        # Do logging
+        if not self.params.main.disable_wandb:
+            wandb.log({"val/loss_total": val_loss})
+            wandb.log(metrics_tracklet_drivable)
+            wandb.log(metrics_gt_drivable)
+            wandb.log({"Mask": [wandb.Image(target_overlay_grid_mask, caption="GT"),
+                                wandb.Image(pred_overlay_grid_mask, caption="Pred")]})
+
+            wandb.log(metrics_tracklet_angles)
+            wandb.log({"Angles": [wandb.Image(target_overlay_grid_angles, caption="GT"),
+                                  wandb.Image(pred_overlay_grid_angles, caption="Pred")]})
+
+        cv2.imwrite("viz/target_overlay_grid_mask-e{:03d}.png".format(epoch), target_overlay_grid_mask)
+        cv2.imwrite("viz/pred_overlay_grid_mask-e{:03d}.png".format(epoch), pred_overlay_grid_mask)
+
+        cv2.imwrite("viz/target_overlay_grid_angles-e{:03d}.png".format(epoch), target_overlay_grid_angles)
+        cv2.imwrite("viz/pred_overlay_grid_angles-e{:03d}.png".format(epoch), pred_overlay_grid_angles)
+
+        print(metrics_tracklet_drivable)
+        print(metrics_gt_drivable)
+
+        return metrics_tracklet_drivable
+
+
+
+    def evaluate_succ(self, epoch):
+        print("evaluate_succ...")
+        self.model.eval()
+
+        val_losses = []
+
+        mask_preds = []
+        mask_targets = []
+        mask_gts = []
+
+        angle_preds = []
+        angle_targets = []
+
+        target_overlay_list_mask = []
+        pred_overlay_list_mask = []
+        target_overlay_list_angle = []
+        pred_overlay_list_angle = []
+
+        eval_progress = tqdm(self.dataloader_val)
+        for step, data in enumerate(eval_progress):
+
+            pos_enc = data["pos_enc"].cuda()
+            rgb = data["rgb"].cuda()
+
+            with torch.no_grad():
+                (pred, _) = self.model_full(rgb)    # get from model
+                pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+                pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
+                pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
+
+            in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+            target_succ = data["mask_successor"].cuda()
+
+            (pred_succ, features) = self.model(in_tensor)
+            pred_succ = torch.nn.functional.interpolate(pred_succ, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+
+
+            pred_succ = torch.nn.Sigmoid()(pred_succ[:, 0, :, :])
+            loss_dict = {
+                'loss_succ': torch.nn.BCELoss()(pred_succ, target_succ),
+            }
+            loss_total = sum(loss_dict.values()).item()
+
+            mask_preds.append(pred_succ)
+            mask_targets.append(target_succ)
+
+            # visualization
+            rgb_viz = np.transpose(rgb.cpu().numpy()[0], (1, 2, 0))
+            rgb_viz = (rgb_viz * 255.).astype(np.uint8)
+
+            pred_viz = (cm.plasma(pred_succ.cpu().detach().numpy()[0])[:, :, 0:3] * 255).astype(np.uint8)
+            target_viz = (cm.plasma(target_succ.cpu().detach().numpy()[0])[:, :, 0:3] * 255).astype(np.uint8)
+
+            target_viz = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(target_viz), 0.5, 0)
+            pred_viz = cv2.addWeighted(np.ascontiguousarray(rgb_viz), 0.5, np.ascontiguousarray(pred_viz), 0.5, 0)
+
+            target_overlay_list_mask.append(target_viz)
+            pred_overlay_list_mask.append(pred_viz)
+
+            # Val loss
+            val_losses.append(loss_total)
+
+        val_loss = np.nanmean(val_losses)
+
+        # Get metrics
+        metrics_tracklet_succ = calc_torchmetrics_mask(mask_preds, mask_targets, name="successor_tracklet")
 
 
         # Make grid of images
-        target_overlay_grid = make_image_grid(target_overlay_list, nrow=8, ncol=8)
-        pred_overlay_grid = make_image_grid(pred_overlay_list, nrow=8, ncol=8)
+        target_overlay_grid_mask = make_image_grid(target_overlay_list_mask, nrow=10, ncol=10)
+        pred_overlay_grid_mask = make_image_grid(pred_overlay_list_mask, nrow=10, ncol=10)
 
+
+
+        # Do logging
         if not self.params.main.disable_wandb:
-            wandb.log(metrics_tracklet)
-            wandb.log(metrics_gt_annot)
-            wandb.log({"Samples eval": [wandb.Image(target_overlay_grid, caption="GT"),
-                                        wandb.Image(pred_overlay_grid, caption="Pred")],
-                       })
+            wandb.log({"val/loss_total": val_loss})
+            wandb.log(metrics_tracklet_succ)
+            wandb.log({"Mask": [wandb.Image(target_overlay_grid_mask, caption="GT"),
+                                wandb.Image(pred_overlay_grid_mask, caption="Pred")]})
 
-        cv2.imwrite("viz/target_overlay_grid-e{}.png".format(epoch), target_overlay_grid)
-        cv2.imwrite("viz/pred_overlay_grid-e{}.png".format(epoch), pred_overlay_grid)
+        cv2.imwrite("viz/target_overlay_grid_succ-e{}.png".format(epoch), target_overlay_grid_mask)
+        cv2.imwrite("viz/pred_overlay_grid_succ-e{}.png".format(epoch), pred_overlay_grid_mask)
 
-        print(metrics_tracklet)
-        print(metrics_gt_annot)
+        print(metrics_tracklet_succ)
 
-        return metrics_gt_annot
+        return metrics_tracklet_succ
 
 
     def inference(self):
@@ -287,7 +476,7 @@ class Trainer():
             new_state_dict[name] = v
 
         self.model.load_state_dict(new_state_dict)
-        self.model = self.model.eval()
+        self.model.eval()
 
         base_images = glob.glob("/data/autograph/successors-pedestrians/pittsburgh-pre/train/*rgb.png")
 
@@ -330,8 +519,6 @@ class Trainer():
             cv2.namedWindow("pred_sdf_viz")
             cv2.setMouseCallback("pred_sdf_viz", click)
             cv2.waitKey(-1)
-
-
 
 
 
@@ -380,7 +567,7 @@ def main():
         num_in_channels = 3  # rgb
     elif opt.target == "successor":
         if opt.full_checkpoint is not None:
-            num_in_channels = 7  # rgb, mask_sdf, pos_encoding
+            num_in_channels = 9  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
         else:
             num_in_channels = 6  # rgb, pos_encoding
     else:
@@ -393,7 +580,7 @@ def main():
     if opt.full_checkpoint is not None:
         model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
                                    num_in_channels=3,
-                                   num_classes=1).to(params.model.device)
+                                   num_classes=3).to(params.model.device)
 
         state_dict = torch.load(opt.full_checkpoint)
         try:
@@ -424,8 +611,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '0703', "austin", "train", "*")
-    val_path = os.path.join(params.paths.dataroot, '0703', "austin", "val", "*")
+    train_path = os.path.join(params.paths.dataroot, '0903', "austin", "train", "*")
+    val_path = os.path.join(params.paths.dataroot, '0903', "austin", "val", "*")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5, frac_straight=0.5)
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val', frac_branch=0.5, frac_straight=0.5)
@@ -452,7 +639,10 @@ def main():
 
         if epoch % 1 == 0:
             with torch.no_grad():
-                trainer.evaluate(epoch)
+                if opt.target == "successor":
+                    trainer.evaluate_succ(epoch)
+                else:
+                    trainer.evaluate_full(epoch)
 
             try:
                 wandb_run_name = wandb.run.name
@@ -466,7 +656,7 @@ def main():
 
             os.makedirs(checkpoint_path, exist_ok=True)
 
-            fname = 'e-{:02d}.pth'.format(epoch)
+            fname = 'e-{:03d}.pth'.format(epoch)
             checkpoint_name = os.path.join(checkpoint_path, fname)
 
             print("Saving checkpoint to {}".format(checkpoint_name))

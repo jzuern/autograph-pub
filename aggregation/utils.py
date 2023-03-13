@@ -11,8 +11,92 @@ import os
 from sklearn.cluster import DBSCAN
 from av2.geometry.interpolate import compute_midpoint_line
 from av2.map.map_api import ArgoverseStaticMap
-
+import matplotlib.pyplot as plt
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_angles,  get_oriented_crop, transform2vgg
+
+
+class AngleColorizer:
+    def __init__(self, color_map=cv2.COLORMAP_HSV):
+        self.color_map = color_map
+
+    def safety_check(self, angle):
+        if angle.min() < 0 or angle.max() > 2 * np.pi:
+            min_diff = np.abs(angle.min() - 0)
+            max_diff = np.abs(angle.max() - 2 * np.pi)
+            if min_diff < 0.1 and max_diff < 0.1:
+                angle = np.clip(angle, 0, 2 * np.pi)
+            else:
+                print(angle.min(), angle.max())
+                raise ValueError("Angle must be in the range [0, 2*pi]")
+        return angle
+
+
+
+    def angle_to_color(self, angle):
+        """
+        Converts an angle to a color. Angle is in radians and is in the range [0, 2*pi].
+        :param angle:
+        :return:  A 3-tuple representing the RGB color.
+        """
+        angle = self.safety_check(angle)
+
+        cmap = plt.get_cmap("hsv")
+        angle_hsv = (cmap(angle / (2 * np.pi))[:, :, :3] * 255).astype(np.uint8)
+
+        return angle_hsv
+
+    def angles_to_colors(self, angles):
+        """
+        Converts a list of angles to a list of colors. Angle is in radians and is in the range [0, 2*pi].
+        :param angles:
+        :return:  A list of 3-tuples representing the RGB colors.
+        """
+        return [self.angle_to_color(angle) for angle in angles]
+
+    def color_to_angle(self, color_image):
+        """
+        Converts a color to an angle. Angle is in radians and is in the range [0, 2*pi].
+        :param color: A 3-tuple representing the RGB color.
+        :return:
+        """
+        color_hsv = cv2.cvtColor(color_image, cv2.COLOR_RGB2HSV)
+        return color_hsv[:, :, 0] / 255 * 2 * np.pi * 1.4410
+
+
+    def colors_to_angles(self, colors):
+        """
+        Converts a list of colors to a list of angles. Angle is in radians and is in the range [0, 2*pi].
+        :param colors:
+        :return:
+        """
+        return [self.color_to_angle(color) for color in colors]
+
+    def angle_to_xy(self, angle):
+        """
+        Converts an angle to a 2D vector. Angle is in radians and is in the range [0, 2*pi].
+        :param angle:
+        :return:
+        """
+        angle = self.safety_check(angle)
+
+        return np.array([np.cos(angle), np.sin(angle)])
+
+    def angles_to_xys(self, angles):
+        """
+        Converts a list of angles to a list of 2D vectors. Angle is in radians and is in the range [0, 2*pi].
+        :param angles:
+        :return:
+        """
+        return [self.angle_to_xy(angle) for angle in angles]
+
+    def xy_to_angle(self, xy):
+        """
+        Converts a 2D vector to an angle. Angle is in radians and is in the range [0, 2*pi].
+        :param xy:
+        :return:
+        """
+        return np.arctan2(xy[1], xy[0]) % (2 * np.pi)
+
 
 
 class Cropper:
@@ -145,6 +229,7 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
     mask_ped = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
     mask_veh = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
 
+    # Paint into vehicle and pedestrian masks
     for t in trajectories_all:
         for i in range(len(t)-1):
             cv2.line(mask_veh, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
@@ -153,6 +238,26 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
             cv2.line(mask_ped, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
             cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1, cv2.LINE_AA)
 
+
+    # paint into angle mask
+    mask_angle = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+    for t in trajectories_all:
+        for i in range(len(t) - 1):
+            start = tuple(t[i].astype(int))
+            end = tuple(t[i + 1].astype(int))
+            angle = np.arctan2(end[1] - start[1], end[0] - start[0]) + np.pi
+            cv2.line(mask_angle, start, end, angle, 7)
+
+    # convert using color map
+    mask_angle_colorized = AngleColorizer().angle_to_color(mask_angle)
+    mask_angle_colorized[mask_angle == 0] = 0
+
+    # import matplotlib.pyplot as plt
+    # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
+    # ax[0].imshow(mask_angle)
+    # ax[1].imshow(mask_angle_colorized)
+    # ax[2].imshow(sat_image_viz)
+    # plt.show()
 
     succ_traj = trajectories_2 + trajectories_close_q
 
@@ -169,7 +274,7 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
     mask_total[:, :, 2] = mask_ped
     mask_total[:, :, 1] = mask_veh
 
-    return succ_traj,  mask_total, sat_image_viz
+    return succ_traj,  mask_total, mask_angle_colorized, sat_image_viz
 
 
 

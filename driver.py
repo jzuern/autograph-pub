@@ -8,7 +8,8 @@ from pynput.keyboard import Key, Listener
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
 import matplotlib.pyplot as plt
-
+from skimage.morphology import skeletonize
+from aggregation.utils import AngleColorizer
 
 def colorize(mask):
 
@@ -22,6 +23,20 @@ def colorize(mask):
     return mask
 
 
+# # cv2 callback function for clicking on image
+# def click_aggregation(event, x, y, flags, param):
+#     if event == cv2.EVENT_LBUTTONDOWN:
+#         q = [y, x]
+#
+#
+#
+# cv2.namedWindow("pred_sdf_viz")
+# cv2.setMouseCallback("pred_sdf_viz", click_aggregation)
+# cv2.waitKey(-1)
+#
+#
+
+
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
@@ -33,6 +48,7 @@ class SatelliteDriver(object):
         #self.crop_shape = (512, 512)
         self.canvas_log_odds = None
         self.pose_history = np.array([self.pose])
+        self.ac = AngleColorizer()
 
     def load_model(self, model_path, type=None):
 
@@ -48,25 +64,26 @@ class SatelliteDriver(object):
         if type == "full":
             self.model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
                                            num_in_channels=3,
-                                           num_classes=1).cuda()
+                                           num_classes=3).cuda()
             self.model_full.load_state_dict(new_state_dict)
             # self.model_full.eval()
 
         elif type == "successor":
             self.model_succ = DeepLabv3Plus(models.resnet101(pretrained=True),
-                                           num_in_channels=7,
-                                           num_classes=1).cuda()
+                                           num_in_channels=9,
+                                           num_classes=3).cuda()
             self.model_succ.load_state_dict(new_state_dict)
             # self.model_succ.eval()
 
         print("Model loaded")
 
     def load_satellite(self, path):
+        print("Loading satellite...")
         self.satellite = np.asarray(Image.open(path)).astype(np.uint8)
         self.satellite = cv2.cvtColor(self.satellite, cv2.COLOR_BGR2RGB)
 
         # Crop
-        top_left = [27000, 17000]  # vertical, horizontal
+        top_left = [36000, 26000]  # vertical, horizontal
         delta = [5000, 5000]
         self.satellite = self.satellite[top_left[0]:top_left[0] + delta[0], top_left[1]:top_left[1] + delta[1], :]
 
@@ -92,12 +109,45 @@ class SatelliteDriver(object):
     def skeletonize_prediction(self, pred, threshold=0.5):
 
         # first, convert to binary
-        pred = (pred > threshold).astype(np.uint8)
+        pred_thrshld = (pred > threshold).astype(np.uint8)
 
         # then, skeletonize
-        pred = cv2.ximgproc.thinning(pred, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
+        skeleton = skeletonize(pred_thrshld)
 
-        return pred
+        # # display results
+        # fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(8, 4),
+        #                          sharex=True, sharey=True)
+        #
+        # ax = axes.ravel()
+        #
+        # ax[0].imshow(pred, cmap=plt.cm.gray)
+        # ax[0].axis('off')
+        # ax[0].set_title('original', fontsize=20)
+        #
+        # ax[1].imshow(pred_thrshld, cmap=plt.cm.gray)
+        # ax[1].axis('off')
+        # ax[1].set_title('original', fontsize=20)
+        #
+        # ax[2].imshow(skeleton, cmap=plt.cm.gray)
+        # ax[2].axis('off')
+        # ax[2].set_title('skeleton', fontsize=20)
+
+        # fig.tight_layout()
+        # plt.show()
+
+        # cut away top and sides by N pixels
+        N = 20
+        skeleton[:N,  :] = 0
+        skeleton[: , :N] = 0
+        skeleton[:, -N:] = 0
+
+        skeleton = skeleton.astype(np.uint8) * 255
+        skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
+        skeleton = (skeleton / 255.0).astype(np.float32)
+
+
+
+        return skeleton
 
 
 
@@ -145,6 +195,9 @@ class SatelliteDriver(object):
         warped_roi = warped_roi.astype(np.float32) / 255.  # 1 for valid, 0 for invalid
         warped_roi[warped_roi < 0.5] = 0.5
         warped_roi[warped_roi >= 0.5] = 1
+
+
+
         # TODO: make this proper bayesian
 
         self.canvas_log_odds += warped_pred
@@ -172,6 +225,8 @@ class SatelliteDriver(object):
             cv2.line(canvas_viz, (x_0, y_0), (x_1, y_1), (0, 145, 0), 1, cv2.LINE_AA)
 
         cv2.imshow("Aggregation", canvas_viz)
+
+
 
         # also visualize the canvas around current pose
         width = 500
@@ -264,7 +319,7 @@ class SatelliteDriver(object):
             self.pose[2] += 2 * np.pi
 
         # alter pose based on which arrow key is pressed
-        s = 20
+        s = 60
 
         forward_vector = np.array([np.cos(self.pose[2]),
                                   -np.sin(self.pose[2])])
@@ -302,55 +357,62 @@ class SatelliteDriver(object):
 
         if self.model_full is not None:
             with torch.no_grad():
-                (sdf_full, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
-                sdf_full = torch.nn.functional.interpolate(sdf_full,
-                                                           size=rgb_torch.shape[2:],
-                                                           mode='bilinear',
-                                                           align_corners=True)
-                sdf_full = torch.nn.Sigmoid()(sdf_full)[0:1]
+                (pred, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
+                pred = torch.nn.functional.interpolate(pred,
+                                                       size=rgb_torch.shape[2:],
+                                                       mode='bilinear',
+                                                       align_corners=True)
+                pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
+                pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
-        in_tensor = torch.cat([rgb_torch, sdf_full, pos_encoding_torch], dim=1)
+        print(rgb_torch.shape)
+        print(pos_encoding_torch.shape)
+        print(pred_drivable.shape)
+        print(pred_angles.shape)
+
+        in_tensor = torch.cat([rgb_torch, pos_encoding_torch, pred_drivable, pred_angles], dim=1)
         in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
 
-        (sdf_succ, features) = self.model_succ(in_tensor)
-        sdf_succ = torch.nn.functional.interpolate(sdf_succ,
+        (pred_succ, features) = self.model_succ(in_tensor)
+        pred_succ = torch.nn.functional.interpolate(pred_succ,
                                                size=rgb_torch.shape[2:],
                                                mode='bilinear',
                                                align_corners=True)
-        sdf_succ = torch.nn.Sigmoid()(sdf_succ)
-        sdf_succ = sdf_succ[0, 0].cpu().detach().numpy()
-        sdf_full = sdf_full[0, 0].cpu().detach().numpy()
 
-        self.add_pred_to_canvas(sdf_succ, self.pose)
+        pred_succ = torch.nn.Sigmoid()(pred_succ)
+        pred_succ = pred_succ[0, 0].cpu().detach().numpy()
+        pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
 
-        skeleton = self.skeletonize_prediction(sdf_succ, threshold=0.2)
-        # skeleton = cv2.cvtColor(skeleton, cv2.COLOR_GRAY2BGR)
-        # skeleton = cv2.addWeighted(rgb, 0.5, skeleton, 0.5, 0)
-        cv2.imshow("skeleton", skeleton)
+        pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+        pred_angles_color = self.ac.angle_to_color(pred_angles)
 
+        skeleton = self.skeletonize_prediction(pred_succ, threshold=0.1)
 
-        sdf_succ = (sdf_succ * 255).astype(np.uint8)
-        sdf_full = (sdf_full * 255).astype(np.uint8)
-        sdf_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(sdf_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
-        sdf_full_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(sdf_full, cv2.COLORMAP_MAGMA), 0.5, 0)
+        # self.add_pred_to_canvas(sdf_succ, self.pose)
+        self.add_pred_to_canvas(skeleton, self.pose)
 
+        skeleton = (skeleton * 255).astype(np.uint8)
+        skeleton_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(skeleton, cv2.COLORMAP_MAGMA), 0.5, 0)
+        cv2.imshow("skeleton", skeleton_viz)
 
+        pred_succ = (pred_succ * 255).astype(np.uint8)
+        pred_drivable = (pred_drivable * 255).astype(np.uint8)
+        pred_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
+        pred_drivable_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_drivable, cv2.COLORMAP_MAGMA), 0.5, 0)
+        pred_angles_color_viz = cv2.addWeighted(rgb, 0.5, pred_angles_color, 0.5, 0)
 
-
-        cv2.imshow("pred_sdf_viz", sdf_succ_viz)
-        cv2.imshow("sdf_full_viz", sdf_full_viz)
+        cv2.imshow("pred_succ", pred_succ_viz)
+        cv2.imshow("pred_drivable", pred_drivable_viz)
+        cv2.imshow("pred_angles_color", pred_angles_color_viz)
         cv2.waitKey(1)
 
 
 if __name__ == "__main__":
     driver = SatelliteDriver()
+    driver.load_model(model_path="/data/autograph/checkpoints/local_run_full/e-167.pth", type="full")
+    driver.load_model(model_path="/data/autograph/checkpoints/local_run_successor/e-74.pth", type="successor")
+
     driver.load_satellite(path="/data/lanegraph/woven-data/Austin.png")
-    # driver.load_model(model_path="/data/autograph/checkpoints/fresh-disco-47/e-07.pth", type="full")
-    # driver.load_model(model_path="/data/autograph/checkpoints/eager-forest-52/e-36.pth", type="successor")
-
-    driver.load_model(model_path="/data/autograph/checkpoints/lively-grass-55/e-90.pth", type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/smart-smoke-57/e-100.pth", type="successor")
-
 
     print("Press arrow keys to drive")
 

@@ -8,11 +8,163 @@ import cv2
 import numpy as np
 import networkx as nx
 import random
-
+from aggregation.utils import AngleColorizer
 
 def get_id(filename):
     id_list = os.path.basename(filename).split('-')
     return "-".join(id_list[1:4])
+
+
+class SuccessorRegressorDataset(torch.utils.data.Dataset):
+    def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5):
+        self.path = path
+        self.params = params
+        self.split = split
+        self.ac = AngleColorizer()
+
+        print("Looking for files in", path)
+        self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
+        self.sdf_files = sorted(glob(os.path.join(path, '*-masks.png')))
+        self.angles_files = sorted(glob(os.path.join(path, '*-angles.png')))
+        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding.png')))
+        self.drivable_gt_files = sorted(glob(os.path.join(path, '*-drivable-gt.png')))
+
+        # only use files for which we have all modalities
+        file_ids = [get_id(f) for f in self.sdf_files]
+        self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
+        self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
+        self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
+        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
+        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
+
+        print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
+
+        # jointly shuffle them
+        c = list(zip(self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
+        random.shuffle(c)
+        self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
+
+        # check if all files are present
+        assert len(self.sdf_files) == len(self.rgb_files)
+
+        # Now we can share the files between type branch and straight
+        rgb_branch = [i for i in self.rgb_files if "branching" in i]
+        sdf_branch = [i for i in self.sdf_files if "branching" in i]
+        pos_enc_branch = [i for i in self.pos_enc_files if "branching" in i]
+        drivable_gt_branch = [i for i in self.drivable_gt_files if "branching" in i]
+        angles_branch = [i for i in self.angles_files if "branching" in i]
+
+        rgb_straight = [i for i in self.rgb_files if "straight" in i]
+        sdf_straight = [i for i in self.sdf_files if "straight" in i]
+        pos_enc_straight = [i for i in self.pos_enc_files if "straight" in i]
+        drivable_gt_straight = [i for i in self.drivable_gt_files if "straight" in i]
+        angles_straight = [i for i in self.angles_files if "straight" in i]
+
+        if frac_branch * len(rgb_branch) < frac_straight * len(rgb_straight):
+            frac_straight_eff = 2 * frac_branch * len(rgb_branch) / len(rgb_straight)
+            frac_branch_eff = 2 * frac_branch
+        else:
+            frac_branch_eff = 2 * frac_straight * len(rgb_straight) / len(rgb_branch)
+            frac_straight_eff = 2 * frac_straight
+
+        print("frac_branch = {}, frac_straight = {}".format(frac_branch, frac_straight))
+        print("Using {}% branch and {}% straight effectively".format(frac_branch_eff * 100, frac_straight_eff * 100))
+
+        self.rgb_files = rgb_branch[:int(frac_branch_eff * len(rgb_branch))] + \
+                         rgb_straight[:int(frac_straight_eff * len(rgb_straight))]
+        self.sdf_files = sdf_branch[:int(frac_branch_eff * len(sdf_branch))] + \
+                         sdf_straight[:int(frac_straight_eff * len(sdf_straight))]
+        self.pos_enc_files = pos_enc_branch[:int(frac_branch_eff * len(pos_enc_branch))] + \
+                             pos_enc_straight[:int(frac_straight_eff * len(pos_enc_straight))]
+        self.drivable_gt_files = drivable_gt_branch[:int(frac_branch_eff * len(drivable_gt_branch))] + \
+                                 drivable_gt_straight[:int(frac_straight_eff * len(drivable_gt_straight))]
+        self.angles_files = angles_branch[:int(frac_branch_eff * len(angles_branch))] + \
+                            angles_straight[:int(frac_straight_eff * len(angles_straight))]
+
+
+        print("Loaded {} {} files".format(len(self.sdf_files), self.split))
+
+    def __len__(self):
+        return len(self.sdf_files)
+
+    def random_rotate(self, return_dict):
+        k = np.random.randint(0, 4)
+        return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
+        return_dict['mask_full'] = torch.rot90(return_dict['mask_full'], k, [0, 1])
+        return_dict['mask_successor'] = torch.rot90(return_dict['mask_successor'], k, [0, 1])
+        return_dict['mask_pedestrian'] = torch.rot90(return_dict['mask_pedestrian'], k, [0, 1])
+
+        imshape = return_dict['rgb'].shape
+
+        old_pos_encoding = return_dict['pos_enc']
+        pos_center = torch.where(old_pos_encoding == 1.0)[1:3]
+        q = pos_center[0].item(), pos_center[1].item()
+
+        # change position of q according to rotation
+        if k == 1:
+            q = old_pos_encoding.shape[2] - q[1] - 1, q[0]
+        elif k == 2:
+            q = old_pos_encoding.shape[1] - q[0] - 1, old_pos_encoding.shape[2] - q[1] - 1
+        elif k == 3:
+            q = q[1], old_pos_encoding.shape[1] - q[0] - 1
+
+        pos_encoding = np.zeros(imshape, dtype=np.float32)
+        x, y = np.meshgrid(np.arange(imshape[2]), np.arange(imshape[1]))
+        pos_encoding[2, q[1], q[0]] = 1
+        pos_encoding[0, :, :] = np.abs((x - q[0])) / imshape[2]
+        pos_encoding[1, :, :] = np.abs((y - q[1])) / imshape[1]
+        pos_encoding = (pos_encoding * 255).astype(np.uint8)
+
+        pos_encoding = torch.from_numpy(pos_encoding).float() / 255.0
+
+        return_dict['pos_enc'] = pos_encoding
+
+        return return_dict
+
+
+    def __getitem__(self, idx):
+        mask = cv2.imread(self.sdf_files[idx], cv2.IMREAD_COLOR)
+        pos_enc = cv2.imread(self.pos_enc_files[idx], cv2.IMREAD_UNCHANGED)
+        angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_COLOR)
+        angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
+        rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
+        drivable_gt = cv2.imread(self.drivable_gt_files[idx], cv2.IMREAD_UNCHANGED)
+
+        angles = self.ac.color_to_angle(angles)
+        angles_xy = self.ac.angle_to_xy(angles)
+        angles_xy = torch.from_numpy(angles_xy).float()
+
+
+        mask_full = mask[:, :, 1]
+        mask_successor = mask[:, :, 2]
+        mask_pedestrian = mask[:, :, 0]
+
+        # to tensor
+        mask_full = torch.from_numpy(mask_full).float() / 255.0
+        drivable_gt = torch.from_numpy(drivable_gt).float() / 255.0
+
+        mask_successor = torch.from_numpy(mask_successor).float() / 255.0
+        mask_pedestrian = torch.from_numpy(mask_pedestrian).float() / 255.0
+        rgb = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
+        pos_enc = torch.from_numpy(pos_enc).float().permute(2, 0, 1) / 255.0
+
+        return_dict = {
+            'drivable': mask_full,
+            'drivable_gt': drivable_gt,
+            'mask_successor': mask_successor,
+            'mask_pedestrian': mask_pedestrian,
+            'pos_enc': pos_enc,
+            'angles_xy': angles_xy,
+            'rgb': rgb
+        }
+
+        if self.split == 'train':
+            pass
+            #return_dict = self.random_rotate(return_dict)
+
+        return return_dict
+
+
 
 
 class RegressorDataset(torch.utils.data.Dataset):
@@ -110,160 +262,6 @@ class RegressorDataset(torch.utils.data.Dataset):
         }
 
         #return_dict = self.random_rotate(return_dict)
-
-        return return_dict
-
-
-class SuccessorRegressorDataset(torch.utils.data.Dataset):
-    def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5):
-        self.path = path
-        self.params = params
-
-        print("Looking for files in", path)
-        self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
-        self.sdf_files = sorted(glob(os.path.join(path, '*-masks.png')))
-        #self.angles_files = sorted(glob(os.path.join(path, '*-angles-tracklets-dense.png')))
-        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding.png')))
-        self.drivable_gt_files = sorted(glob(os.path.join(path, '*-drivable-gt.png')))
-
-        # only use files for which we have all modalities
-        file_ids = [get_id(f) for f in self.sdf_files]
-        self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
-        #self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
-        self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
-        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
-        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
-
-        print(len(self.sdf_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
-
-
-        # jointly shuffle them
-        c = list(zip(self.sdf_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
-        random.shuffle(c)
-        self.sdf_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
-
-
-        # check if all files are present
-        assert len(self.sdf_files) == len(self.rgb_files)
-
-        self.split = split
-
-
-        # Now we can share the files between type branch and straight
-        rgb_branch = [i for i in self.rgb_files if "branching" in i]
-        sdf_branch = [i for i in self.sdf_files if "branching" in i]
-        pos_enc_branch = [i for i in self.pos_enc_files if "branching" in i]
-        drivable_gt_branch = [i for i in self.drivable_gt_files if "branching" in i]
-
-        rgb_straight = [i for i in self.rgb_files if "straight" in i]
-        sdf_straight = [i for i in self.sdf_files if "straight" in i]
-        pos_enc_straight = [i for i in self.pos_enc_files if "straight" in i]
-        drivable_gt_straight = [i for i in self.drivable_gt_files if "straight" in i]
-
-        if frac_branch * len(rgb_branch) < frac_straight * len(rgb_straight):
-            frac_straight_eff = 2 * frac_branch * len(rgb_branch) / len(rgb_straight)
-            frac_branch_eff = 2 * frac_branch
-        else:
-            frac_branch_eff = 2 * frac_straight * len(rgb_straight) / len(rgb_branch)
-            frac_straight_eff = 2 * frac_straight
-
-        print("frac_branch = {}, frac_straight = {}".format(frac_branch, frac_straight))
-        print("Using {}% branch and {}% straight effectively".format(frac_branch_eff * 100, frac_straight_eff * 100))
-
-        self.rgb_files = rgb_branch[:int(frac_branch_eff * len(rgb_branch))] + \
-                         rgb_straight[:int(frac_straight_eff * len(rgb_straight))]
-        self.sdf_files = sdf_branch[:int(frac_branch_eff * len(sdf_branch))] + \
-                         sdf_straight[:int(frac_straight_eff * len(sdf_straight))]
-        self.pos_enc_files = pos_enc_branch[:int(frac_branch_eff * len(pos_enc_branch))] + \
-                             pos_enc_straight[:int(frac_straight_eff * len(pos_enc_straight))]
-        self.drivable_gt_files = drivable_gt_branch[:int(frac_branch_eff * len(drivable_gt_branch))] + \
-                                 drivable_gt_straight[:int(frac_straight_eff * len(drivable_gt_straight))]
-
-        print("Loaded {} {} files".format(len(self.sdf_files), self.split))
-
-    def __len__(self):
-        return len(self.sdf_files)
-
-    def random_rotate(self, return_dict):
-        k = np.random.randint(0, 4)
-        return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
-        return_dict['mask_full'] = torch.rot90(return_dict['mask_full'], k, [0, 1])
-        return_dict['mask_successor'] = torch.rot90(return_dict['mask_successor'], k, [0, 1])
-        return_dict['mask_pedestrian'] = torch.rot90(return_dict['mask_pedestrian'], k, [0, 1])
-
-        imshape = return_dict['rgb'].shape
-
-        old_pos_encoding = return_dict['pos_enc']
-        pos_center = torch.where(old_pos_encoding == 1.0)[1:3]
-        q = pos_center[0].item(), pos_center[1].item()
-
-        # change position of q according to rotation
-        if k == 1:
-            q = old_pos_encoding.shape[2] - q[1] - 1, q[0]
-        elif k == 2:
-            q = old_pos_encoding.shape[1] - q[0] - 1, old_pos_encoding.shape[2] - q[1] - 1
-        elif k == 3:
-            q = q[1], old_pos_encoding.shape[1] - q[0] - 1
-
-        pos_encoding = np.zeros(imshape, dtype=np.float32)
-        x, y = np.meshgrid(np.arange(imshape[2]), np.arange(imshape[1]))
-        pos_encoding[2, q[1], q[0]] = 1
-        pos_encoding[0, :, :] = np.abs((x - q[0])) / imshape[2]
-        pos_encoding[1, :, :] = np.abs((y - q[1])) / imshape[1]
-        pos_encoding = (pos_encoding * 255).astype(np.uint8)
-
-        pos_encoding = torch.from_numpy(pos_encoding).float() / 255.0
-
-        return_dict['pos_enc'] = pos_encoding
-
-        return return_dict
-
-
-
-    def __getitem__(self, idx):
-        mask = cv2.imread(self.sdf_files[idx], cv2.IMREAD_COLOR)
-        pos_enc = cv2.imread(self.pos_enc_files[idx], cv2.IMREAD_UNCHANGED)
-        #angles = cv2.imread(self.angles_files[idx], cv2.IMREAD_COLOR)
-        #angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
-        rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
-        drivable_gt = cv2.imread(self.drivable_gt_files[idx], cv2.IMREAD_UNCHANGED)
-
-        # convert from angles to unit circle xy coordinates
-        # to hsv to get hue
-
-        mask_full = mask[:, :, 1]
-        mask_successor = mask[:, :, 2]
-        mask_pedestrian = mask[:, :, 0]
-
-        # to tensor
-        mask_full = torch.from_numpy(mask_full).float() / 255.0
-        drivable_gt = torch.from_numpy(drivable_gt).float() / 255.0
-
-        mask_successor = torch.from_numpy(mask_successor).float() / 255.0
-        mask_pedestrian = torch.from_numpy(mask_pedestrian).float() / 255.0
-        #angles_x = torch.from_numpy(angles_x).float()
-        #angles_y = torch.from_numpy(angles_y).float()
-        #angles_mask = torch.from_numpy(angles_mask).float()
-        #angles = torch.from_numpy(angles).float()
-        rgb = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
-        pos_enc = torch.from_numpy(pos_enc).float().permute(2, 0, 1) / 255.0
-
-        return_dict = {
-            'mask_full': mask_full,
-            'drivable_gt': drivable_gt,
-            'mask_successor': mask_successor,
-            'mask_pedestrian': mask_pedestrian,
-            'pos_enc': pos_enc,
-            #'angles_mask': angles_mask,
-            #'angles_x': angles_x,
-            #'angles_y': angles_y,
-            #'angles': angles,
-            'rgb': rgb
-        }
-
-        if self.split == 'train':
-            pass
-            #return_dict = self.random_rotate(return_dict)
 
         return return_dict
 
@@ -371,10 +369,6 @@ class PreprocessedDataset(torch_geometric.data.Dataset):
         #    data = self.random_rotate(data)
 
         return data
-
-
-
-
 
 
 class PreprocessedDatasetSuccessor(torch_geometric.data.Dataset):

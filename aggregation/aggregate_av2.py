@@ -123,186 +123,186 @@ def crop_img_at_pose(img, pose, crop_size):
         return None
 
 
-def get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
-
-    endpoints = []
-
-    # find endpoints by checking if they are close to the image border
-    for t in succ_traj:
-        if np.any(np.isclose(t[-1], np.array([crop_size-1, crop_size-1]), atol=10.0)) or np.any(np.isclose(t[-1], np.array([0, 0]), atol=10.0)):
-            coords = (int(t[-1, 0]), int(t[-1, 1]))
-            cv2.circle(sat_image_viz, coords, 5, (255, 255, 255), -1)
-        else:
-            coords = (int(t[-1, 0]), int(t[-1, 1]))
-            cv2.circle(sat_image_viz, coords, 5, (129, 129, 129), -1)
-        endpoints.append(coords)
-    endpoints = np.array(endpoints)
-
-    mask_thin = np.zeros(sat_image_viz.shape[0:2], dtype=np.uint8)
-    for t in succ_traj:
-        for i in range(len(t) - 1):
-            x1 = int(t[i][0])
-            y1 = int(t[i][1])
-            x2 = int(t[i + 1][0])
-            y2 = int(t[i + 1][1])
-            cv2.line(mask_thin, (x1, y1), (x2, y2), 1, thickness=2)
-
-    # Cluster endpoints
-    try:
-        clustering = DBSCAN(eps=15, min_samples=DBSCAN_MIN_N_SAMPLES).fit(endpoints)
-    except:
-        logging.debug("DBSCAN endpoint clustering failed. Skipping", exc_info=True)
-        return None, None, None
-
-    endpoints_centroids = []
-    for c in np.unique(clustering.labels_):
-        endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
-    endpoints_centroids = np.array(endpoints_centroids)
-
-    # If at least 2 endpoints are found
-    num_endpoints = len(endpoints_centroids)
-    if num_endpoints <= NUM_ENDPOINTS_MIN:
-        logging.debug("Too few endpoints found. Skipping")
-        return None, None, None
-
-    cv2.circle(sat_image_viz, (int(q[0]), int(q[1])), 4, (0, 255, 0), -1)
-    [cv2.circle(sat_image_viz, (int(p[0]), int(p[1])), 4, (0, 0, 0), -1) for p in endpoints_centroids]
-
-    try:
-        sdf_thin = skfmm.distance(1 - mask_thin) - skfmm.distance(mask_thin)
-        sdf_thin = sdf_thin - sdf_thin.min() + 1
-    except:
-        logging.debug("SDF thinning failed. Skipping")
-        return None, None, None
-
-    kernel = cv2.circle(np.zeros((20, 20), np.uint8), (10, 10), 10, 1, -1)
-
-    path_imgs = []
-
-    for pos_end in endpoints_centroids:
-
-        path, cost = skimage.graph.route_through_array(sdf_thin.T,
-                                                       start=tuple(q.astype(np.int32)),
-                                                       end=tuple(pos_end.astype(np.int32)),
-                                                       fully_connected=True)
-        path = np.stack(path, axis=-1)
-        path_img = np.zeros(sat_image_viz.shape[0:2], dtype=np.uint8)
-        path_img[path[1], path[0]] = 1
-        path_imgs.append(cv2.dilate(path_img.astype(np.uint8), kernel, iterations=1))
-
-    mask_succ_sparse = np.max(np.array(path_imgs), axis=0)
-
-    return sat_image_viz, mask_succ_sparse, mask_thin
-
-
-
+# def get_succ_graph_fast(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
+#
+#     endpoints = []
+#
+#     # find endpoints by checking if they are close to the image border
+#     for t in succ_traj:
+#         if np.any(np.isclose(t[-1], np.array([crop_size-1, crop_size-1]), atol=10.0)) or np.any(np.isclose(t[-1], np.array([0, 0]), atol=10.0)):
+#             coords = (int(t[-1, 0]), int(t[-1, 1]))
+#             cv2.circle(sat_image_viz, coords, 5, (255, 255, 255), -1)
+#         else:
+#             coords = (int(t[-1, 0]), int(t[-1, 1]))
+#             cv2.circle(sat_image_viz, coords, 5, (129, 129, 129), -1)
+#         endpoints.append(coords)
+#     endpoints = np.array(endpoints)
+#
+#     mask_thin = np.zeros(sat_image_viz.shape[0:2], dtype=np.uint8)
+#     for t in succ_traj:
+#         for i in range(len(t) - 1):
+#             x1 = int(t[i][0])
+#             y1 = int(t[i][1])
+#             x2 = int(t[i + 1][0])
+#             y2 = int(t[i + 1][1])
+#             cv2.line(mask_thin, (x1, y1), (x2, y2), 1, thickness=2)
+#
+#     # Cluster endpoints
+#     try:
+#         clustering = DBSCAN(eps=15, min_samples=DBSCAN_MIN_N_SAMPLES).fit(endpoints)
+#     except:
+#         logging.debug("DBSCAN endpoint clustering failed. Skipping", exc_info=True)
+#         return None, None, None
+#
+#     endpoints_centroids = []
+#     for c in np.unique(clustering.labels_):
+#         endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
+#     endpoints_centroids = np.array(endpoints_centroids)
+#
+#     # If at least 2 endpoints are found
+#     num_endpoints = len(endpoints_centroids)
+#     if num_endpoints <= NUM_ENDPOINTS_MIN:
+#         logging.debug("Too few endpoints found. Skipping")
+#         return None, None, None
+#
+#     cv2.circle(sat_image_viz, (int(q[0]), int(q[1])), 4, (0, 255, 0), -1)
+#     [cv2.circle(sat_image_viz, (int(p[0]), int(p[1])), 4, (0, 0, 0), -1) for p in endpoints_centroids]
+#
+#     try:
+#         sdf_thin = skfmm.distance(1 - mask_thin) - skfmm.distance(mask_thin)
+#         sdf_thin = sdf_thin - sdf_thin.min() + 1
+#     except:
+#         logging.debug("SDF thinning failed. Skipping")
+#         return None, None, None
+#
+#     kernel = cv2.circle(np.zeros((20, 20), np.uint8), (10, 10), 10, 1, -1)
+#
+#     path_imgs = []
+#
+#     for pos_end in endpoints_centroids:
+#
+#         path, cost = skimage.graph.route_through_array(sdf_thin.T,
+#                                                        start=tuple(q.astype(np.int32)),
+#                                                        end=tuple(pos_end.astype(np.int32)),
+#                                                        fully_connected=True)
+#         path = np.stack(path, axis=-1)
+#         path_img = np.zeros(sat_image_viz.shape[0:2], dtype=np.uint8)
+#         path_img[path[1], path[0]] = 1
+#         path_imgs.append(cv2.dilate(path_img.astype(np.uint8), kernel, iterations=1))
+#
+#     mask_succ_sparse = np.max(np.array(path_imgs), axis=0)
+#
+#     return sat_image_viz, mask_succ_sparse, mask_thin
+#
 
 
-def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
-
-    endpoints = []
-
-    for t in succ_traj:
-        if np.any(np.isclose(t[-1], np.array([crop_size-1, crop_size-1]), atol=10.0)) or np.any(np.isclose(t[-1], np.array([0, 0]), atol=10.0)):
-            coords = (int(t[-1, 0]), int(t[-1, 1]))
-            cv2.circle(sat_image_viz, coords, 5, (255, 255, 255), -1)
-            endpoints.append(coords)
-    endpoints = np.array(endpoints)
-
-    # sample halting points everywhere
-    points = poisson_disk_sampling(r_min=r_min,
-                                   width=crop_size,
-                                   height=crop_size)
-    edges = get_random_edges(points,
-                             min_point_dist=r_min,
-                             max_point_dist=2*r_min)
-
-    points = [np.array([p[0], p[1]]) for p in points]
-
-    G = nx.DiGraph()
-    for i in range(len(points)):
-        G.add_node(i, pos=points[i], log_odds_dijkstra=0.0, p=0)
-    for i in range(len(edges)):
-        G.add_edge(edges[i][0], edges[i][1], log_odds_dijkstra=0.0, p=0)
-
-    # Assign traversal cost according to tracklets in succ_traj
-    G, mask, mask_thin, sdf, angles = assign_graph_traversals(G, succ_traj, imsize=sat_image_viz.shape[0:2])
-    mask = (mask / 255.).astype(np.float32)
-
-    # Cluster endpoints
-    try:
-        clustering = DBSCAN(eps=15, min_samples=DBSCAN_MIN_N_SAMPLES).fit(endpoints)
-    except:
-        logging.error("DBSCAN endpoint clustering failed. Skipping")
-        return None, None, None, None, None, None, None
-
-    endpoints_centroids = []
-    for c in np.unique(clustering.labels_):
-        endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
-    endpoints_centroids = np.array(endpoints_centroids)
-
-    # If at least 2 endpoints are found
-    num_endpoints = len(endpoints_centroids)
-    if num_endpoints < 2:
-        if np.random.rand() < 0.9:  # 90% chance to skip (cause we do not want to skip all)
-            logging.info("Too few endpoints found. Skipping")
-            return None, None, None, None, None, None, None
-
-    # Get planning from query point to end points
-    G_start = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - q, axis=1))
-    G_ends = [np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - endnode, axis=1)) for endnode in endpoints_centroids]
-
-    for G_end in G_ends:
-        path = nx.dijkstra_path(G, G_start, G_end, weight="cost")
-        for i in range(len(path) - 1):
-            G.edges[path[i], path[i + 1]]["p"] = 1
-        for i in range(len(path)):
-            G.nodes[path[i]]["p"] = 1
-
-    # plot start node and end nodes
-    pos_start = G.nodes[G_start]["pos"]
-    pos_ends = [G.nodes[G_end]["pos"] for G_end in G_ends]
-
-    cv2.circle(sat_image_viz, (int(pos_start[0]), int(pos_start[1])), 4, (0, 255, 0), -1)
-    [cv2.circle(sat_image_viz, (int(p[0]), int(p[1])), 4, (0, 0, 0), -1) for p in pos_ends]
-
-    angles_viz = visualize_angles(np.cos(angles),
-                                  np.sin(angles),
-                                  mask=mask[:, :, 0])
-
-    try:
-        sdf_thin = skfmm.distance(1 - mask_thin) - skfmm.distance(mask_thin)
-        sdf_thin = sdf_thin - sdf_thin.min() + 1
-    except:
-        logging.error("SDF thinning failed. Skipping")
-        return None, None, None, None, None, None, None
-
-    kernel = np.zeros((20, 20), np.uint8)
-    kernel = cv2.circle(kernel, (10, 10), 10, 1, -1)
-
-    path_imgs = []
-
-    # if len(pos_ends) < 1:
-    #     logging.error("Too few endpoints found ({}). Skipping".format(len(pos_ends)))
-    #     return None, None, None, None, None, None
-
-    for pos_end in pos_ends:
-
-        path, cost = skimage.graph.route_through_array(sdf_thin.T,
-                                                       start=tuple(pos_start.astype(np.int32)),
-                                                       end=tuple(pos_end.astype(np.int32)),
-                                                       fully_connected=True)
-        path = np.stack(path, axis=-1)
-        path_img = np.zeros_like(sdf, dtype=np.int32)
-        path_img[path[1], path[0]] = 1
-        path_imgs.append(cv2.dilate(path_img.astype(np.uint8), kernel, iterations=1))
-
-    mask_succ_sparse = np.max(np.array(path_imgs), axis=0)
 
 
-    return G, sat_image_viz, mask, angles, angles_viz, mask_succ_sparse, num_endpoints
-
-
+# def get_succ_graph(q, succ_traj, sat_image_viz, r_min=10, crop_size=256):
+#
+#     endpoints = []
+#
+#     for t in succ_traj:
+#         if np.any(np.isclose(t[-1], np.array([crop_size-1, crop_size-1]), atol=10.0)) or np.any(np.isclose(t[-1], np.array([0, 0]), atol=10.0)):
+#             coords = (int(t[-1, 0]), int(t[-1, 1]))
+#             cv2.circle(sat_image_viz, coords, 5, (255, 255, 255), -1)
+#             endpoints.append(coords)
+#     endpoints = np.array(endpoints)
+#
+#     # sample halting points everywhere
+#     points = poisson_disk_sampling(r_min=r_min,
+#                                    width=crop_size,
+#                                    height=crop_size)
+#     edges = get_random_edges(points,
+#                              min_point_dist=r_min,
+#                              max_point_dist=2*r_min)
+#
+#     points = [np.array([p[0], p[1]]) for p in points]
+#
+#     G = nx.DiGraph()
+#     for i in range(len(points)):
+#         G.add_node(i, pos=points[i], log_odds_dijkstra=0.0, p=0)
+#     for i in range(len(edges)):
+#         G.add_edge(edges[i][0], edges[i][1], log_odds_dijkstra=0.0, p=0)
+#
+#     # Assign traversal cost according to tracklets in succ_traj
+#     G, mask, mask_thin, sdf, angles = assign_graph_traversals(G, succ_traj, imsize=sat_image_viz.shape[0:2])
+#     mask = (mask / 255.).astype(np.float32)
+#
+#     # Cluster endpoints
+#     try:
+#         clustering = DBSCAN(eps=15, min_samples=DBSCAN_MIN_N_SAMPLES).fit(endpoints)
+#     except:
+#         logging.error("DBSCAN endpoint clustering failed. Skipping")
+#         return None, None, None, None, None, None, None
+#
+#     endpoints_centroids = []
+#     for c in np.unique(clustering.labels_):
+#         endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
+#     endpoints_centroids = np.array(endpoints_centroids)
+#
+#     # If at least 2 endpoints are found
+#     num_endpoints = len(endpoints_centroids)
+#     if num_endpoints < 2:
+#         if np.random.rand() < 0.9:  # 90% chance to skip (cause we do not want to skip all)
+#             logging.info("Too few endpoints found. Skipping")
+#             return None, None, None, None, None, None, None
+#
+#     # Get planning from query point to end points
+#     G_start = np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - q, axis=1))
+#     G_ends = [np.argmin(np.linalg.norm(np.array([G.nodes[i]["pos"] for i in G.nodes]) - endnode, axis=1)) for endnode in endpoints_centroids]
+#
+#     for G_end in G_ends:
+#         path = nx.dijkstra_path(G, G_start, G_end, weight="cost")
+#         for i in range(len(path) - 1):
+#             G.edges[path[i], path[i + 1]]["p"] = 1
+#         for i in range(len(path)):
+#             G.nodes[path[i]]["p"] = 1
+#
+#     # plot start node and end nodes
+#     pos_start = G.nodes[G_start]["pos"]
+#     pos_ends = [G.nodes[G_end]["pos"] for G_end in G_ends]
+#
+#     cv2.circle(sat_image_viz, (int(pos_start[0]), int(pos_start[1])), 4, (0, 255, 0), -1)
+#     [cv2.circle(sat_image_viz, (int(p[0]), int(p[1])), 4, (0, 0, 0), -1) for p in pos_ends]
+#
+#     angles_viz = visualize_angles(np.cos(angles),
+#                                   np.sin(angles),
+#                                   mask=mask[:, :, 0])
+#
+#     try:
+#         sdf_thin = skfmm.distance(1 - mask_thin) - skfmm.distance(mask_thin)
+#         sdf_thin = sdf_thin - sdf_thin.min() + 1
+#     except:
+#         logging.error("SDF thinning failed. Skipping")
+#         return None, None, None, None, None, None, None
+#
+#     kernel = np.zeros((20, 20), np.uint8)
+#     kernel = cv2.circle(kernel, (10, 10), 10, 1, -1)
+#
+#     path_imgs = []
+#
+#     # if len(pos_ends) < 1:
+#     #     logging.error("Too few endpoints found ({}). Skipping".format(len(pos_ends)))
+#     #     return None, None, None, None, None, None
+#
+#     for pos_end in pos_ends:
+#
+#         path, cost = skimage.graph.route_through_array(sdf_thin.T,
+#                                                        start=tuple(pos_start.astype(np.int32)),
+#                                                        end=tuple(pos_end.astype(np.int32)),
+#                                                        fully_connected=True)
+#         path = np.stack(path, axis=-1)
+#         path_img = np.zeros_like(sdf, dtype=np.int32)
+#         path_img[path[1], path[0]] = 1
+#         path_imgs.append(cv2.dilate(path_img.astype(np.uint8), kernel, iterations=1))
+#
+#     mask_succ_sparse = np.max(np.array(path_imgs), axis=0)
+#
+#
+#     return G, sat_image_viz, mask, angles, angles_viz, mask_succ_sparse, num_endpoints
+#
+#
 
 
 # def process_chunk_successors(source, roi_xxyy_list, export_final, trajectories_, trajectories_ped_, lanes_, sat_image_, out_path_root, centerline_image_=None, city_name=None):
@@ -835,8 +835,8 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, intersection_gt, tra
         angle = angle - np.pi / 2
 
 
-        # random alteration of angle uniform between -pi/4 and pi/4
-        angle = angle + np.random.uniform(-np.pi/4, np.pi/4)
+        # random alteration of angle uniform between -pi/3 and pi/3
+        angle = angle + np.random.uniform(-np.pi/3, np.pi/3)
 
         sat_image_crop = crop_img_at_pose(sat_image, [pos_x, pos_y, angle], crop_size)
         tracklet_image_crop = crop_img_at_pose(tracklet_image, [pos_x, pos_y, angle], crop_size)
@@ -972,7 +972,7 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
                     q = np.array([mouseX, mouseY])
                     print(q)
 
-                    succ_traj, mask_total, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
+                    succ_traj, mask_total, mask_angle_colorized, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
 
                     mask_succ_sparse = mask_total[0].copy()
 
@@ -1010,7 +1010,7 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
 
             print("{}/{}-{}".format(out_path, sample_id, i_query))
 
-            succ_traj, mask_total, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
+            succ_traj, mask_total, mask_angle_colorized, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
 
             num_clusters = get_endpoints(succ_traj, crop_size)
 
@@ -1047,9 +1047,7 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
 
             tracklets_im_list.append(mask_succ_sparse)
 
-
             [cv2.circle(sat_image_viz, (qq[0], qq[1]), 2, (0, 150, 255), -1) for qq in query_points]
-
 
             pos_encoding = np.zeros(sat_image_crop.shape, dtype=np.float32)
             x, y = np.meshgrid(np.arange(sat_image_crop.shape[1]), np.arange(sat_image_crop.shape[0]))
@@ -1066,7 +1064,7 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
             Image.fromarray(sat_image_viz).save("{}/{}/{}-{}-rgb-viz.png".format(out_path, sample_type, sample_id, i_query))
             Image.fromarray(mask_total).save("{}/{}/{}-{}-masks.png".format(out_path, sample_type, sample_id, i_query))
             Image.fromarray(drivable_gt_crop.astype(np.uint8)).save("{}/{}/{}-{}-drivable-gt.png".format(out_path, sample_type, sample_id, i_query))
-
+            Image.fromarray(mask_angle_colorized).save("{}/{}/{}-{}-angles.png".format(out_path, sample_type, sample_id, i_query))
 
 
 
