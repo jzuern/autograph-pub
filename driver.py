@@ -40,7 +40,7 @@ def colorize(mask):
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
-        self.init_pose = np.array([1945.6, 2860, -4.43])
+        self.init_pose = np.array([ 1906.9, 3086.0, -3.23])
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
@@ -63,17 +63,17 @@ class SatelliteDriver(object):
 
         if type == "full":
             self.model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
-                                           num_in_channels=3,
-                                           num_classes=3).cuda()
+                                            num_in_channels=3,
+                                            num_classes=3).cuda()
             self.model_full.load_state_dict(new_state_dict)
-            # self.model_full.eval()
+            self.model_full.eval()
 
         elif type == "successor":
             self.model_succ = DeepLabv3Plus(models.resnet101(pretrained=True),
-                                           num_in_channels=9,
-                                           num_classes=3).cuda()
+                                            num_in_channels=9,
+                                            num_classes=1).cuda()
             self.model_succ.load_state_dict(new_state_dict)
-            # self.model_succ.eval()
+            self.model_succ.eval()
 
         print("Model loaded")
 
@@ -189,8 +189,8 @@ class SatelliteDriver(object):
                                           (self.canvas_log_odds.shape[0], self.canvas_log_odds.shape[1]),
                                           cv2.INTER_LINEAR)
         warped_roi = cv2.warpPerspective(pred_roi, M,
-                                          (self.canvas_log_odds.shape[0], self.canvas_log_odds.shape[1]),
-                                          cv2.INTER_NEAREST)
+                                         (self.canvas_log_odds.shape[0], self.canvas_log_odds.shape[1]),
+                                         cv2.INTER_NEAREST)
 
         warped_roi = warped_roi.astype(np.float32) / 255.  # 1 for valid, 0 for invalid
         warped_roi[warped_roi < 0.5] = 0.5
@@ -274,7 +274,7 @@ class SatelliteDriver(object):
         csize_half = csize // 2
 
         satellite_image = self.satellite[int(y - csize * 2): int(y + csize * 2),
-                                         int(x - csize * 2): int(x + csize * 2)].copy()
+                          int(x - csize * 2): int(x + csize * 2)].copy()
 
         # For bottom centered
         src_pts = np.array([[-csize_half, 0],
@@ -319,12 +319,12 @@ class SatelliteDriver(object):
             self.pose[2] += 2 * np.pi
 
         # alter pose based on which arrow key is pressed
-        s = 60
+        s = 50
 
         forward_vector = np.array([np.cos(self.pose[2]),
-                                  -np.sin(self.pose[2])])
+                                   -np.sin(self.pose[2])])
         sideways_vector = np.array([np.cos(self.pose[2] + np.pi / 2),
-                                   -np.sin(self.pose[2] + np.pi / 2)])
+                                    -np.sin(self.pose[2] + np.pi / 2)])
 
         # arrow key pressed
         if key == Key.up:
@@ -341,10 +341,10 @@ class SatelliteDriver(object):
         elif key == Key.right:
             self.pose[2] += 0.2
         elif key == Key.page_up:
-            delta = s * sideways_vector
+            delta = s/2. * sideways_vector
             self.pose[0:2] += np.array([delta[1], delta[0]])
         elif key == Key.page_down:
-            delta = s * sideways_vector
+            delta = s/2. * sideways_vector
             self.pose[0:2] -= np.array([delta[1], delta[0]])
 
         self.pose_history = np.concatenate([self.pose_history, [self.pose]])
@@ -365,19 +365,15 @@ class SatelliteDriver(object):
                 pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
                 pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
-        print(rgb_torch.shape)
-        print(pos_encoding_torch.shape)
-        print(pred_drivable.shape)
-        print(pred_angles.shape)
 
         in_tensor = torch.cat([rgb_torch, pos_encoding_torch, pred_drivable, pred_angles], dim=1)
         in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
 
         (pred_succ, features) = self.model_succ(in_tensor)
         pred_succ = torch.nn.functional.interpolate(pred_succ,
-                                               size=rgb_torch.shape[2:],
-                                               mode='bilinear',
-                                               align_corners=True)
+                                                    size=rgb_torch.shape[2:],
+                                                    mode='bilinear',
+                                                    align_corners=True)
 
         pred_succ = torch.nn.Sigmoid()(pred_succ)
         pred_succ = pred_succ[0, 0].cpu().detach().numpy()
@@ -409,8 +405,8 @@ class SatelliteDriver(object):
 
 if __name__ == "__main__":
     driver = SatelliteDriver()
-    driver.load_model(model_path="/data/autograph/checkpoints/local_run_full/e-167.pth", type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/local_run_successor/e-74.pth", type="successor")
+    driver.load_model(model_path="/data/autograph/checkpoints/peach-bun-72/e-020.pth", type="full")
+    driver.load_model(model_path="/data/autograph/checkpoints/butterscotch-flan-74/e-050.pth", type="successor")
 
     driver.load_satellite(path="/data/lanegraph/woven-data/Austin.png")
 

@@ -162,10 +162,13 @@ class Trainer():
                 target_drivable = data["drivable"].cuda()
                 target_angles = data["angles_xy"].cuda()
 
+
                 (pred, features) = self.model(in_tensor)
                 pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+
                 pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
                 pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
+
 
                 loss_dict = {
                     'loss_drivable': torch.nn.BCELoss()(pred_drivable, target_drivable),
@@ -446,7 +449,7 @@ class Trainer():
 
         # Do logging
         if not self.params.main.disable_wandb:
-            wandb.log({"val/loss_total": val_loss})
+            wandb.log({"eva/loss_total": val_loss})
             wandb.log(metrics_tracklet_succ)
             wandb.log({"Mask": [wandb.Image(target_overlay_grid_mask, caption="GT"),
                                 wandb.Image(pred_overlay_grid_mask, caption="Pred")]})
@@ -565,16 +568,19 @@ def main():
     # -------  Model, optimizer and data initialization ------
     if opt.target == "full":
         num_in_channels = 3  # rgb
+        num_out_channels = 3  # drivable, angles
     elif opt.target == "successor":
         if opt.full_checkpoint is not None:
             num_in_channels = 9  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
         else:
             num_in_channels = 6  # rgb, pos_encoding
+        num_out_channels = 1  # drivable
     else:
         raise ValueError("Unknown target")
+
     model = DeepLabv3Plus(models.resnet101(pretrained=True),
                           num_in_channels=num_in_channels,
-                          num_classes=1).to(params.model.device)
+                          num_classes=num_out_channels).to(params.model.device)
 
     model_full = None
     if opt.full_checkpoint is not None:
@@ -611,8 +617,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '0903', "austin", "train", "*")
-    val_path = os.path.join(params.paths.dataroot, '0903', "austin", "val", "*")
+    train_path = os.path.join(params.paths.dataroot, '1303', "austin", "train", "*")
+    val_path = os.path.join(params.paths.dataroot, '1303', "austin", "val", "*")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5, frac_straight=0.5)
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val', frac_branch=0.5, frac_straight=0.5)
