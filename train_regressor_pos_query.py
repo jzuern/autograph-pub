@@ -171,8 +171,8 @@ class Trainer():
 
 
                 loss_dict = {
-                    'loss_drivable': torch.nn.BCELoss()(pred_drivable, target_drivable),
-                    'loss_angles': torch.nn.MSELoss()(pred_angles, target_angles),
+                    'train/loss_drivable': torch.nn.BCELoss()(pred_drivable, target_drivable),
+                    'train/loss_angles': torch.nn.MSELoss()(pred_angles, target_angles),
                 }
 
                 loss_total = sum(loss_dict.values())
@@ -193,7 +193,7 @@ class Trainer():
                 pred_succ = torch.nn.Sigmoid()(pred_succ[:, 0, :, :])
 
                 loss_dict = {
-                    'loss_succ': torch.nn.BCELoss()(pred_succ, target_succ),
+                    'train/loss_succ': torch.nn.BCELoss()(pred_succ, target_succ),
                 }
 
                 loss_total = sum(loss_dict.values())
@@ -350,7 +350,7 @@ class Trainer():
 
         # Do logging
         if not self.params.main.disable_wandb:
-            wandb.log({"val/loss_total": val_loss})
+            wandb.log({"eval/loss_total": val_loss})
             wandb.log(metrics_tracklet_drivable)
             wandb.log(metrics_gt_drivable)
             wandb.log({"Mask": [wandb.Image(target_overlay_grid_mask, caption="GT"),
@@ -449,7 +449,7 @@ class Trainer():
 
         # Do logging
         if not self.params.main.disable_wandb:
-            wandb.log({"eva/loss_total": val_loss})
+            wandb.log({"eval/loss_total": val_loss})
             wandb.log(metrics_tracklet_succ)
             wandb.log({"Mask": [wandb.Image(target_overlay_grid_mask, caption="GT"),
                                 wandb.Image(pred_overlay_grid_mask, caption="Pred")]})

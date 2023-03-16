@@ -16,8 +16,8 @@ from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_ang
 
 
 class AngleColorizer:
-    def __init__(self, color_map=cv2.COLORMAP_HSV):
-        self.color_map = color_map
+    def __init__(self):
+        pass
 
     def safety_check(self, angle):
         if angle.min() < 0 or angle.max() > 2 * np.pi:

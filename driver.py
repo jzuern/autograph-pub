@@ -4,12 +4,19 @@ from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 from collections import OrderedDict
 import torchvision.models as models
 import numpy as np
-from pynput.keyboard import Key, Listener
+from pynput.keyboard import Key, Listener, Controller
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
 import matplotlib.pyplot as plt
 from skimage.morphology import skeletonize
 from aggregation.utils import AngleColorizer
+import sknw
+import networkx as nx
+import time
+
+
+keyboard = Controller()
+
 
 def colorize(mask):
 
@@ -23,30 +30,20 @@ def colorize(mask):
     return mask
 
 
-# # cv2 callback function for clicking on image
-# def click_aggregation(event, x, y, flags, param):
-#     if event == cv2.EVENT_LBUTTONDOWN:
-#         q = [y, x]
-#
-#
-#
-# cv2.namedWindow("pred_sdf_viz")
-# cv2.setMouseCallback("pred_sdf_viz", click_aggregation)
-# cv2.waitKey(-1)
-#
-#
-
 
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
-        self.init_pose = np.array([ 1906.9, 3086.0, -3.23])
+        self.init_pose = np.array([1691.8, 2279.5, 1.05])
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
+
         self.crop_shape = (256, 256)
-        #self.crop_shape = (512, 512)
+
         self.canvas_log_odds = None
+        self.canvas_angles = None
+
         self.pose_history = np.array([self.pose])
         self.ac = AngleColorizer()
 
@@ -79,15 +76,22 @@ class SatelliteDriver(object):
 
     def load_satellite(self, path):
         print("Loading satellite...")
-        self.satellite = np.asarray(Image.open(path)).astype(np.uint8)
-        self.satellite = cv2.cvtColor(self.satellite, cv2.COLOR_BGR2RGB)
+        # self.satellite = np.asarray(Image.open(path)).astype(np.uint8)
+        # self.satellite = cv2.cvtColor(self.satellite, cv2.COLOR_BGR2RGB)
 
-        # Crop
-        top_left = [36000, 26000]  # vertical, horizontal
-        delta = [5000, 5000]
-        self.satellite = self.satellite[top_left[0]:top_left[0] + delta[0], top_left[1]:top_left[1] + delta[1], :]
+        # # Crop
+        # top_left = [36000, 26000]  # vertical, horizontal
+        # delta = [3000, 3000]
+        # self.satellite = self.satellite[top_left[0]:top_left[0] + delta[0], top_left[1]:top_left[1] + delta[1], :]
+        #
+        #
+        # cv2.imwrite("satellite.png", cv2.cvtColor(self.satellite, cv2.COLOR_BGR2RGB))
+        # exit()
+        self.satellite = np.asarray(Image.open("satellite.png")).astype(np.uint8)
+
 
         self.canvas_log_odds = np.ones([self.satellite.shape[0], self.satellite.shape[1]], dtype=np.float32)
+        self.canvas_angles = np.zeros([self.satellite.shape[0], self.satellite.shape[1], 3], dtype=np.uint8)
 
         print("Satellite loaded")
 
@@ -141,21 +145,46 @@ class SatelliteDriver(object):
         skeleton[: , :N] = 0
         skeleton[:, -N:] = 0
 
-        skeleton = skeleton.astype(np.uint8) * 255
-        skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
-        skeleton = (skeleton / 255.0).astype(np.float32)
-
-
 
         return skeleton
 
 
+    def pose_to_transform_1(self):
+
+        x, y, yaw = self.pose
+
+        csize = self.crop_shape[0]
+        csize_half = csize // 2
+
+        # For bottom centered
+        src_pts = np.array([[-csize_half, 0],
+                            [-csize_half, -csize+1],
+                            [csize_half-1, -csize+1],
+                            [csize_half-1, 0]])
+
+        R = np.array([[np.cos(yaw), -np.sin(yaw)],
+                      [np.sin(yaw), np.cos(yaw)]])
+
+        center = np.array([csize, csize])
+
+        # Rotate source points
+        src_pts = (np.matmul(R, src_pts.T).T + center).astype(np.float32)
+
+        # Destination points are simply the corner points
+        dst_pts = np.array([[0, csize - 1],
+                            [0, 0],
+                            [csize - 1, 0],
+                            [csize - 1, csize - 1]],
+                           dtype="float32")
+
+        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+
+        return M
+
+    def pose_to_transform_2(self):
 
 
-    def add_pred_to_canvas(self, pred, pose):
-
-
-        x, y, yaw = pose
+        x, y, yaw = self.pose
 
         csize = self.crop_shape[0]
         half_csize = csize // 2
@@ -183,6 +212,15 @@ class SatelliteDriver(object):
 
         M = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
+        return M
+
+
+
+
+    def add_pred_to_canvas(self, pred):
+
+        M = self.pose_to_transform_2()
+
         pred_roi = (np.ones_like(pred) * 255).astype(np.uint8)
 
         warped_pred = cv2.warpPerspective(pred, M,
@@ -203,19 +241,19 @@ class SatelliteDriver(object):
         self.canvas_log_odds += warped_pred
 
         # resize to smaller
-        df = self.canvas_log_odds.shape[0] / 1000
-        img1 = cv2.resize(colorize(self.canvas_log_odds), (1000, 1000))
-        img2 = cv2.resize(self.satellite, (1000, 1000))
+        df = self.canvas_log_odds.shape[0] / 1500
+        img1 = cv2.resize(colorize(self.canvas_log_odds), (1500, 1500))
+        img2 = cv2.resize(self.satellite, (1500, 1500))
         canvas_viz = cv2.addWeighted(img1, 0.5, img2, 0.5, 0)
 
         for i in range(1, len(self.pose_history)-1):
             x_0, y_0, _ = self.pose_history[i-1]
             x_1, y_1, _ = self.pose_history[i]
 
-            x_0 -= csize
-            x_1 -= csize
-            y_0 -= csize
-            y_1 -= csize
+            x_0 -= self.crop_shape[0]
+            x_1 -= self.crop_shape[0]
+            y_0 -= self.crop_shape[0]
+            y_1 -= self.crop_shape[0]
 
             x_0 = int(x_0 / df)
             x_1 = int(x_1 / df)
@@ -224,15 +262,15 @@ class SatelliteDriver(object):
 
             cv2.line(canvas_viz, (x_0, y_0), (x_1, y_1), (0, 145, 0), 1, cv2.LINE_AA)
 
-        cv2.imshow("Aggregation", canvas_viz)
+        # cv2.imshow("Aggregation", canvas_viz)
 
 
 
         # also visualize the canvas around current pose
         width = 500
         x_1, y_1, _ = self.pose_history[-1]
-        x_1 -= csize
-        y_1 -= csize
+        x_1 -= self.crop_shape[0]
+        y_1 -= self.crop_shape[0]
         x_1 = int(x_1)
         y_1 = int(y_1)
 
@@ -268,39 +306,16 @@ class SatelliteDriver(object):
 
     def crop_satellite_at_pose(self, pose):
 
+        M = self.pose_to_transform_1()
         x, y, yaw = pose
 
-        csize = self.crop_shape[0]
-        csize_half = csize // 2
-
-        satellite_image = self.satellite[int(y - csize * 2): int(y + csize * 2),
-                          int(x - csize * 2): int(x + csize * 2)].copy()
-
-        # For bottom centered
-        src_pts = np.array([[-csize_half, 0],
-                            [-csize_half, -csize+1],
-                            [csize_half-1, -csize+1],
-                            [csize_half-1, 0]])
-
-        R = np.array([[np.cos(yaw), -np.sin(yaw)],
-                      [np.sin(yaw), np.cos(yaw)]])
-
-        center = np.array([csize, csize])
-
-        # Rotate source points
-        src_pts = (np.matmul(R, src_pts.T).T + center).astype(np.float32)
-
-        # Destination points are simply the corner points
-        dst_pts = np.array([[0, csize - 1],
-                            [0, 0],
-                            [csize - 1, 0],
-                            [csize - 1, csize - 1]],
-                           dtype="float32")
-
-        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+        satellite_image = self.satellite[int(y - self.crop_shape[0] * 2): int(y + self.crop_shape[0] * 2),
+                                         int(x - self.crop_shape[0] * 2): int(x + self.crop_shape[0] * 2)].copy()
 
         try:
-            rgb = cv2.warpPerspective(satellite_image, M, (csize, csize), cv2.INTER_LINEAR, borderMode=cv2.BORDER_TRANSPARENT)
+            rgb = cv2.warpPerspective(satellite_image, M, (self.crop_shape[0], self.crop_shape[1]),
+                                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_TRANSPARENT)
+
         except:
             print("Error in warpPerspective. Resetting position")
             self.pose = self.init_pose
@@ -309,7 +324,186 @@ class SatelliteDriver(object):
         return rgb
 
 
-    def drive_step(self,key):
+    def skeleton_to_graph(self, skeleton, pred_angles, pred_succ):
+        """Convert skeleton to graph"""
+
+        # build graph from skeleton
+        graph = sknw.build_sknw(skeleton)
+
+        print("graph: ", graph.edges())
+
+
+        # add node positions
+        node_positions = np.array([graph.nodes[n]['o'] for n in graph.nodes()])
+
+        if len(node_positions) == 0:
+            return graph
+
+        start_node = np.argmin(np.linalg.norm(node_positions - np.array([255, 128]), axis=1))
+
+
+        # remove all edges that are not connected to closest node
+        connected = nx.node_connected_component(graph, start_node)  # nodes of component that contains node 0
+        graph.remove_nodes_from([n for n in graph if n not in connected])
+
+        # now let every edge face away from the closest node
+        edge_order = nx.dfs_edges(graph, source=start_node, depth_limit=None)
+        edge_order = list(edge_order)
+
+        for i, (s, e) in enumerate(edge_order):
+            graph[s][e]['pts'] = np.flip(graph[s][e]['pts'], axis=0)
+
+        # make Graph to DiGraph
+        graph = graph.to_directed()
+
+
+        graphviz = np.repeat(pred_succ[:, :, np.newaxis], 3, axis=2)
+
+        # draw edges by pts
+        for (s, e) in graph.edges():
+            ps = graph[s][e]['pts']
+            for i in range(len(ps) - 1):
+                cv2.arrowedLine(graphviz, (int(ps[i][1]), int(ps[i][0])), (int(ps[i + 1][1]), int(ps[i + 1][0])), (255, 0, 255), 1, cv2.LINE_AA)
+            cv2.arrowedLine(graphviz, (int(ps[0][1]), int(ps[0][0])), (int(ps[-1][1]), int(ps[-1][0])), (255, 0, 255), 1, cv2.LINE_AA)
+
+        # draw node by o
+        nodes = graph.nodes()
+        node_positions = np.array([nodes[i]['o'] for i in nodes])
+        [cv2.circle(graphviz, (int(p[1]), int(p[0])), 4, (0, 255, 0), -1) for p in node_positions]
+
+        cv2.imshow("graphviz", graphviz)
+
+
+        return graph
+
+
+    def add_graph_to_angle_canvas(self):
+
+        g = self.graph_skeleton
+
+        angle_canvas_cropped = np.zeros(self.crop_shape).astype(np.float32)
+        angle_indicator = np.zeros(self.crop_shape).astype(np.float32)
+
+        # fill angle canvas with graph g
+        for (s, e) in g.edges():
+            print(s, e)
+            edge_points = g[s][e]['pts']
+
+            for i in range(len(edge_points) - 1):
+                x1 = edge_points[i][1]
+                y1 = edge_points[i][0]
+                x2 = edge_points[i + 1][1]
+                y2 = edge_points[i + 1][0]
+                angle = np.arctan2(y2 - y1, x2 - x1) + np.pi
+                angle = angle + self.pose[2]
+                angle = angle % (2 * np.pi)
+                cv2.line(angle_canvas_cropped, (int(x1), int(y1)), (int(x2), int(y2)), angle, thickness=2)
+                cv2.line(angle_indicator, (int(x1), int(y1)), (int(x2), int(y2)), 1, thickness=2)
+
+        # plt.imshow(angle_canvas_cropped)
+        # plt.show()
+
+        # angle_canvas_cropped = angle_canvas_cropped % (2 * np.pi)
+
+        M = self.pose_to_transform_2()
+
+        angle_canvas_cropped_c = self.ac.angle_to_color(angle_canvas_cropped)
+        angle_canvas_cropped_c = angle_canvas_cropped_c * np.expand_dims(angle_indicator, axis=2)
+
+        cv2.imshow("angles_colorized", angle_canvas_cropped_c)
+
+        warped_angles = cv2.warpPerspective(angle_canvas_cropped_c, M,
+                                           (self.canvas_angles.shape[0], self.canvas_angles.shape[1]),
+                                           cv2.INTER_LINEAR)
+
+        info_available = np.sum(warped_angles, axis=2) > 0
+
+        self.canvas_angles[info_available] = warped_angles[info_available]
+
+        # resize to smaller
+        img1 = cv2.resize(self.canvas_angles, (1500, 1500))
+        img2 = cv2.resize(self.satellite, (1500, 1500))
+        canvas_viz = cv2.addWeighted(img1, 0.5, img2, 0.5, 0)
+
+        cv2.imshow("Aggregation angles", canvas_viz)
+
+
+
+
+    def make_step(self):
+
+        """Run one step of the simulation"""
+
+        self.pose_history = np.concatenate([self.pose_history, [self.pose]])
+
+        pos_encoding = self.generate_pos_encoding()
+        rgb = self.crop_satellite_at_pose(self.pose)
+
+
+        rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
+        pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
+
+        if self.model_full is not None:
+            with torch.no_grad():
+                (pred, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
+                pred = torch.nn.functional.interpolate(pred,
+                                                       size=rgb_torch.shape[2:],
+                                                       mode='bilinear',
+                                                       align_corners=True)
+                pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
+                pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
+
+
+        in_tensor = torch.cat([rgb_torch, pos_encoding_torch, pred_drivable, pred_angles], dim=1)
+        in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
+
+        (pred_succ, features) = self.model_succ(in_tensor)
+        pred_succ = torch.nn.functional.interpolate(pred_succ,
+                                                    size=rgb_torch.shape[2:],
+                                                    mode='bilinear',
+                                                    align_corners=True)
+
+        pred_succ = torch.nn.Sigmoid()(pred_succ)
+        pred_succ = pred_succ[0, 0].cpu().detach().numpy()
+        pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
+
+        pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+        pred_angles_color = self.ac.angle_to_color(pred_angles)
+
+        skeleton = self.skeletonize_prediction(pred_succ, threshold=0.1)
+        self.graph_skeleton = self.skeleton_to_graph(skeleton, pred_angles, pred_succ)
+
+        # make skeleton fatter
+        skeleton = skeleton.astype(np.uint8) * 255
+        skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
+        skeleton = (skeleton / 255.0).astype(np.float32)
+
+
+        # self.add_pred_to_canvas(sdf_succ, self.pose)
+        self.add_pred_to_canvas(skeleton)
+        self.add_graph_to_angle_canvas()
+
+        skeleton = (skeleton * 255).astype(np.uint8)
+        skeleton_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(skeleton, cv2.COLORMAP_MAGMA), 0.5, 0)
+        # cv2.imshow("skeleton", skeleton_viz)
+
+        pred_succ = (pred_succ * 255).astype(np.uint8)
+        pred_drivable = (pred_drivable * 255).astype(np.uint8)
+        pred_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
+        pred_drivable_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_drivable, cv2.COLORMAP_MAGMA), 0.5, 0)
+        pred_angles_color_viz = cv2.addWeighted(rgb, 0.5, pred_angles_color, 0.5, 0)
+
+        cv2.imshow("pred_succ", pred_succ_viz)
+        # cv2.imshow("pred_drivable", pred_drivable_viz)
+        # cv2.imshow("pred_angles_color", pred_angles_color_viz)
+        cv2.waitKey(1)
+
+
+
+
+    def drive_keyboard(self, key):
+
+        print("drive_step")
 
         print("Pose x, y, yaw: {:.1f}, {:.1f}, {:.2f}".format(self.pose[0], self.pose[1], self.pose[2]))
 
@@ -347,73 +541,59 @@ class SatelliteDriver(object):
             delta = s/2. * sideways_vector
             self.pose[0:2] -= np.array([delta[1], delta[0]])
 
-        self.pose_history = np.concatenate([self.pose_history, [self.pose]])
 
-        pos_encoding = self.generate_pos_encoding()
-        rgb = self.crop_satellite_at_pose(self.pose)
-
-        rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
-        pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
-
-        if self.model_full is not None:
-            with torch.no_grad():
-                (pred, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
-                pred = torch.nn.functional.interpolate(pred,
-                                                       size=rgb_torch.shape[2:],
-                                                       mode='bilinear',
-                                                       align_corners=True)
-                pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
-                pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
+        self.make_step()
 
 
-        in_tensor = torch.cat([rgb_torch, pos_encoding_torch, pred_drivable, pred_angles], dim=1)
-        in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
+    def drive_freely(self):
 
-        (pred_succ, features) = self.model_succ(in_tensor)
-        pred_succ = torch.nn.functional.interpolate(pred_succ,
-                                                    size=rgb_torch.shape[2:],
-                                                    mode='bilinear',
-                                                    align_corners=True)
+        try:
+            g = self.graph_skeleton
 
-        pred_succ = torch.nn.Sigmoid()(pred_succ)
-        pred_succ = pred_succ[0, 0].cpu().detach().numpy()
-        pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
+            # get split points where an edge has two successors
+            split_points = []
+            for node in g.nodes:
+                if len(list(g.successors(node))) > 1:
+                    split_points.append(node)
 
-        pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
-        pred_angles_color = self.ac.angle_to_color(pred_angles)
+            print("split points", split_points)
 
-        skeleton = self.skeletonize_prediction(pred_succ, threshold=0.1)
+        except Exception as e:
+            self.graph_skeleton = nx.DiGraph()
+            print(e)
+            # rotate left
 
-        # self.add_pred_to_canvas(sdf_succ, self.pose)
-        self.add_pred_to_canvas(skeleton, self.pose)
+            self.pose[2] -= 0.2
 
-        skeleton = (skeleton * 255).astype(np.uint8)
-        skeleton_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(skeleton, cv2.COLORMAP_MAGMA), 0.5, 0)
-        cv2.imshow("skeleton", skeleton_viz)
+        time.sleep(1)
+        self.make_step()
 
-        pred_succ = (pred_succ * 255).astype(np.uint8)
-        pred_drivable = (pred_drivable * 255).astype(np.uint8)
-        pred_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
-        pred_drivable_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_drivable, cv2.COLORMAP_MAGMA), 0.5, 0)
-        pred_angles_color_viz = cv2.addWeighted(rgb, 0.5, pred_angles_color, 0.5, 0)
 
-        cv2.imshow("pred_succ", pred_succ_viz)
-        cv2.imshow("pred_drivable", pred_drivable_viz)
-        cv2.imshow("pred_angles_color", pred_angles_color_viz)
-        cv2.waitKey(1)
+
 
 
 if __name__ == "__main__":
     driver = SatelliteDriver()
-    driver.load_model(model_path="/data/autograph/checkpoints/peach-bun-72/e-020.pth", type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/butterscotch-flan-74/e-050.pth", type="successor")
+    # driver.load_model(model_path="/data/autograph/checkpoints/peach-bun-72/e-020.pth", type="full")
+    # driver.load_model(model_path="/data/autograph/checkpoints/butterscotch-flan-74/e-050.pth", type="successor")
+
+    driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth", type="full")
+    driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-030.pth", type="successor")
+
 
     driver.load_satellite(path="/data/lanegraph/woven-data/Austin.png")
+
+
+    # while True:
+    #     driver.drive_freely()
+
+
 
     print("Press arrow keys to drive")
 
     def on_press(key):
-        driver.drive_step(key)
+        driver.drive_keyboard(key)
+
 
     def on_release(key):
         if key == Key.esc:
