@@ -114,7 +114,7 @@ class Cropper:
 
 
 # Smooth trajectories with a median filter
-def smooth_trajectory(traj, window_size):
+def smooth_trajectory(traj, window_size=5):
     """
     Smooths a 2D trajectory using a moving average filter.
 

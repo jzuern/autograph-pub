@@ -13,6 +13,8 @@ from aggregation.utils import AngleColorizer
 import sknw
 import networkx as nx
 import time
+import queue
+from aggregation.utils import smooth_trajectory
 
 
 keyboard = Controller()
@@ -34,7 +36,7 @@ def colorize(mask):
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
-        self.init_pose = np.array([1691.8, 2279.5, 1.05])
+        self.init_pose = np.array([1977.5, 2225.6, 1.45])
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
@@ -46,6 +48,9 @@ class SatelliteDriver(object):
 
         self.pose_history = np.array([self.pose])
         self.ac = AngleColorizer()
+
+        self.future_pose_queue = queue.Queue()
+        self.step = 0
 
     def load_model(self, model_path, type=None):
 
@@ -118,29 +123,8 @@ class SatelliteDriver(object):
         # then, skeletonize
         skeleton = skeletonize(pred_thrshld)
 
-        # # display results
-        # fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(8, 4),
-        #                          sharex=True, sharey=True)
-        #
-        # ax = axes.ravel()
-        #
-        # ax[0].imshow(pred, cmap=plt.cm.gray)
-        # ax[0].axis('off')
-        # ax[0].set_title('original', fontsize=20)
-        #
-        # ax[1].imshow(pred_thrshld, cmap=plt.cm.gray)
-        # ax[1].axis('off')
-        # ax[1].set_title('original', fontsize=20)
-        #
-        # ax[2].imshow(skeleton, cmap=plt.cm.gray)
-        # ax[2].axis('off')
-        # ax[2].set_title('skeleton', fontsize=20)
-
-        # fig.tight_layout()
-        # plt.show()
-
         # cut away top and sides by N pixels
-        N = 20
+        N = 30
         skeleton[:N,  :] = 0
         skeleton[: , :N] = 0
         skeleton[:, -N:] = 0
@@ -280,6 +264,7 @@ class SatelliteDriver(object):
         viz_roi = cv2.addWeighted(canvas_roi, 0.5, satellite_roi, 0.5, 0)
 
         cv2.imshow("Aggregation_cropped", viz_roi)
+        cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_Aggregation_cropped.png".format(self.step), viz_roi)
 
 
         # warped_log_odds = np.log(warped_pred / (1 - warped_pred))
@@ -321,6 +306,8 @@ class SatelliteDriver(object):
             self.pose = self.init_pose
             rgb = self.crop_satellite_at_pose(self.pose)
 
+        self.current_crop = rgb
+
         return rgb
 
 
@@ -330,8 +317,9 @@ class SatelliteDriver(object):
         # build graph from skeleton
         graph = sknw.build_sknw(skeleton)
 
-        print("graph: ", graph.edges())
-
+        # smooth edges
+        for (s, e) in graph.edges():
+            graph[s][e]['pts'] = smooth_trajectory(graph[s][e]['pts'])
 
         # add node positions
         node_positions = np.array([graph.nodes[n]['o'] for n in graph.nodes()])
@@ -339,22 +327,40 @@ class SatelliteDriver(object):
         if len(node_positions) == 0:
             return graph
 
-        start_node = np.argmin(np.linalg.norm(node_positions - np.array([255, 128]), axis=1))
-
+        start_node = np.argmin(np.linalg.norm(node_positions - np.array([128, 255]), axis=1))
 
         # remove all edges that are not connected to closest node
         connected = nx.node_connected_component(graph, start_node)  # nodes of component that contains node 0
         graph.remove_nodes_from([n for n in graph if n not in connected])
 
+        graph = graph.to_directed()
+
         # now let every edge face away from the closest node
         edge_order = nx.dfs_edges(graph, source=start_node, depth_limit=None)
         edge_order = list(edge_order)
 
-        for i, (s, e) in enumerate(edge_order):
-            graph[s][e]['pts'] = np.flip(graph[s][e]['pts'], axis=0)
+        # print("edge_order", edge_order)
+        # print("graph.edges()", graph.edges())
 
-        # make Graph to DiGraph
-        graph = graph.to_directed()
+        for i, (s, e) in enumerate(edge_order):
+            if graph.has_edge(s, e):
+                if graph.has_edge(e, s):
+                    graph[s][e]['pts'] = np.flip(graph[e][s]['pts'], axis=0)
+                    graph.remove_edge(e, s)
+
+        # print("graph.edges()", graph.edges())
+
+
+        fig, ax = plt.subplots()
+        ax.set_aspect('equal')
+        ax.imshow(self.current_crop)
+        for (s, e) in graph.edges():
+            ps = graph[s][e]['pts']
+            for i in range(len(ps) - 1):
+                ax.arrow(ps[i][1], ps[i][0], ps[i + 1][1] - ps[i][1], ps[i + 1][0] - ps[i][0], head_width=1, head_length=1, fc='g', ec='g')
+            ax.arrow(ps[0][1], ps[0][0], ps[-1][1] - ps[0][1], ps[-1][0] - ps[0][0], head_width=5, head_length=5, fc='k', ec='k')
+        plt.scatter(node_positions[:, 1], node_positions[:, 0], c='r')
+        plt.show()
 
 
         graphviz = np.repeat(pred_succ[:, :, np.newaxis], 3, axis=2)
@@ -366,12 +372,13 @@ class SatelliteDriver(object):
                 cv2.arrowedLine(graphviz, (int(ps[i][1]), int(ps[i][0])), (int(ps[i + 1][1]), int(ps[i + 1][0])), (255, 0, 255), 1, cv2.LINE_AA)
             cv2.arrowedLine(graphviz, (int(ps[0][1]), int(ps[0][0])), (int(ps[-1][1]), int(ps[-1][0])), (255, 0, 255), 1, cv2.LINE_AA)
 
-        # draw node by o
+        # draw nodes
         nodes = graph.nodes()
         node_positions = np.array([nodes[i]['o'] for i in nodes])
         [cv2.circle(graphviz, (int(p[1]), int(p[0])), 4, (0, 255, 0), -1) for p in node_positions]
 
         cv2.imshow("graphviz", graphviz)
+        cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_graphviz.png".format(self.step), graphviz)
 
 
         return graph
@@ -428,8 +435,6 @@ class SatelliteDriver(object):
         cv2.imshow("Aggregation angles", canvas_viz)
 
 
-
-
     def make_step(self):
 
         """Run one step of the simulation"""
@@ -438,7 +443,6 @@ class SatelliteDriver(object):
 
         pos_encoding = self.generate_pos_encoding()
         rgb = self.crop_satellite_at_pose(self.pose)
-
 
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
         pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
@@ -483,20 +487,25 @@ class SatelliteDriver(object):
         self.add_pred_to_canvas(skeleton)
         self.add_graph_to_angle_canvas()
 
-        skeleton = (skeleton * 255).astype(np.uint8)
-        skeleton_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(skeleton, cv2.COLORMAP_MAGMA), 0.5, 0)
+        # skeleton = (skeleton * 255).astype(np.uint8)
+        # skeleton_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(skeleton, cv2.COLORMAP_MAGMA), 0.5, 0)
         # cv2.imshow("skeleton", skeleton_viz)
 
         pred_succ = (pred_succ * 255).astype(np.uint8)
         pred_drivable = (pred_drivable * 255).astype(np.uint8)
         pred_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
-        pred_drivable_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_drivable, cv2.COLORMAP_MAGMA), 0.5, 0)
-        pred_angles_color_viz = cv2.addWeighted(rgb, 0.5, pred_angles_color, 0.5, 0)
+        # pred_drivable_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_drivable, cv2.COLORMAP_MAGMA), 0.5, 0)
+        # pred_angles_color_viz = cv2.addWeighted(rgb, 0.5, pred_angles_color, 0.5, 0)
 
         cv2.imshow("pred_succ", pred_succ_viz)
+        cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_pred_succ_viz.png".format(self.step), pred_succ_viz)
+
+
         # cv2.imshow("pred_drivable", pred_drivable_viz)
         # cv2.imshow("pred_angles_color", pred_angles_color_viz)
         cv2.waitKey(1)
+
+        self.step += 1
 
 
 
@@ -547,23 +556,67 @@ class SatelliteDriver(object):
 
     def drive_freely(self):
 
+        print("Current pose: {:.0f}, {:.0f}, {:.1f}".format(self.pose[0], self.pose[1], self.pose[2]))
+
         try:
             g = self.graph_skeleton
 
-            # get split points where an edge has two successors
-            split_points = []
-            for node in g.nodes:
-                if len(list(g.successors(node))) > 1:
-                    split_points.append(node)
 
-            print("split points", split_points)
+            # get split points where an edge has two successors
+            successor_points = []
+            for node in g.nodes:
+                if len(list(g.successors(node))) >= 1:
+                    successor_points.append(node)
+
+            for successor_point in successor_points:
+                succ = list(g.successors(successor_point))
+
+                succ_edges = []
+                for successor in succ:
+                    succ_edges.append(g.edges[successor_point, successor])
+
+                # get angles
+                for edge in succ_edges:
+                    start_idx = 0
+                    end_idx = 10
+
+                    vector_start = np.array([edge["pts"][start_idx][0], edge["pts"][start_idx][1]])
+                    vector_end = np.array([edge["pts"][end_idx][0], edge["pts"][end_idx][1]])
+                    vector = vector_end - vector_start
+
+                    angle = np.arctan2(vector[1], vector[0]) + np.pi
+                    print(angle)
+
+                    # convert to global coordinates
+                    pose_global = np.zeros(3)
+                    pose_global[0:2] = self.pose[0:2] + np.cos(self.pose[2]) * vector + np.sin(self.pose[2]) * vector
+                    pose_global[2] = self.pose[2] - angle
+
+                    self.future_pose_queue.put(pose_global)
+                    print("put pose in queue: {:.0f}, {:.0f}, {:.1f}".format(pose_global[0], pose_global[1], pose_global[2]))
+
+            if self.future_pose_queue.empty():
+                print("future_pose_queue empty. Exiting.")
+                self.future_pose_queue.put(self.pose)
+                exit()
+            else:
+                self.pose = self.future_pose_queue.get()
+                print("get pose from queue: {:.0f}, {:.0f}, {:.1f}".format(self.pose[0], self.pose[1], self.pose[2]))
 
         except Exception as e:
-            self.graph_skeleton = nx.DiGraph()
             print(e)
+            self.graph_skeleton = nx.DiGraph()
             # rotate left
 
-            self.pose[2] -= 0.2
+            # self.pose[2] -= 0.2
+
+
+
+        if self.pose[2] > 2 * np.pi:
+            self.pose[2] -= 2 * np.pi
+        if self.pose[2] < -2 * np.pi:
+            self.pose[2] += 2 * np.pi
+
 
         time.sleep(1)
         self.make_step()
@@ -584,9 +637,8 @@ if __name__ == "__main__":
     driver.load_satellite(path="/data/lanegraph/woven-data/Austin.png")
 
 
-    # while True:
-    #     driver.drive_freely()
-
+    while True:
+        driver.drive_freely()
 
 
     print("Press arrow keys to drive")
