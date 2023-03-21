@@ -1008,7 +1008,7 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
 
         for i_query, q in enumerate(query_points):
 
-            print("{}/{}-{}".format(out_path, sample_id, i_query))
+            #print("{}/{}-{}".format(out_path, sample_id, i_query))
 
             succ_traj, mask_total, mask_angle_colorized, sat_image_viz = merge_successor_trajectories(q, trajectories, annots_ped, sat_image_crop)
 
@@ -1057,7 +1057,7 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
             pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
             sample_num += 1
-            print("-------------\nSaving to {}/{}/{}-{} | Sample {} / {}".format(out_path, sample_type, sample_id, i_query, sample_num, max_num_samples))
+            print("---- TID: {}/{}: Saving to {}/{}/{}-{} | Sample {} / {}".format(args.thread_id, args.num_parallel, out_path, sample_type, sample_id, i_query, sample_num, max_num_samples))
 
             Image.fromarray(pos_encoding).save("{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
             Image.fromarray(sat_image_crop).save("{}/{}/{}-{}-rgb.png".format(out_path, sample_type, sample_id, i_query))
@@ -1083,6 +1083,10 @@ if __name__ == "__main__":
     parser.add_argument("--max_num_samples", type=int, default=100, help="Number of samples to generate per city")
     parser.add_argument("--crop_size", type=int, default=512, help="Size of the BEV image crop")
     parser.add_argument("--query_points", type=str, default=None, choices=[None, "ego", "random"])
+
+    parser.add_argument("--thread_id", type=int, default=0, help="ID of thread from 1 to num_parallel")
+    parser.add_argument("--num_parallel", type=int, default=1, help="Number of parallel parsing processes")
+
     args = parser.parse_args()
 
     print("Parsing config:", args)
@@ -1116,12 +1120,12 @@ if __name__ == "__main__":
 
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
-
     drivable_gt = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_drivable.png".format(city_name)))).astype(np.uint8)
-    drivable_gt[drivable_gt > 1] = 255
+    #intersection_gt = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_intersections.png".format(city_name)))).astype(np.uint8)
+    intersection_gt = None
 
-    intersection_gt = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_intersections.png".format(city_name)))).astype(np.uint8)
-    intersection_gt[intersection_gt > 1] = 255
+    drivable_gt[drivable_gt > 1] = 255
+    #intersection_gt[intersection_gt > 1] = 255
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
 
@@ -1277,16 +1281,23 @@ if __name__ == "__main__":
     trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
     trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
 
-    if city_name == "Austin":
-        # y_min_cut = 17000
-        y_min_cut = 0
-        y_max_cut = 52000
+    if args.thread_id > 0:
+        num_y_pixels = sat_image_.shape[0]
+        y_min_cut = int(num_y_pixels * float(args.thread_id + 0) / args.num_parallel)
+        y_max_cut = int(num_y_pixels * float(args.thread_id + 1) / args.num_parallel)
+
         sat_image_ = np.ascontiguousarray(sat_image_[y_min_cut:y_max_cut, :, :])
         drivable_gt = np.ascontiguousarray(drivable_gt[y_min_cut:y_max_cut, :])
-        intersection_gt = np.ascontiguousarray(intersection_gt[y_min_cut:y_max_cut, :])
+        #intersection_gt = np.ascontiguousarray(intersection_gt[y_min_cut:y_max_cut, :])
+
+        print(sat_image_.shape)
 
         trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
         trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
+
+    # save memory
+    del intersection_gt
+    intersection_gt = None
 
 
     viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
@@ -1335,20 +1346,3 @@ if __name__ == "__main__":
                             args.max_num_samples,
                             crop_size=args.crop_size,
                             )
-    # else:
-    #     arguments = zip(repeat(city_name),
-    #                     repeat(args.source),
-    #                     repeat(trajectories_),
-    #                     repeat(trajectories_ped_),
-    #                     repeat(lanes_),
-    #                     repeat(sat_image_),
-    #                     repeat(tracklets_image),
-    #                     repeat(out_path_root),
-    #                     repeat(args.max_num_samples),
-    #                     )
-    #
-    #
-    #     Pool(num_cpus).starmap(process_chunk_final, arguments)
-
-
-
