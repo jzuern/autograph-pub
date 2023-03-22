@@ -762,3 +762,40 @@ def resample_trajectory(trajectory, dist=5):
             new_trajectory.append(trajectory[i])
             curr_pos = trajectory[i]
     return np.array(new_trajectory)
+
+
+def mean_angle_abs_diff(x, y):
+    period = 2 * np.pi
+    diff = (x - y + period / 2) % period - period / 2
+    if diff > np.pi:
+        diff = diff - (2 * np.pi)  # shift (pi, 2*pi] to (-pi, 0]
+    return np.abs(diff)
+
+
+def similarity_check(pose, pose_list):
+    if len(pose_list) == 0:
+        return False
+    poslist = np.array(pose_list)[:,:2]
+    anglelist = np.array(pose_list)[:,2:]
+
+    euclidean_distances = cdist(pose[np.newaxis, 0:2], poslist, metric='euclidean')
+    angle_distances = cdist(pose[np.newaxis, 2:], anglelist, lambda u, v: mean_angle_abs_diff(u, v))
+
+    position_criterium = euclidean_distances < 10
+    angle_criterium = angle_distances < np.pi/4
+    criterium = position_criterium & angle_criterium
+
+    # Check criterium sum
+    if np.sum(criterium) > 0:
+        return True
+    else:
+        return False
+
+
+def out_of_bounds_check(pose, satellite_shape):
+    margin = 500
+
+    if pose[0] < margin or pose[0] > satellite_shape[1] - margin or pose[1] < margin or pose[1] > satellite_shape[0] - margin:
+        return True
+    else:
+        return False
