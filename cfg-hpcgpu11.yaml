@@ -7,6 +7,7 @@ paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
     dataroot: /home/zuern/datasets/autograph/
+    #dataroot: /tmp/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /home/zuern/self-supervised-graph/checkpoints/
     config_name: exp-11-01-23/* # name/city_name or name/*
@@ -28,7 +29,7 @@ model:
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
-    num_epochs: 150
+    num_epochs: 1000
     gnn_depth: 1
     # lane_mpnn
     map_feat_dim: 64
