@@ -13,9 +13,7 @@ from aggregation.utils import AngleColorizer
 import sknw
 import networkx as nx
 import time
-import queue
-from aggregation.utils import smooth_trajectory
-
+from aggregation.utils import smooth_trajectory, similarity_check, out_of_bounds_check
 
 keyboard = Controller()
 
@@ -32,11 +30,10 @@ def colorize(mask):
     return mask
 
 
-
 class SatelliteDriver(object):
     def __init__(self):
         self.satellite = None
-        self.init_pose = np.array([1977.5, 2225.6, 1.45])
+        self.init_pose = np.array([1600, 2641, 2*np.pi*0.98])
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
@@ -49,8 +46,10 @@ class SatelliteDriver(object):
         self.pose_history = np.array([self.pose])
         self.ac = AngleColorizer()
 
-        self.future_pose_queue = queue.Queue()
+        self.future_poses = []
         self.step = 0
+        self.graph_skeleton = None
+
 
     def load_model(self, model_path, type=None):
 
@@ -149,7 +148,7 @@ class SatelliteDriver(object):
         R = np.array([[np.cos(yaw), -np.sin(yaw)],
                       [np.sin(yaw), np.cos(yaw)]])
 
-        center = np.array([csize, csize])
+        center = np.array([x, y])
 
         # Rotate source points
         src_pts = (np.matmul(R, src_pts.T).T + center).astype(np.float32)
@@ -165,45 +164,10 @@ class SatelliteDriver(object):
 
         return M
 
-    def pose_to_transform_2(self):
-
-
-        x, y, yaw = self.pose
-
-        csize = self.crop_shape[0]
-        half_csize = csize // 2
-
-        # For bottom centered
-        dst_pts = np.array([[-half_csize, 0],
-                            [-half_csize, -csize+1],
-                            [half_csize-1, -csize+1],
-                            [half_csize-1, 0]])
-
-        R = np.array([[np.cos(yaw), -np.sin(yaw)],
-                      [np.sin(yaw), np.cos(yaw)]])
-
-        center = np.array([x, y]) - np.array([csize, csize])
-
-        # Rotate dst points
-        dst_pts = (np.matmul(R, dst_pts.T).T + center).astype(np.float32)
-
-        # source points are simply the corner points
-        src_pts = np.array([[0, csize - 1],
-                            [0, 0],
-                            [csize - 1, 0],
-                            [csize - 1, csize - 1]],
-                           dtype="float32")
-
-        M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-
-        return M
-
-
-
 
     def add_pred_to_canvas(self, pred):
 
-        M = self.pose_to_transform_2()
+        M = np.linalg.inv(self.pose_to_transform_1())
 
         pred_roi = (np.ones_like(pred) * 255).astype(np.uint8)
 
@@ -251,14 +215,12 @@ class SatelliteDriver(object):
 
 
         # also visualize the canvas around current pose
-        width = 500
+        width = 800
         x_1, y_1, _ = self.pose_history[-1]
-        x_1 -= self.crop_shape[0]
-        y_1 -= self.crop_shape[0]
         x_1 = int(x_1)
         y_1 = int(y_1)
 
-        canvas_roi = self.canvas_log_odds[y_1 - width//2 : y_1+width//2, x_1-width//2 : x_1+width//2]
+        canvas_roi = self.canvas_log_odds[y_1 - width//2:y_1+width//2, x_1-width//2 : x_1+width//2]
         canvas_roi = colorize(canvas_roi)
         satellite_roi = self.satellite[y_1 - width//2 : y_1+width//2, x_1-width//2 : x_1+width//2, :]
         viz_roi = cv2.addWeighted(canvas_roi, 0.5, satellite_roi, 0.5, 0)
@@ -292,10 +254,7 @@ class SatelliteDriver(object):
     def crop_satellite_at_pose(self, pose):
 
         M = self.pose_to_transform_1()
-        x, y, yaw = pose
-
-        satellite_image = self.satellite[int(y - self.crop_shape[0] * 2): int(y + self.crop_shape[0] * 2),
-                                         int(x - self.crop_shape[0] * 2): int(x + self.crop_shape[0] * 2)].copy()
+        satellite_image = self.satellite.copy()
 
         try:
             rgb = cv2.warpPerspective(satellite_image, M, (self.crop_shape[0], self.crop_shape[1]),
@@ -351,16 +310,16 @@ class SatelliteDriver(object):
         # print("graph.edges()", graph.edges())
 
 
-        fig, ax = plt.subplots()
-        ax.set_aspect('equal')
-        ax.imshow(self.current_crop)
-        for (s, e) in graph.edges():
-            ps = graph[s][e]['pts']
-            for i in range(len(ps) - 1):
-                ax.arrow(ps[i][1], ps[i][0], ps[i + 1][1] - ps[i][1], ps[i + 1][0] - ps[i][0], head_width=1, head_length=1, fc='g', ec='g')
-            ax.arrow(ps[0][1], ps[0][0], ps[-1][1] - ps[0][1], ps[-1][0] - ps[0][0], head_width=5, head_length=5, fc='k', ec='k')
-        plt.scatter(node_positions[:, 1], node_positions[:, 0], c='r')
-        plt.show()
+        # fig, ax = plt.subplots()
+        # ax.set_aspect('equal')
+        # ax.imshow(self.current_crop)
+        # for (s, e) in graph.edges():
+        #     ps = graph[s][e]['pts']
+        #     for i in range(len(ps) - 1):
+        #         ax.arrow(ps[i][1], ps[i][0], ps[i + 1][1] - ps[i][1], ps[i + 1][0] - ps[i][0], head_width=1, head_length=1, fc='g', ec='g')
+        #     ax.arrow(ps[0][1], ps[0][0], ps[-1][1] - ps[0][1], ps[-1][0] - ps[0][0], head_width=5, head_length=5, fc='k', ec='k')
+        # plt.scatter(node_positions[:, 1], node_positions[:, 0], c='r')
+        # plt.show()
 
 
         graphviz = np.repeat(pred_succ[:, :, np.newaxis], 3, axis=2)
@@ -377,11 +336,12 @@ class SatelliteDriver(object):
         node_positions = np.array([nodes[i]['o'] for i in nodes])
         [cv2.circle(graphviz, (int(p[1]), int(p[0])), 4, (0, 255, 0), -1) for p in node_positions]
 
-        cv2.imshow("graphviz", graphviz)
-        cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_graphviz.png".format(self.step), graphviz)
+        # cv2.imshow("graphviz", graphviz)
+        # cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_graphviz.png".format(self.step), graphviz)
 
 
         return graph
+
 
 
     def add_graph_to_angle_canvas(self):
@@ -393,7 +353,6 @@ class SatelliteDriver(object):
 
         # fill angle canvas with graph g
         for (s, e) in g.edges():
-            print(s, e)
             edge_points = g[s][e]['pts']
 
             for i in range(len(edge_points) - 1):
@@ -412,12 +371,12 @@ class SatelliteDriver(object):
 
         # angle_canvas_cropped = angle_canvas_cropped % (2 * np.pi)
 
-        M = self.pose_to_transform_2()
+        M = np.linalg.inv(self.pose_to_transform_1())
 
         angle_canvas_cropped_c = self.ac.angle_to_color(angle_canvas_cropped)
         angle_canvas_cropped_c = angle_canvas_cropped_c * np.expand_dims(angle_indicator, axis=2)
 
-        cv2.imshow("angles_colorized", angle_canvas_cropped_c)
+        # cv2.imshow("angles_colorized", angle_canvas_cropped_c)
 
         warped_angles = cv2.warpPerspective(angle_canvas_cropped_c, M,
                                            (self.canvas_angles.shape[0], self.canvas_angles.shape[1]),
@@ -428,16 +387,61 @@ class SatelliteDriver(object):
         self.canvas_angles[info_available] = warped_angles[info_available]
 
         # resize to smaller
-        img1 = cv2.resize(self.canvas_angles, (1500, 1500))
-        img2 = cv2.resize(self.satellite, (1500, 1500))
+        img1 = cv2.resize(self.canvas_angles, (1000, 1000))
+        img2 = cv2.resize(self.satellite, (1000, 1000))
         canvas_viz = cv2.addWeighted(img1, 0.5, img2, 0.5, 0)
 
         cv2.imshow("Aggregation angles", canvas_viz)
 
 
+    def render_poses_in_aerial(self):
+        rgb_pose_viz = self.satellite.copy()
+        arrow_len = 60
+
+        for pose in self.pose_history:
+            # render pose as arrow
+            y = pose[0]
+            x = pose[1]
+            theta = pose[2]
+            x2 = x - arrow_len * np.cos(theta)
+            y2 = y + arrow_len * np.sin(theta)
+            cv2.arrowedLine(rgb_pose_viz, (int(y), int(x)), (int(y2), int(x2)), (255, 0, 0), 1, cv2.LINE_AA)
+
+        for pose in self.future_poses:
+            # render pose as arrow
+            y = pose[0]
+            x = pose[1]
+            theta = pose[2]
+            x2 = x - arrow_len * np.cos(theta)
+            y2 = y + arrow_len * np.sin(theta)
+            cv2.arrowedLine(rgb_pose_viz, (int(y), int(x)), (int(y2), int(x2)), (255, 255, 0), 1, cv2.LINE_AA)
+
+
+        # crop around ego pose
+        x = int(self.pose[0])
+        y = int(self.pose[1])
+
+        x1 = x - 500
+        x2 = x + 500
+        y1 = y - 500
+        y2 = y + 500
+
+        # fig, ax = plt.subplots()
+        # plt.imshow(rgb_pose_viz)
+        # ax.set_xlim([x1, x2])
+        # ax.set_ylim([y2, y1])
+        # plt.show()
+
+        rgb_pose_viz = rgb_pose_viz[y1:y2, x1:x2]
+
+
+        # cv2.imshow("rgb_pose_viz", rgb_pose_viz)
+        cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_rgb_pose_viz.png".format(self.step), rgb_pose_viz)
+
+
     def make_step(self):
 
-        """Run one step of the simulation"""
+        """Run one step of the driving loop."""
 
         self.pose_history = np.concatenate([self.pose_history, [self.pose]])
 
@@ -497,16 +501,21 @@ class SatelliteDriver(object):
         # pred_drivable_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_drivable, cv2.COLORMAP_MAGMA), 0.5, 0)
         # pred_angles_color_viz = cv2.addWeighted(rgb, 0.5, pred_angles_color, 0.5, 0)
 
-        cv2.imshow("pred_succ", pred_succ_viz)
+        # cv2.imshow("pred_succ", pred_succ_viz)
         cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_pred_succ_viz.png".format(self.step), pred_succ_viz)
 
 
         # cv2.imshow("pred_drivable", pred_drivable_viz)
         # cv2.imshow("pred_angles_color", pred_angles_color_viz)
-        cv2.waitKey(1)
 
         self.step += 1
 
+    def yaw_check(self, yaw):
+        if yaw > 2 * np.pi:
+            yaw -= 2 * np.pi
+        if yaw < 0:
+            yaw += 2 * np.pi
+        return yaw
 
 
 
@@ -550,108 +559,120 @@ class SatelliteDriver(object):
             delta = s/2. * sideways_vector
             self.pose[0:2] -= np.array([delta[1], delta[0]])
 
-
         self.make_step()
-
 
     def drive_freely(self):
 
         print("Current pose: {:.0f}, {:.0f}, {:.1f}".format(self.pose[0], self.pose[1], self.pose[2]))
 
-        try:
-            g = self.graph_skeleton
+        if self.graph_skeleton is None:
+            self.make_step()
+            return
 
+        g = self.graph_skeleton
+        successor_points = []
+        for node in g.nodes:
+            if len(list(g.successors(node))) >= 1:
+                successor_points.append(node)
 
-            # get split points where an edge has two successors
-            successor_points = []
-            for node in g.nodes:
-                if len(list(g.successors(node))) >= 1:
-                    successor_points.append(node)
+        succ_edges = []
+        for successor_point in successor_points:
+            succ = list(g.successors(successor_point))
+            for successor in succ:
+                succ_edges.append(g.edges[successor_point, successor])
 
-            for successor_point in successor_points:
-                succ = list(g.successors(successor_point))
+        print("checking {} edges".format(len(succ_edges)))
+        for edge in succ_edges:
+            start_idx = 10
+            end_idx = 40
 
-                succ_edges = []
-                for successor in succ:
-                    succ_edges.append(g.edges[successor_point, successor])
+            num_points_in_edge = len(edge["pts"])
+            if num_points_in_edge < end_idx+1:
+                continue
 
-                # get angles
-                for edge in succ_edges:
-                    start_idx = 0
-                    end_idx = 10
+            pos_start_local = np.array([edge["pts"][start_idx][1], edge["pts"][start_idx][0]])
+            pos_end_local = np.array([edge["pts"][end_idx][1], edge["pts"][end_idx][0]])
+            pos_start_local = np.array([128, 256]) - pos_start_local
+            pos_end_local = np.array([128, 256]) - pos_end_local
 
-                    vector_start = np.array([edge["pts"][start_idx][0], edge["pts"][start_idx][1]])
-                    vector_end = np.array([edge["pts"][end_idx][0], edge["pts"][end_idx][1]])
-                    vector = vector_end - vector_start
+            edge_local = pos_end_local - pos_start_local
+            angle_local = np.arctan2(-edge_local[0], edge_local[1])
 
-                    angle = np.arctan2(vector[1], vector[0]) + np.pi
-                    print(angle)
+            print("pos_start", pos_start_local)
+            print("pos_end", pos_end_local)
+            print("edge_local", edge_local)
+            print("edge_angle_local", angle_local)
 
-                    # convert to global coordinates
-                    pose_global = np.zeros(3)
-                    pose_global[0:2] = self.pose[0:2] + np.cos(self.pose[2]) * vector + np.sin(self.pose[2]) * vector
-                    pose_global[2] = self.pose[2] - angle
+            # transform pos_start to global coordinates
+            pos_start_global = np.zeros(2)
+            pos_start_global[0] = self.pose[0] - pos_start_local[0] * np.cos(self.pose[2]) + pos_start_local[1] * np.sin(self.pose[2])
+            pos_start_global[1] = self.pose[1] - pos_start_local[0] * np.sin(self.pose[2]) - pos_start_local[1] * np.cos(self.pose[2])
 
-                    self.future_pose_queue.put(pose_global)
-                    print("put pose in queue: {:.0f}, {:.0f}, {:.1f}".format(pose_global[0], pose_global[1], pose_global[2]))
+            # add to current pose
+            future_pose_global = np.zeros(3)
+            future_pose_global[0:2] = pos_start_global
+            future_pose_global[2] = self.pose[2] + angle_local
+            future_pose_global[2] = self.yaw_check(future_pose_global[2])
 
-            if self.future_pose_queue.empty():
-                print("future_pose_queue empty. Exiting.")
-                self.future_pose_queue.put(self.pose)
-                exit()
-            else:
-                self.pose = self.future_pose_queue.get()
-                print("get pose from queue: {:.0f}, {:.0f}, {:.1f}".format(self.pose[0], self.pose[1], self.pose[2]))
+            # put in queue if not yet visited
+            was_visited = similarity_check(future_pose_global, self.pose_history)
+            is_already_in_queue = similarity_check(future_pose_global, self.future_poses)
 
-        except Exception as e:
-            print(e)
-            self.graph_skeleton = nx.DiGraph()
-            # rotate left
+            if not was_visited and not is_already_in_queue:
+                self.future_poses.append(future_pose_global)
+                print("put pose in queue: {:.0f}, {:.0f}, {:.1f}".format(future_pose_global[0],
+                                                                         future_pose_global[1],
+                                                                         future_pose_global[2]))
+        self.render_poses_in_aerial()
 
-            # self.pose[2] -= 0.2
+        if len(self.future_poses) == 0:
+            print("future_pose_queuefuture_poses empty. Exiting.")
+            exit()
+        else:
 
+            # reorder queue based on distance to current pose
+            self.future_poses.sort(key=lambda x: np.linalg.norm(x[0:2] - self.pose[0:2]))
 
+            self.pose = self.future_poses.pop(0)
+            while out_of_bounds_check(self.pose, self.satellite.shape):
+                print("pose out of bounds. removing from queue")
+                self.pose = self.future_poses.pop(0)
 
-        if self.pose[2] > 2 * np.pi:
-            self.pose[2] -= 2 * np.pi
-        if self.pose[2] < -2 * np.pi:
-            self.pose[2] += 2 * np.pi
+            print("get pose from queue: {:.0f}, {:.0f}, {:.1f}".format(self.pose[0], self.pose[1], self.pose[2]))
 
+        self.pose[2] = self.yaw_check(self.pose[2])
 
-        time.sleep(1)
         self.make_step()
 
-
+        cv2.waitKey(1)
+        time.sleep(0.1)
 
 
 
 if __name__ == "__main__":
     driver = SatelliteDriver()
-    # driver.load_model(model_path="/data/autograph/checkpoints/peach-bun-72/e-020.pth", type="full")
-    # driver.load_model(model_path="/data/autograph/checkpoints/butterscotch-flan-74/e-050.pth", type="successor")
 
-    driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth", type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-030.pth", type="successor")
-
-
+    driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",
+                      type="full")
+    driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-030.pth",
+                      type="successor")
     driver.load_satellite(path="/data/lanegraph/woven-data/Austin.png")
-
 
     while True:
         driver.drive_freely()
 
 
-    print("Press arrow keys to drive")
-
-    def on_press(key):
-        driver.drive_keyboard(key)
-
-
-    def on_release(key):
-        if key == Key.esc:
-            return False
-
-    # Collect events until released
-    with Listener(on_press=on_press) as listener:
-        listener.join()
+    # print("Press arrow keys to drive")
+    #
+    # def on_press(key):
+    #     driver.drive_keyboard(key)
+    #
+    #
+    # def on_release(key):
+    #     if key == Key.esc:
+    #         return False
+    #
+    # # Collect events until released
+    # with Listener(on_press=on_press) as listener:
+    #     listener.join()
 
