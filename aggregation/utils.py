@@ -772,17 +772,17 @@ def mean_angle_abs_diff(x, y):
     return np.abs(diff)
 
 
-def similarity_check(pose, pose_list):
+def similarity_check(pose, pose_list, min_dist=10, min_angle=np.pi/4):
     if len(pose_list) == 0:
         return False
-    poslist = np.array(pose_list)[:,:2]
-    anglelist = np.array(pose_list)[:,2:]
+    poslist = np.array(pose_list)[:, :2]
+    anglelist = np.array(pose_list)[:, 2:]
 
     euclidean_distances = cdist(pose[np.newaxis, 0:2], poslist, metric='euclidean')
     angle_distances = cdist(pose[np.newaxis, 2:], anglelist, lambda u, v: mean_angle_abs_diff(u, v))
 
-    position_criterium = euclidean_distances < 10
-    angle_criterium = angle_distances < np.pi/4
+    position_criterium = euclidean_distances < min_dist
+    angle_criterium = angle_distances < min_angle
     criterium = position_criterium & angle_criterium
 
     # Check criterium sum
@@ -792,10 +792,31 @@ def similarity_check(pose, pose_list):
         return False
 
 
-def out_of_bounds_check(pose, satellite_shape):
-    margin = 500
-
-    if pose[0] < margin or pose[0] > satellite_shape[1] - margin or pose[1] < margin or pose[1] > satellite_shape[0] - margin:
+def out_of_bounds_check(pose, satellite_shape, oob_margin=400):
+    if pose[0] < oob_margin or pose[0] > satellite_shape[1] - oob_margin or pose[1] < oob_margin or pose[1] > satellite_shape[0] - oob_margin:
         return True
     else:
         return False
+
+
+
+def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color=np.array([255, 0, 142]) / 255.):
+
+    '''
+    Visualize a lane graph on an axis
+    Args:
+        G: graph
+        ax:  axis object
+        node_color:  color of nodes
+        edge_color:  color of edges
+
+    Returns:
+        None
+    '''
+
+    nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
+                     edge_color=node_color,
+                     node_color=edge_color,
+                     with_labels=False,
+                     node_size=5,
+                     arrowsize=15.0, )
