@@ -834,7 +834,6 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, intersection_gt, tra
         angle = np.arctan2(next_y - pos_y, next_x - pos_x)
         angle = angle - np.pi / 2
 
-
         # random alteration of angle uniform between -pi/3 and pi/3
         angle = angle + np.random.uniform(-np.pi/3, np.pi/3)
 
@@ -847,8 +846,6 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, intersection_gt, tra
 
     crop_center_x = int(pos_x + np.sin(angle) * crop_size / 2)
     crop_center_y = int(pos_y - np.cos(angle) * crop_size / 2)
-
-    # print("Agent pose: ", pos_x, pos_y, angle, "Crop center: ", crop_center_x, crop_center_y, angle, "Crop size: ", crop_size)
 
     return sat_image_crop, tracklet_image_crop, drivable_gt_crop, [crop_center_x, crop_center_y, angle]
 
@@ -1281,19 +1278,24 @@ if __name__ == "__main__":
     trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
     trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
 
-    if args.thread_id > 0:
+    if args.thread_id > 0:  # if we are parallel
         num_y_pixels = sat_image_.shape[0]
-        y_min_cut = int(num_y_pixels * float(args.thread_id + 0) / args.num_parallel)
-        y_max_cut = int(num_y_pixels * float(args.thread_id + 1) / args.num_parallel)
+        y_min_cut = int(num_y_pixels * float(args.thread_id - 1) / args.num_parallel)
+        y_max_cut = int(num_y_pixels * float(args.thread_id) / args.num_parallel)
 
         sat_image_ = np.ascontiguousarray(sat_image_[y_min_cut:y_max_cut, :, :])
         drivable_gt = np.ascontiguousarray(drivable_gt[y_min_cut:y_max_cut, :])
-        #intersection_gt = np.ascontiguousarray(intersection_gt[y_min_cut:y_max_cut, :])
-
-        print(sat_image_.shape)
 
         trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
         trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
+
+        # delete trajectories that are outside of the image
+        trajectories_ = [t for t in trajectories_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
+        trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
+
+        print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}".format(args.thread_id, sat_image_.shape, len(trajectories_), len(trajectories_ped_)))
+
+
 
     # save memory
     del intersection_gt

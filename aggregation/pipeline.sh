@@ -1,22 +1,26 @@
 export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 
 # iterate over all cities
-CITIES=(miami washington austin detroit pittsburgh paloalto)
-#CITIES=(pittsburgh)
-
-EXP="1302"
-OUT_DIR="/data/autograph"
-
-
+#CITIES=(pittsburgh washington paloalto austin detroit miami)
+CITIES=(austin)
 NUM_PARALLEL=4
 
-
 for CITY in "${CITIES[@]}"; do
-    echo "Processing $CITY !"
-    for ((i=0; i<NUM_PARALLEL; i++)); do
-        echo "Processing $CITY, $i !"
-        ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY --out_path_root $OUT_DIR/$EXP/$CITY-pre --source tracklets_dense --num_cpus 1 &
-    done
-    wait
-
+  for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
+    echo "Processing $CITY, $tid / $NUM_PARALLEL !"
+    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY\
+                                                           --out_path_root /data/autograph/test/$CITY \
+                                                           --sat_image_root /data/lanegraph/woven-data \
+                                                           --source tracklets_dense \
+                                                           --crop_size 256 \
+                                                           --query_points ego \
+                                                           --max_num_samples 100000000 \
+                                                           --num_parallel $NUM_PARALLEL \
+                                                           --thread_id $tid &
+    sleep 60 # sleep X sec to give time start generating
+  done
+  wait
 done
+wait
+
+#ps aux | grep aggregate_av2.py | awk '{print $2}' | xargs kill -9
