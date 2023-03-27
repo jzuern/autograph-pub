@@ -3,23 +3,16 @@ from tqdm import tqdm
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
 import os
-import networkx as nx
 import cv2
-import skfmm
 import argparse
-from sklearn.cluster import DBSCAN
-import skimage
 from glob import glob
 import logging
 from av2.datasets.motion_forecasting import scenario_serialization
 import pickle
 import time
 
-
-from lanegnn.utils import poisson_disk_sampling, get_random_edges
 from data.av2.settings import *
-from lanegnn.utils import visualize_angles
-from aggregation.utils import get_scenario_centerlines, assign_graph_traversals, resample_trajectory, Tracklet, \
+from aggregation.utils import get_scenario_centerlines, resample_trajectory, Tracklet, \
     filter_tracklet, merge_successor_trajectories, iou_mask, smooth_trajectory, get_endpoints
 
 
@@ -1054,7 +1047,7 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
             pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
             sample_num += 1
-            print("---- TID: {}/{}: Saving to {}/{}/{}-{} | Sample {} / {}".format(args.thread_id, args.num_parallel, out_path, sample_type, sample_id, i_query, sample_num, max_num_samples))
+            print("---- TID: {}/{}: Sample {} / {} | Saving to {}/{}/{}-{}".format(args.thread_id, args.num_parallel, out_path, sample_type, sample_id, i_query, sample_num, max_num_samples))
 
             Image.fromarray(pos_encoding).save("{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
             Image.fromarray(sat_image_crop).save("{}/{}/{}-{}-rgb.png".format(out_path, sample_type, sample_id, i_query))
@@ -1062,9 +1055,6 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
             Image.fromarray(mask_total).save("{}/{}/{}-{}-masks.png".format(out_path, sample_type, sample_id, i_query))
             Image.fromarray(drivable_gt_crop.astype(np.uint8)).save("{}/{}/{}-{}-drivable-gt.png".format(out_path, sample_type, sample_id, i_query))
             Image.fromarray(mask_angle_colorized).save("{}/{}/{}-{}-angles.png".format(out_path, sample_type, sample_id, i_query))
-
-
-
 
 
 if __name__ == "__main__":
@@ -1294,7 +1284,9 @@ if __name__ == "__main__":
         trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
 
         print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}".format(args.thread_id, sat_image_.shape, len(trajectories_), len(trajectories_ped_)))
-
+        if len(trajectories_) == 0:
+            print("No trajectories in this thread. Exiting...")
+            exit(0)
 
 
     # save memory

@@ -140,6 +140,9 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
+            if data is None:
+                continue
+
             # mask_pedestrian = data["mask_pedestrian"].cuda()
             # drivable_gt = data["drivable_gt"].cuda()
             pos_enc = data["pos_enc"].cuda()
@@ -263,6 +266,10 @@ class Trainer():
 
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
+
+            if data is None:
+                continue
+
             rgb = data["rgb"].cuda()
 
             in_tensor = rgb
@@ -592,8 +599,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, '1503', "austin", "train", "*")
-    val_path = os.path.join(params.paths.dataroot, '1503', "austin", "val", "*")
+    train_path = os.path.join(params.paths.dataroot, 'test-all-cities', "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
+    val_path = os.path.join(params.paths.dataroot, 'test-all-cities', "*", "val", "*")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5,
                                               frac_straight=0.5)

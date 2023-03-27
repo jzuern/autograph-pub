@@ -9,6 +9,9 @@ import numpy as np
 import networkx as nx
 import random
 from aggregation.utils import AngleColorizer
+from pathlib import Path
+import subprocess
+
 
 def get_id(filename):
     id_list = os.path.basename(filename).split('-')
@@ -16,26 +19,30 @@ def get_id(filename):
 
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
-    def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5):
+    def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5, max_num_samples_train=50000, max_num_samples_val=5000):
         self.path = path
         self.params = params
         self.split = split
         self.ac = AngleColorizer()
 
-        print("Looking for files in", path)
-        self.rgb_files = sorted(glob(os.path.join(path, '*-rgb.png')))
-        self.sdf_files = sorted(glob(os.path.join(path, '*-masks.png')))
-        self.angles_files = sorted(glob(os.path.join(path, '*-angles.png')))
-        self.pos_enc_files = sorted(glob(os.path.join(path, '*-pos-encoding.png')))
-        self.drivable_gt_files = sorted(glob(os.path.join(path, '*-drivable-gt.png')))
+        print("Looking for files in {}".format(path))
+
+        # # get all files
+        p = Path(self.path).parents[2]
+
+        self.rgb_files = [val for sublist in [[os.path.join(i[0], j) if ("-rgb.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
+        self.sdf_files = [val for sublist in [[os.path.join(i[0], j) if ("-masks.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
+        self.angles_files = [val for sublist in [[os.path.join(i[0], j) if ("-angles.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
+        self.pos_enc_files = [val for sublist in [[os.path.join(i[0], j) if ("-pos-encoding.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
+        self.drivable_gt_files = [val for sublist in [[os.path.join(i[0], j) if ("-drivable-gt.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
 
         # only use files for which we have all modalities
-        file_ids = [get_id(f) for f in self.sdf_files]
-        self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
-        self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
-        self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
-        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
-        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
+        # file_ids = [get_id(f) for f in self.sdf_files]
+        # self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
+        # self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
+        # self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
+        # self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
+        # self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
 
         print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
@@ -81,6 +88,19 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.angles_files = angles_branch[:int(frac_branch_eff * len(angles_branch))] + \
                             angles_straight[:int(frac_straight_eff * len(angles_straight))]
 
+        # jointly shuffle them
+        c = list(zip(self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
+        random.shuffle(c)
+        self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
+
+        max_num_samples = max_num_samples_train if self.split == "train" else max_num_samples_val
+        print("max_num_samples = {}".format(max_num_samples))
+
+        self.sdf_files = self.sdf_files[0:max_num_samples]
+        self.angles_files = self.angles_files[0:max_num_samples]
+        self.rgb_files = self.rgb_files[0:max_num_samples]
+        self.pos_enc_files = self.pos_enc_files[0:max_num_samples]
+        self.drivable_gt_files = self.drivable_gt_files[0:max_num_samples]
 
         print("Loaded {} {} files".format(len(self.sdf_files), self.split))
 
@@ -129,6 +149,11 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
         rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
         drivable_gt = cv2.imread(self.drivable_gt_files[idx], cv2.IMREAD_UNCHANGED)
+
+
+        if mask is None or pos_enc is None or angles is None or rgb is None or drivable_gt is None:
+            print("Error loading file: {}".format(self.sdf_files[idx]))
+            return None
 
         angles = self.ac.color_to_angle(angles)
         angles_xy = self.ac.angle_to_xy(angles)

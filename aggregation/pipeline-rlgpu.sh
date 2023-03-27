@@ -8,7 +8,7 @@ NUM_PARALLEL=12
 for CITY in "${CITIES[@]}"; do
   for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
     echo "Processing $CITY, $tid / $NUM_PARALLEL !"
-    ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY\
+    /home/buechner/zuern/geometric/bin/python aggregate_av2.py --city_name $CITY\
                                                            --out_path_root /home/buechner/zuern/autograph/2403/$CITY \
                                                            --sat_image_root /home/buechner/zuern/urbanlanegraph-dataset/ \
                                                            --source tracklets_dense \
