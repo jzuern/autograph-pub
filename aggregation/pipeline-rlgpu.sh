@@ -1,23 +1,23 @@
-export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
+export PYTHONPATH=$PYTHONPATH:/home/buechner/zuern/self-supervised-graph
 
 # iterate over all cities
-#CITIES=(pittsburgh washington paloalto austin detroit miami)
-CITIES=(austin)
+CITIES=(pittsburgh washington paloalto austin detroit miami)
+#CITIES=(austin)
 NUM_PARALLEL=12
 
 for CITY in "${CITIES[@]}"; do
   for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
     echo "Processing $CITY, $tid / $NUM_PARALLEL !"
     /home/buechner/zuern/geometric/bin/python aggregate_av2.py --city_name $CITY\
-                                                           --out_path_root /home/buechner/zuern/autograph/2403/$CITY \
+                                                           --out_path_root /data/buechner/zuern/autograph/all-cities/$CITY \
                                                            --sat_image_root /home/buechner/zuern/urbanlanegraph-dataset/ \
                                                            --source tracklets_dense \
                                                            --crop_size 256 \
                                                            --query_points ego \
-                                                           --max_num_samples 100000000 \
+                                                           --max_num_samples 10000 \
                                                            --num_parallel $NUM_PARALLEL \
                                                            --thread_id $tid &
-    sleep 60 # sleep X sec to give time start generating
+    sleep 120 # sleep X sec to give time start generating
   done
   wait
 done

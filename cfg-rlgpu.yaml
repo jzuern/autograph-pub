@@ -6,7 +6,7 @@ main:
 paths:
     home: /home/buechner/zuern/
     package: /home/buechner/zuern/self-supervised-graph/
-    dataroot: /home/buechner/zuern/autograph/
+    dataroot: /data2/buechner/autograph/
     checkpoints: /home/buechner/zuern/self-supervised-graph/checkpoints/
     config_name: exp-11-01-23/* # preprocessed/city_name or preprocessed/*
 preprocessing:
@@ -23,7 +23,7 @@ model:
     dataparallel: False
     device: cuda
     batch_size: 4
-    batch_size_reg: 64
+    batch_size_reg: 128
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999

@@ -10,7 +10,6 @@ import networkx as nx
 import random
 from aggregation.utils import AngleColorizer
 from pathlib import Path
-import subprocess
 
 
 def get_id(filename):
@@ -19,7 +18,7 @@ def get_id(filename):
 
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
-    def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5, max_num_samples_train=50000, max_num_samples_val=5000):
+    def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5, max_num_samples=None):
         self.path = path
         self.params = params
         self.split = split
@@ -37,12 +36,12 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.drivable_gt_files = [val for sublist in [[os.path.join(i[0], j) if ("-drivable-gt.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
 
         # only use files for which we have all modalities
-        # file_ids = [get_id(f) for f in self.sdf_files]
-        # self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
-        # self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
-        # self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
-        # self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
-        # self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
+        file_ids = [get_id(f) for f in self.sdf_files]
+        self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
+        self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
+        self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
+        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
+        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
 
         print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
@@ -93,14 +92,12 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         random.shuffle(c)
         self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
 
-        max_num_samples = max_num_samples_train if self.split == "train" else max_num_samples_val
-        print("max_num_samples = {}".format(max_num_samples))
-
-        self.sdf_files = self.sdf_files[0:max_num_samples]
-        self.angles_files = self.angles_files[0:max_num_samples]
-        self.rgb_files = self.rgb_files[0:max_num_samples]
-        self.pos_enc_files = self.pos_enc_files[0:max_num_samples]
-        self.drivable_gt_files = self.drivable_gt_files[0:max_num_samples]
+        if max_num_samples is not None:
+            self.sdf_files = self.sdf_files[0:max_num_samples]
+            self.angles_files = self.angles_files[0:max_num_samples]
+            self.rgb_files = self.rgb_files[0:max_num_samples]
+            self.pos_enc_files = self.pos_enc_files[0:max_num_samples]
+            self.drivable_gt_files = self.drivable_gt_files[0:max_num_samples]
 
         print("Loaded {} {} files".format(len(self.sdf_files), self.split))
 
