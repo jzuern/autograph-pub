@@ -599,8 +599,8 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'test-all-cities', "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
-    val_path = os.path.join(params.paths.dataroot, 'test-all-cities', "*", "val", "*")
+    train_path = os.path.join(params.paths.dataroot, 'all-cities', "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
+    val_path = os.path.join(params.paths.dataroot, 'all-cities', "*", "val", "*")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5,
                                               frac_straight=0.5)

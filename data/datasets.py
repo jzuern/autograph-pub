@@ -12,9 +12,11 @@ from aggregation.utils import AngleColorizer
 from pathlib import Path
 
 
-def get_id(filename):
-    id_list = os.path.basename(filename).split('-')
-    return "-".join(id_list[1:4])
+# def get_id(filename):
+#     id_list = os.path.basename(filename).split('-')
+#     return "-".join(id_list[1:4])
+
+get_id = lambda filename: "-".join(os.path.basename(filename).split('-')[1:4])
 
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
@@ -26,26 +28,43 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         print("Looking for files in {}".format(path))
 
-        # # get all files
+        # get all files
         p = Path(self.path).parents[2]
 
-        self.rgb_files = [val for sublist in [[os.path.join(i[0], j) if ("-rgb.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
-        self.sdf_files = [val for sublist in [[os.path.join(i[0], j) if ("-masks.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
-        self.angles_files = [val for sublist in [[os.path.join(i[0], j) if ("-angles.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
-        self.pos_enc_files = [val for sublist in [[os.path.join(i[0], j) if ("-pos-encoding.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
-        self.drivable_gt_files = [val for sublist in [[os.path.join(i[0], j) if ("-drivable-gt.png" in j and split in i[0]) else None for j in i[2]] for i in os.walk(p)] for val in sublist if val is not None]
+        filelist = [str(f) for f in p.glob('**/*') if f.is_file()]
+        filelist = sorted(filelist)
 
-        # only use files for which we have all modalities
-        file_ids = [get_id(f) for f in self.sdf_files]
-        self.sdf_files = [f for f in self.sdf_files if get_id(f) in file_ids]
-        self.angles_files = [f for f in self.angles_files if get_id(f) in file_ids]
-        self.rgb_files = [f for f in self.rgb_files if get_id(f) in file_ids]
-        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in file_ids]
-        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in file_ids]
+        self.rgb_files = [f for f in filelist if "-rgb.png" in f and split in f]
+        self.sdf_files = [f for f in filelist if "-masks.png" in f and split in f]
+        self.angles_files = [f for f in filelist if "-angles.png" in f and split in f]
+        self.pos_enc_files = [f for f in filelist if "-pos-encoding.png" in f and split in f]
+        self.drivable_gt_files = [f for f in filelist if "-drivable-gt.png" in f and split in f]
 
         print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
-        # jointly shuffle them
+        # only use files for which we have all modalities
+        file_ids_sdf = [get_id(f) for f in self.sdf_files]
+        file_ids_angles = [get_id(f) for f in self.angles_files]
+        file_ids_rgb = [get_id(f) for f in self.rgb_files]
+        file_ids_pos_enc = [get_id(f) for f in self.pos_enc_files]
+        file_ids_drivable_gt = [get_id(f) for f in self.drivable_gt_files]
+
+        # find ids that are not in all lists
+        ids_not_in_all = set(file_ids_sdf).symmetric_difference(set(file_ids_angles))
+        ids_not_in_all = ids_not_in_all.union(set(file_ids_sdf).symmetric_difference(set(file_ids_rgb)))
+        ids_not_in_all = ids_not_in_all.union(set(file_ids_sdf).symmetric_difference(set(file_ids_pos_enc)))
+        ids_not_in_all = ids_not_in_all.union(set(file_ids_sdf).symmetric_difference(set(file_ids_drivable_gt)))
+
+        # remove all files that are not in all lists
+        self.sdf_files = [f for f in self.sdf_files if get_id(f) not in ids_not_in_all]
+        self.angles_files = [f for f in self.angles_files if get_id(f) not in ids_not_in_all]
+        self.rgb_files = [f for f in self.rgb_files if get_id(f) not in ids_not_in_all]
+        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) not in ids_not_in_all]
+        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) not in ids_not_in_all]
+
+        print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
+
+        # # jointly shuffle them
         c = list(zip(self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
         random.shuffle(c)
         self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
@@ -76,16 +95,14 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         print("frac_branch = {}, frac_straight = {}".format(frac_branch, frac_straight))
         print("Using {}% branch and {}% straight effectively".format(frac_branch_eff * 100, frac_straight_eff * 100))
 
-        self.rgb_files = rgb_branch[:int(frac_branch_eff * len(rgb_branch))] + \
-                         rgb_straight[:int(frac_straight_eff * len(rgb_straight))]
-        self.sdf_files = sdf_branch[:int(frac_branch_eff * len(sdf_branch))] + \
-                         sdf_straight[:int(frac_straight_eff * len(sdf_straight))]
-        self.pos_enc_files = pos_enc_branch[:int(frac_branch_eff * len(pos_enc_branch))] + \
-                             pos_enc_straight[:int(frac_straight_eff * len(pos_enc_straight))]
-        self.drivable_gt_files = drivable_gt_branch[:int(frac_branch_eff * len(drivable_gt_branch))] + \
-                                 drivable_gt_straight[:int(frac_straight_eff * len(drivable_gt_straight))]
-        self.angles_files = angles_branch[:int(frac_branch_eff * len(angles_branch))] + \
-                            angles_straight[:int(frac_straight_eff * len(angles_straight))]
+        lb = int(frac_branch_eff * len(rgb_branch))
+        ls = int(frac_straight_eff * len(rgb_straight))
+
+        self.rgb_files = rgb_branch[:lb] + rgb_straight[:ls]
+        self.sdf_files = sdf_branch[:lb] + sdf_straight[:ls]
+        self.pos_enc_files = pos_enc_branch[:lb] + pos_enc_straight[:ls]
+        self.drivable_gt_files = drivable_gt_branch[:lb] + drivable_gt_straight[:ls]
+        self.angles_files = angles_branch[:lb] + angles_straight[:ls]
 
         # jointly shuffle them
         c = list(zip(self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
@@ -104,39 +121,39 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.sdf_files)
 
-    def random_rotate(self, return_dict):
-        k = np.random.randint(0, 4)
-        return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
-        return_dict['mask_full'] = torch.rot90(return_dict['mask_full'], k, [0, 1])
-        return_dict['mask_successor'] = torch.rot90(return_dict['mask_successor'], k, [0, 1])
-        return_dict['mask_pedestrian'] = torch.rot90(return_dict['mask_pedestrian'], k, [0, 1])
-
-        imshape = return_dict['rgb'].shape
-
-        old_pos_encoding = return_dict['pos_enc']
-        pos_center = torch.where(old_pos_encoding == 1.0)[1:3]
-        q = pos_center[0].item(), pos_center[1].item()
-
-        # change position of q according to rotation
-        if k == 1:
-            q = old_pos_encoding.shape[2] - q[1] - 1, q[0]
-        elif k == 2:
-            q = old_pos_encoding.shape[1] - q[0] - 1, old_pos_encoding.shape[2] - q[1] - 1
-        elif k == 3:
-            q = q[1], old_pos_encoding.shape[1] - q[0] - 1
-
-        pos_encoding = np.zeros(imshape, dtype=np.float32)
-        x, y = np.meshgrid(np.arange(imshape[2]), np.arange(imshape[1]))
-        pos_encoding[2, q[1], q[0]] = 1
-        pos_encoding[0, :, :] = np.abs((x - q[0])) / imshape[2]
-        pos_encoding[1, :, :] = np.abs((y - q[1])) / imshape[1]
-        pos_encoding = (pos_encoding * 255).astype(np.uint8)
-
-        pos_encoding = torch.from_numpy(pos_encoding).float() / 255.0
-
-        return_dict['pos_enc'] = pos_encoding
-
-        return return_dict
+    # def random_rotate(self, return_dict):
+    #     k = np.random.randint(0, 4)
+    #     return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
+    #     return_dict['mask_full'] = torch.rot90(return_dict['mask_full'], k, [0, 1])
+    #     return_dict['mask_successor'] = torch.rot90(return_dict['mask_successor'], k, [0, 1])
+    #     return_dict['mask_pedestrian'] = torch.rot90(return_dict['mask_pedestrian'], k, [0, 1])
+    #
+    #     imshape = return_dict['rgb'].shape
+    #
+    #     old_pos_encoding = return_dict['pos_enc']
+    #     pos_center = torch.where(old_pos_encoding == 1.0)[1:3]
+    #     q = pos_center[0].item(), pos_center[1].item()
+    #
+    #     # change position of q according to rotation
+    #     if k == 1:
+    #         q = old_pos_encoding.shape[2] - q[1] - 1, q[0]
+    #     elif k == 2:
+    #         q = old_pos_encoding.shape[1] - q[0] - 1, old_pos_encoding.shape[2] - q[1] - 1
+    #     elif k == 3:
+    #         q = q[1], old_pos_encoding.shape[1] - q[0] - 1
+    #
+    #     pos_encoding = np.zeros(imshape, dtype=np.float32)
+    #     x, y = np.meshgrid(np.arange(imshape[2]), np.arange(imshape[1]))
+    #     pos_encoding[2, q[1], q[0]] = 1
+    #     pos_encoding[0, :, :] = np.abs((x - q[0])) / imshape[2]
+    #     pos_encoding[1, :, :] = np.abs((y - q[1])) / imshape[1]
+    #     pos_encoding = (pos_encoding * 255).astype(np.uint8)
+    #
+    #     pos_encoding = torch.from_numpy(pos_encoding).float() / 255.0
+    #
+    #     return_dict['pos_enc'] = pos_encoding
+    #
+    #     return return_dict
 
 
     def __getitem__(self, idx):
@@ -147,7 +164,6 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
         drivable_gt = cv2.imread(self.drivable_gt_files[idx], cv2.IMREAD_UNCHANGED)
 
-
         if mask is None or pos_enc is None or angles is None or rgb is None or drivable_gt is None:
             print("Error loading file: {}".format(self.sdf_files[idx]))
             return None
@@ -155,7 +171,6 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         angles = self.ac.color_to_angle(angles)
         angles_xy = self.ac.angle_to_xy(angles)
         angles_xy = torch.from_numpy(angles_xy).float()
-
 
         mask_full = mask[:, :, 1]
         mask_successor = mask[:, :, 2]

@@ -38,7 +38,7 @@ model:
     edge_geo_dim: 16
     # end_of_archs
     in_layers: rgb,sdf,angle  # which inputs to use for LaneGNN map encoder
-    loader_workers: 4
+    loader_workers: 8
     weight_decay: 1e-4
     ignore_low_scores: False
     checkpoint:
