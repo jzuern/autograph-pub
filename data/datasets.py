@@ -166,7 +166,7 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         if mask is None or pos_enc is None or angles is None or rgb is None or drivable_gt is None:
             print("Error loading file: {}".format(self.sdf_files[idx]))
-            return None
+            return {'rgb': 0}
 
         angles = self.ac.color_to_angle(angles)
         angles_xy = self.ac.angle_to_xy(angles)

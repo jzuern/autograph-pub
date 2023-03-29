@@ -140,7 +140,7 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-            if data is None:
+            if "pos_enc" not in data:
                 continue
 
             # mask_pedestrian = data["mask_pedestrian"].cuda()
@@ -267,7 +267,7 @@ class Trainer():
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
 
-            if data is None:
+            if "pos_enc" not in data:
                 continue
 
             rgb = data["rgb"].cuda()
