@@ -25,14 +25,11 @@ keyboard = Controller()
 
 
 
-
-
 # SETTINGS
 
 skeleton_threshold = 0.1  # threshold for skeletonization
-
-edge_start_idx = 10  # start index for selecting edge as future pose
-edge_end_idx = 50    # end index for selecting edge as future pose
+edge_start_idx = 10       # start index for selecting edge as future pose
+edge_end_idx = 50         # end index for selecting edge as future pose
 
 viz = False
 if viz:
@@ -42,7 +39,7 @@ if viz:
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     ax.imshow(np.asarray(Image.open("aerial_image.png")))
     fname = sorted(glob.glob("/home/zuern/Desktop/tmp/G_agg/*.gpickle"))[-1]
-    G_agg = pickle.load(open("/home/zuern/Desktop/tmp/G_agg/G_agg.gpickle", "rb"))
+    G_agg = pickle.load(open(fname, "rb"))
     visualize_graph(G_agg, ax)
     plt.show()
     exit()
@@ -638,12 +635,19 @@ class SatelliteDriver(object):
                     pointlist_global[:, 0] = self.pose[0] - pointlist_local[:, 1] * np.cos(self.pose[2]) + pointlist_local[:, 0] * np.sin(self.pose[2])
                     pointlist_global[:, 1] = self.pose[1] - pointlist_local[:, 1] * np.sin(self.pose[2]) - pointlist_local[:, 0] * np.cos(self.pose[2])
 
-                    node_0 = tuple(edge_start_global)
-                    node_1 = tuple(edge_end_global)
+                    node_edge_start = (int(edge_start_global[0]), int(edge_start_global[1]))
+                    node_edge_end = (int(edge_end_global[0]), int(edge_end_global[1]))
 
-                    self.G_agg.add_node(node_0, pos=edge_start_global)
-                    self.G_agg.add_node(node_1, pos=edge_end_global)
-                    self.G_agg.add_edge(node_0, node_1, pts=pointlist_global)
+                    # add G_agg-edge from edge start to edge end
+                    self.G_agg.add_node(node_edge_start, pos=edge_start_global)
+                    self.G_agg.add_node(node_edge_end, pos=edge_end_global)
+                    self.G_agg.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
+
+                    # add G_agg-edge from current pose to edge start
+                    node_current_pose = (int(self.pose[0]), int(self.pose[1]))
+                    self.G_agg.add_node(node_current_pose, pos=self.pose[0:2])
+                    self.G_agg.add_edge(node_current_pose, node_edge_start)
+
                     break
 
         if self.step % 2 == 0:

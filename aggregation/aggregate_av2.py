@@ -1262,8 +1262,6 @@ if __name__ == "__main__":
     # OR USE GT TRAJETORIES
     #trajectories_ = trajectories_gt_
 
-    print("vehicle trajectories: ",  len(trajectories_))
-    print("pedestrian trajectories: ",  len(trajectories_ped_))
 
     trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
     trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
@@ -1292,6 +1290,28 @@ if __name__ == "__main__":
     # save memory
     del intersection_gt
     intersection_gt = None
+
+
+    print("Number of vehicle trajectories: ",  len(trajectories_))
+    print("Number of pedestrian trajectories: ",  len(trajectories_ped_))
+
+
+    # get summed length of trajectories
+    traj_length = 0
+    for t in trajectories_:
+        for i in range(len(t)-1):
+            traj_length += np.linalg.norm(t[i+1] - t[i])
+    print("Summed length of vehicle trajectories: ", traj_length)
+
+    traj_length = 0
+    for t in trajectories_ped_:
+        for i in range(len(t)-1):
+            traj_length += np.linalg.norm(t[i+1] - t[i])
+    print("Summed length of pedestrian trajectories: ", traj_length)
+
+    exit()
+
+
 
 
     viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
