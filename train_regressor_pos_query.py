@@ -605,7 +605,7 @@ def main():
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5,
                                               frac_straight=0.5)
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val', frac_branch=0.5,
-                                            frac_straight=0.5)
+                                            frac_straight=0.5, max_num_samples=1000)
 
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,

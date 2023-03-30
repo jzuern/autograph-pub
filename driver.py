@@ -1,3 +1,6 @@
+import glob
+import os.path
+
 import cv2
 import torch
 from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
@@ -14,8 +17,35 @@ import sknw
 import networkx as nx
 import matplotlib
 from aggregation.utils import smooth_trajectory, similarity_check, out_of_bounds_check, visualize_graph
+import time
+import pickle
+
 
 keyboard = Controller()
+
+
+
+
+
+# SETTINGS
+
+skeleton_threshold = 0.1  # threshold for skeletonization
+
+edge_start_idx = 10  # start index for selecting edge as future pose
+edge_end_idx = 50    # end index for selecting edge as future pose
+
+viz = False
+if viz:
+    print("Visualizing graph from previous run...")
+    matplotlib.use('TkAgg')
+    plt.ion()
+    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+    ax.imshow(np.asarray(Image.open("aerial_image.png")))
+    fname = sorted(glob.glob("/home/zuern/Desktop/tmp/G_agg/*.gpickle"))[-1]
+    G_agg = pickle.load(open("/home/zuern/Desktop/tmp/G_agg/G_agg.gpickle", "rb"))
+    visualize_graph(G_agg, ax)
+    plt.show()
+    exit()
 
 
 def colorize(mask):
@@ -33,10 +63,13 @@ def colorize(mask):
 class SatelliteDriver(object):
     def __init__(self):
         self.aerial_image = None
-        self.init_pose = np.array([2500, 2500, 0.98 * 2*np.pi])
+        self.init_pose = np.array([2500,
+                                   2500,
+                                   0.98 * 2*np.pi])
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
+        self.time = time.time()
 
         self.crop_shape = (256, 256)
 
@@ -81,18 +114,19 @@ class SatelliteDriver(object):
         print("Model loaded")
 
     def load_satellite(self, impath):
-        # print("Loading aerial image {}...".format(impath))
-        # self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
-        # print("Satellite loaded")
-        #
-        # # Crop
-        # center = [32553, 33714]  # horizontal, vertical
-        # delta = [5000, 5000]
-        # self.aerial_image = self.aerial_image[center[1] - delta[1]//2:center[1] + delta[1]//2,
-        #                                       center[0] - delta[0]//2:center[0] + delta[0]//2, :]
-        #
-        # Image.fromarray(self.aerial_image).save("aerial_image.png")
-        # exit()
+        if not os.path.exists("aerial_image.png"):
+            print("Loading aerial image {}...".format(impath))
+            self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
+            print("Satellite loaded")
+
+            # Crop
+            center = [32553, 33714]  # horizontal, vertical
+            delta = [5000, 5000]
+            self.aerial_image = self.aerial_image[center[1] - delta[1]//2:center[1] + delta[1]//2,
+                                                  center[0] - delta[0]//2:center[0] + delta[0]//2, :]
+
+            Image.fromarray(self.aerial_image).save("aerial_image.png")
+
         self.aerial_image = np.asarray(Image.open("aerial_image.png")).astype(np.uint8)
         self.aerial_image = cv2.cvtColor(self.aerial_image, cv2.COLOR_BGR2RGB)
 
@@ -120,6 +154,8 @@ class SatelliteDriver(object):
         # first, convert to binary
         pred_thrshld = (pred > threshold).astype(np.uint8)
 
+        cv2.imshow("pred_thrshld", pred_thrshld * 255)
+
         # then, skeletonize
         skeleton = skeletonize(pred_thrshld)
 
@@ -133,7 +169,7 @@ class SatelliteDriver(object):
         return skeleton
 
 
-    def pose_to_transform_1(self):
+    def pose_to_transform(self):
 
         x, y, yaw = self.pose
 
@@ -168,7 +204,7 @@ class SatelliteDriver(object):
 
     def add_pred_to_canvas(self, pred):
 
-        M = np.linalg.inv(self.pose_to_transform_1())
+        M = np.linalg.inv(self.pose_to_transform())
 
         pred_roi = (np.ones_like(pred) * 255).astype(np.uint8)
 
@@ -198,50 +234,11 @@ class SatelliteDriver(object):
             y_0 = int(y_0 / df)
             cv2.circle(canvas_viz, (x_0, y_0), 3, (0, 255, 0), -1)
 
-        # cv2.imshow("Aggregation", canvas_viz)
-        # cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_Aggregation.png".format(self.step), canvas_viz)
-
-
-        # # also visualize the canvas around current pose
-        # width = 800
-        # x_1, y_1, _ = self.pose_history[-1]
-        # x_1 = int(x_1)
-        # y_1 = int(y_1)
-        #
-        # canvas_roi = self.canvas_log_odds[y_1 - width//2:y_1+width//2, x_1-width//2 : x_1+width//2]
-        # canvas_roi = colorize(canvas_roi)
-        # satellite_roi = self.aerial_image[y_1 - width//2 : y_1+width//2, x_1-width//2 : x_1+width//2, :]
-        # viz_roi = cv2.addWeighted(canvas_roi, 0.5, satellite_roi, 0.5, 0)
-        #
-        # cv2.imshow("Aggregation_cropped", viz_roi)
-        # cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_Aggregation_cropped.png".format(self.step), viz_roi)
-
-
-        # warped_log_odds = np.log(warped_pred / (1 - warped_pred))
-        # warped_log_odds += warped_roi
-        #
-        # self.canvas_log_odds += warped_log_odds
-        #
-        # canvas_odds = np.exp(self.canvas_log_odds)
-        # canvas_probs = canvas_odds / (1 + canvas_odds)
-        #
-        # cv2.imshow("warped_pred", colorize(warped_pred))
-        # cv2.imshow("canvas", colorize(canvas_probs))
-        #
-        #
-        #
-        # canvas = 1 / (1 + np.exp(-self.canvas_log_odds))
-        #
-        # canvas_viz = colorize(canvas)
-        # canvas_viz = cv2.addWeighted(self.aerial_image, 0.5, canvas_viz, 0.5, 0)
-        #
-        # cv2.imshow("Aggregation", canvas_viz)
-
 
 
     def crop_satellite_at_pose(self, pose):
 
-        M = self.pose_to_transform_1()
+        M = self.pose_to_transform()
         aerial_image = self.aerial_image.copy()
 
         try:
@@ -298,7 +295,6 @@ class SatelliteDriver(object):
         return graph
 
 
-
     def add_graph_to_angle_canvas(self):
 
         g = self.graph_skeleton
@@ -323,7 +319,7 @@ class SatelliteDriver(object):
 
         # angle_canvas_cropped = angle_canvas_cropped % (2 * np.pi)
 
-        M = np.linalg.inv(self.pose_to_transform_1())
+        M = np.linalg.inv(self.pose_to_transform())
 
         angle_canvas_cropped_c = self.ac.angle_to_color(angle_canvas_cropped)
         angle_canvas_cropped_c = angle_canvas_cropped_c * np.expand_dims(angle_indicator, axis=2)
@@ -338,13 +334,12 @@ class SatelliteDriver(object):
         self.canvas_angles[info_available] = warped_angles[info_available]
 
         canvas_viz = cv2.addWeighted(self.aerial_image, 0.5, self.canvas_angles, 0.5, 0)
-        # cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_angle_canvas.png".format(self.step), canvas_viz)
+        # cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_angle_canvas.png".format(self.step), canvas_viz)
 
         # resize to smaller
         # canvas_viz = cv2.resize(canvas_viz, (1000, 1000))
         #
         # cv2.imshow("Aggregation angles", canvas_viz)
-
 
     def render_poses_in_aerial(self):
         rgb_pose_viz = self.aerial_image.copy()
@@ -368,7 +363,6 @@ class SatelliteDriver(object):
             y2 = y + arrow_len * np.sin(theta)
             cv2.arrowedLine(rgb_pose_viz, (int(y), int(x)), (int(y2), int(x2)), (255, 255, 0), 1, cv2.LINE_AA)
 
-
         # crop around ego pose
         x = int(self.pose[0])
         y = int(self.pose[1])
@@ -381,8 +375,7 @@ class SatelliteDriver(object):
         rgb_pose_viz = rgb_pose_viz[y1:y2, x1:x2]
 
         # cv2.imshow("rgb_pose_viz", rgb_pose_viz)
-        cv2.imwrite("/home/zuern/Desktop/tmp/poses/{:04d}_rgb_pose_viz.png".format(self.step), rgb_pose_viz)
-
+        cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_rgb_pose_viz.png".format(self.step), rgb_pose_viz)
 
     def make_step(self):
 
@@ -396,15 +389,14 @@ class SatelliteDriver(object):
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
         pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
 
-        if self.model_full is not None:
-            with torch.no_grad():
-                (pred, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
-                pred = torch.nn.functional.interpolate(pred,
-                                                       size=rgb_torch.shape[2:],
-                                                       mode='bilinear',
-                                                       align_corners=True)
-                pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
-                pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
+        with torch.no_grad():
+            (pred, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
+            pred = torch.nn.functional.interpolate(pred,
+                                                   size=rgb_torch.shape[2:],
+                                                   mode='bilinear',
+                                                   align_corners=True)
+            pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
+            pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
 
         in_tensor = torch.cat([rgb_torch, pos_encoding_torch, pred_drivable, pred_angles], dim=1)
@@ -418,12 +410,14 @@ class SatelliteDriver(object):
 
         pred_succ = torch.nn.Sigmoid()(pred_succ)
         pred_succ = pred_succ[0, 0].cpu().detach().numpy()
-        pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
+        # pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
 
         pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
         pred_angles_color = self.ac.angle_to_color(pred_angles)
 
-        skeleton = self.skeletonize_prediction(pred_succ, threshold=0.10)
+        cv2.imshow("pred_angles_color", pred_angles_color)
+
+        skeleton = self.skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
         self.graph_skeleton = self.skeleton_to_graph(skeleton, pred_angles, pred_succ)
 
         # make skeleton fatter
@@ -451,7 +445,7 @@ class SatelliteDriver(object):
 
 
         cv2.imshow("pred_succ_viz", pred_succ_viz)
-        cv2.imwrite("/home/zuern/Desktop/tmp/{:04d}_pred_succ_viz.png".format(self.step), pred_succ_viz)
+        cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_pred_succ_viz.png".format(self.step), pred_succ_viz)
 
         self.step += 1
 
@@ -477,10 +471,7 @@ class SatelliteDriver(object):
         colors = [tuple(color.tolist()) for color in colors]
 
         for i, edge in enumerate(self.G_agg.edges):
-            # pointlist = np.array(self.G_agg.edges[edge]['pts']).astype(np.int32)
-            # [cv2.line(G_agg_viz, (int(pointlist[i, 0]), int(pointlist[i, 1])), (int(pointlist[i + 1, 0]), int(pointlist[i + 1, 1])), color=(255, 255, 255), thickness=2) for i in range(len(pointlist) - 1)]
-
-            # also visualize edge as arrow
+            # edge as arrow
             start = self.G_agg.nodes[edge[0]]["pos"]
             end = self.G_agg.nodes[edge[1]]["pos"]
             start = (int(start[0]), int(start[1]))
@@ -493,7 +484,6 @@ class SatelliteDriver(object):
             x_0 = int(x_0)
             y_0 = int(y_0)
             cv2.circle(G_agg_viz, (x_0, y_0), 2, (0, 255, 0), -1)
-
 
         # also visualize queued poses
         arrow_length = 30
@@ -515,8 +505,11 @@ class SatelliteDriver(object):
         G_agg_viz = G_agg_viz[int(self.pose[1]) - margin:int(self.pose[1]) + margin,
                               int(self.pose[0]) - margin:int(self.pose[0]) + margin]
 
-
         cv2.imshow("G_agg_viz", G_agg_viz)
+
+        # serialize graph
+        nx.write_gpickle(self.G_agg, "/home/zuern/Desktop/tmp/G_agg/{:04d}_G_agg.gpickle".format(self.step))
+
 
 
     def drive_keyboard(self, key):
@@ -561,11 +554,12 @@ class SatelliteDriver(object):
 
         self.make_step()
 
-
-
     def drive_freely(self):
 
-        print("Step: {} | Current pose: {:.0f}, {:.0f}, {:.1f}".format(self.step, self.pose[0], self.pose[1], self.pose[2]))
+        fps = 1 / (time.time() - self.time)
+        self.time = time.time()
+
+        print("Step: {} | FPS = {:.1f} | Current pose: {:.0f}, {:.0f}, {:.1f}".format(self.step, fps, self.pose[0], self.pose[1], self.pose[2]))
 
         if self.graph_skeleton is None:
             self.make_step()
@@ -584,15 +578,14 @@ class SatelliteDriver(object):
                 succ_edges.append(g.edges[successor_point, successor])
 
         for edge in succ_edges:
-            start_idx = 10
-            end_idx = 50
 
             num_points_in_edge = len(edge["pts"])
-            if num_points_in_edge < end_idx+1:
+            if num_points_in_edge < edge_end_idx+1:
                 continue
 
-            pos_start_local = np.array([edge["pts"][start_idx][1], edge["pts"][start_idx][0]])
-            pos_end_local = np.array([edge["pts"][end_idx][1], edge["pts"][end_idx][0]])
+            pos_start_local = np.array([edge["pts"][edge_start_idx][1], edge["pts"][edge_start_idx][0]])
+            pos_end_local = np.array([edge["pts"][edge_end_idx][1], edge["pts"][edge_end_idx][0]])
+
             pos_start_local = np.array([128, 256]) - pos_start_local
             pos_end_local = np.array([128, 256]) - pos_end_local
 
@@ -639,7 +632,7 @@ class SatelliteDriver(object):
                                                                              future_pose_global[2]))
 
                     # add edge to aggregated graph
-                    pointlist_local = np.array(edge["pts"][start_idx:end_idx])
+                    pointlist_local = np.array(edge["pts"][edge_start_idx:edge_end_idx])
                     pointlist_local = np.array([256, 128]) - pointlist_local
                     pointlist_global = np.zeros(pointlist_local.shape)
                     pointlist_global[:, 0] = self.pose[0] - pointlist_local[:, 1] * np.cos(self.pose[2]) + pointlist_local[:, 0] * np.sin(self.pose[2])
@@ -651,11 +644,11 @@ class SatelliteDriver(object):
                     self.G_agg.add_node(node_0, pos=edge_start_global)
                     self.G_agg.add_node(node_1, pos=edge_end_global)
                     self.G_agg.add_edge(node_0, node_1, pts=pointlist_global)
-
                     break
 
-        self.render_poses_in_aerial()
-        self.visualize_G_agg()
+        if self.step % 2 == 0:
+            self.render_poses_in_aerial()
+            self.visualize_G_agg()
 
         print("     Pose queue size: {}".format(len(self.future_poses)))
 
@@ -670,34 +663,25 @@ class SatelliteDriver(object):
             self.pose = self.future_poses.pop(0)
             while out_of_bounds_check(self.pose, self.aerial_image.shape, oob_margin=500):
                 print("     pose out of bounds. removing from queue")
-
                 if len(self.future_poses) == 0:
                     print("future_poses empty. Exiting.")
                     exit()
 
                 self.pose = self.future_poses.pop(0)
-
             print("     get pose from queue: {:.0f}, {:.0f}, {:.1f}".format(self.pose[0], self.pose[1], self.pose[2]))
 
         self.pose[2] = self.yaw_check(self.pose[2])
 
         self.make_step()
-
         cv2.waitKey(1)
-
 
 
 if __name__ == "__main__":
     driver = SatelliteDriver()
 
-    # driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",
-    #                   type="full")
-    # driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-030.pth",
-    #                   type="successor")
-
-    driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",
+    driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",  # works well (Austin only)
                       type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-053.pth",
+    driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-053.pth",  # works well (Austin only)
                       type="successor")
 
     driver.load_satellite(impath="/data/lanegraph/woven-data/Austin.png")

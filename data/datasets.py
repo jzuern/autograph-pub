@@ -11,13 +11,7 @@ import random
 from aggregation.utils import AngleColorizer
 from pathlib import Path
 
-
-# def get_id(filename):
-#     id_list = os.path.basename(filename).split('-')
-#     return "-".join(id_list[1:4])
-
 get_id = lambda filename: "-".join(os.path.basename(filename).split('-')[1:4])
-
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
     def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5, max_num_samples=None):
