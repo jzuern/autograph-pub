@@ -32,7 +32,7 @@ class AngleColorizer:
 
 
 
-    def angle_to_color(self, angle):
+    def angle_to_color(self, angle, mask=None):
         """
         Converts an angle to a color. Angle is in radians and is in the range [0, 2*pi].
         :param angle:
@@ -42,6 +42,9 @@ class AngleColorizer:
 
         cmap = plt.get_cmap("hsv")
         angle_hsv = (cmap(angle / (2 * np.pi))[:, :, :3] * 255).astype(np.uint8)
+
+        if mask is not None:
+            angle_hsv = angle_hsv * mask[:, :, None]
 
         return angle_hsv
 
@@ -818,5 +821,5 @@ def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color
                      edge_color=node_color,
                      node_color=edge_color,
                      with_labels=False,
-                     node_size=5,
-                     arrowsize=15.0, )
+                     node_size=2,
+                     arrowsize=10.0,)

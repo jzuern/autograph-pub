@@ -1,6 +1,5 @@
 import glob
 import os.path
-
 import cv2
 import torch
 from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
@@ -27,22 +26,22 @@ keyboard = Controller()
 
 # SETTINGS
 
-skeleton_threshold = 0.1  # threshold for skeletonization
-edge_start_idx = 10       # start index for selecting edge as future pose
-edge_end_idx = 50         # end index for selecting edge as future pose
+skeleton_threshold = 0.05  # threshold for skeletonization
+edge_start_idx = 10        # start index for selecting edge as future pose
+edge_end_idx = 50          # end index for selecting edge as future pose
+write_every = 5            # write to disk every n steps
+
 
 viz = False
 if viz:
     print("Visualizing graph from previous run...")
-    matplotlib.use('TkAgg')
-    plt.ion()
     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
     ax.imshow(np.asarray(Image.open("aerial_image.png")))
     fname = sorted(glob.glob("/home/zuern/Desktop/tmp/G_agg/*.gpickle"))[-1]
     G_agg = pickle.load(open(fname, "rb"))
     visualize_graph(G_agg, ax)
     plt.show()
-    exit()
+
 
 
 def colorize(mask):
@@ -60,9 +59,7 @@ def colorize(mask):
 class SatelliteDriver(object):
     def __init__(self):
         self.aerial_image = None
-        self.init_pose = np.array([2500,
-                                   2500,
-                                   0.98 * 2*np.pi])
+        self.init_pose = np.array([1163, 2982, -2.69])
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
@@ -108,28 +105,32 @@ class SatelliteDriver(object):
             self.model_succ.load_state_dict(new_state_dict)
             self.model_succ.eval()
 
-        print("Model loaded")
+        print("Model {} loaded".format(model_path))
 
     def load_satellite(self, impath):
-        if not os.path.exists("aerial_image.png"):
-            print("Loading aerial image {}...".format(impath))
-            self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
-            print("Satellite loaded")
+        # if not os.path.exists("aerial_image.png"):
+        print("Loading aerial image {}...".format(impath))
+        self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
+        print("Satellite loaded")
+        #
+        #     # Crop (horizontal, vertical)
+        #
+        #     # PaloAlto - 1
+        #     # center = [18082, 29236]
+        #     # delta = [4000, 4000]
+        #     # Austin - 1
+        #     center = [43200, 21872]  # horizontal, vertical
+        #     delta = [4000, 4000]
+        #     self.aerial_image = self.aerial_image[center[1] - delta[1]//2:center[1] + delta[1]//2,
+        #                                           center[0] - delta[0]//2:center[0] + delta[0]//2, :]
 
-            # Crop
-            center = [32553, 33714]  # horizontal, vertical
-            delta = [5000, 5000]
-            self.aerial_image = self.aerial_image[center[1] - delta[1]//2:center[1] + delta[1]//2,
-                                                  center[0] - delta[0]//2:center[0] + delta[0]//2, :]
+        # Image.fromarray(self.aerial_image).save("aerial_image.png")
+        #
+        # self.aerial_image = np.asarray(Image.open("aerial_image.png")).astype(np.uint8)
 
-            Image.fromarray(self.aerial_image).save("aerial_image.png")
-
-        self.aerial_image = np.asarray(Image.open("aerial_image.png")).astype(np.uint8)
         self.aerial_image = cv2.cvtColor(self.aerial_image, cv2.COLOR_BGR2RGB)
-
         self.canvas_log_odds = np.ones([self.aerial_image.shape[0], self.aerial_image.shape[1]], dtype=np.float32)
         self.canvas_angles = np.zeros([self.aerial_image.shape[0], self.aerial_image.shape[1], 3], dtype=np.uint8)
-
 
     def generate_pos_encoding(self):
         q = [self.crop_shape[0]-1,
@@ -145,16 +146,15 @@ class SatelliteDriver(object):
 
         return pos_encoding
 
-
-    def skeletonize_prediction(self, pred, threshold=0.5):
+    def skeletonize_prediction(self, pred_succ, threshold=0.5):
 
         # first, convert to binary
-        pred_thrshld = (pred > threshold).astype(np.uint8)
+        pred_succ_thrshld = (pred_succ > threshold).astype(np.uint8)
 
-        cv2.imshow("pred_thrshld", pred_thrshld * 255)
+        cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
 
         # then, skeletonize
-        skeleton = skeletonize(pred_thrshld)
+        skeleton = skeletonize(pred_succ_thrshld)
 
         # cut away top and sides by N pixels
         N = 30
@@ -162,9 +162,7 @@ class SatelliteDriver(object):
         skeleton[: , :N] = 0
         skeleton[:, -N:] = 0
 
-
         return skeleton
-
 
     def pose_to_transform(self):
 
@@ -198,7 +196,6 @@ class SatelliteDriver(object):
 
         return M
 
-
     def add_pred_to_canvas(self, pred):
 
         M = np.linalg.inv(self.pose_to_transform())
@@ -231,8 +228,6 @@ class SatelliteDriver(object):
             y_0 = int(y_0 / df)
             cv2.circle(canvas_viz, (x_0, y_0), 3, (0, 255, 0), -1)
 
-
-
     def crop_satellite_at_pose(self, pose):
 
         M = self.pose_to_transform()
@@ -250,7 +245,6 @@ class SatelliteDriver(object):
         self.current_crop = rgb
 
         return rgb
-
 
     def skeleton_to_graph(self, skeleton, pred_angles, pred_succ):
         """Convert skeleton to graph"""
@@ -290,7 +284,6 @@ class SatelliteDriver(object):
                     graph.remove_edge(e, s)
 
         return graph
-
 
     def add_graph_to_angle_canvas(self):
 
@@ -382,12 +375,13 @@ class SatelliteDriver(object):
 
         pos_encoding = self.generate_pos_encoding()
         rgb = self.crop_satellite_at_pose(self.pose)
+        # rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB) # not the reason
 
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
         pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
 
         with torch.no_grad():
-            (pred, _) = self.model_full(torch.cat([rgb_torch, rgb_torch], dim=0))
+            (pred, _) = self.model_full(rgb_torch)
             pred = torch.nn.functional.interpolate(pred,
                                                    size=rgb_torch.shape[2:],
                                                    mode='bilinear',
@@ -407,12 +401,8 @@ class SatelliteDriver(object):
 
         pred_succ = torch.nn.Sigmoid()(pred_succ)
         pred_succ = pred_succ[0, 0].cpu().detach().numpy()
-        # pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
+        pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
 
-        pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
-        pred_angles_color = self.ac.angle_to_color(pred_angles)
-
-        cv2.imshow("pred_angles_color", pred_angles_color)
 
         skeleton = self.skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
         self.graph_skeleton = self.skeleton_to_graph(skeleton, pred_angles, pred_succ)
@@ -421,6 +411,14 @@ class SatelliteDriver(object):
         skeleton = skeleton.astype(np.uint8) * 255
         skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
         skeleton = (skeleton / 255.0).astype(np.float32)
+
+
+        pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+        pred_angles_color = self.ac.angle_to_color(pred_angles, mask=pred_succ > skeleton_threshold)
+
+
+
+
 
         self.add_pred_to_canvas(skeleton)
         self.add_graph_to_angle_canvas()
@@ -442,6 +440,11 @@ class SatelliteDriver(object):
 
 
         cv2.imshow("pred_succ_viz", pred_succ_viz)
+        cv2.imshow("pred_drivable", pred_drivable)
+        cv2.imshow("pred_angles_color", pred_angles_color)
+
+
+
         cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_pred_succ_viz.png".format(self.step), pred_succ_viz)
 
         self.step += 1
@@ -511,8 +514,6 @@ class SatelliteDriver(object):
 
     def drive_keyboard(self, key):
 
-        print("drive_step")
-
         print("Pose x, y, yaw: {:.1f}, {:.1f}, {:.2f}".format(self.pose[0], self.pose[1], self.pose[2]))
 
         if self.pose[2] > 2 * np.pi:
@@ -550,6 +551,8 @@ class SatelliteDriver(object):
             self.pose[0:2] -= np.array([delta[1], delta[0]])
 
         self.make_step()
+        cv2.waitKey(1)
+
 
     def drive_freely(self):
 
@@ -573,6 +576,9 @@ class SatelliteDriver(object):
             succ = list(g.successors(successor_point))
             for successor in succ:
                 succ_edges.append(g.edges[successor_point, successor])
+
+        if len(succ_edges) == 0:
+            print("     No successor edges found.")
 
         for edge in succ_edges:
 
@@ -607,13 +613,14 @@ class SatelliteDriver(object):
             angle_global = self.pose[2] + angle_local
 
 
-            step_sizes = [20, 40, 60] # number of pixels to move forward along edge
+            # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
+            step_sizes = [40] # number of pixels to move forward along edge
 
             for step_size in step_sizes:
 
                 diff = step_size * (edge_end_global - edge_start_global) / np.linalg.norm(edge_end_global - edge_start_global)
 
-                # add to current pose
+                # define future pose
                 future_pose_global = np.zeros(3)
                 future_pose_global[0:2] = edge_start_global + diff
                 future_pose_global[2] = self.yaw_check(angle_global)
@@ -624,9 +631,10 @@ class SatelliteDriver(object):
 
                 if not was_visited and not is_already_in_queue:
                     self.future_poses.append(future_pose_global)
-                    print("     put pose in queue: {:.0f}, {:.0f}, {:.1f}".format(future_pose_global[0],
-                                                                             future_pose_global[1],
-                                                                             future_pose_global[2]))
+                    print("     put pose in queue: {:.0f}, {:.0f}, {:.1f} (step size: {})".format(future_pose_global[0],
+                                                                                  future_pose_global[1],
+                                                                                  future_pose_global[2],
+                                                                                                  step_size))
 
                     # add edge to aggregated graph
                     pointlist_local = np.array(edge["pts"][edge_start_idx:edge_end_idx])
@@ -643,14 +651,18 @@ class SatelliteDriver(object):
                     self.G_agg.add_node(node_edge_end, pos=edge_end_global)
                     self.G_agg.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
 
-                    # add G_agg-edge from current pose to edge start
-                    node_current_pose = (int(self.pose[0]), int(self.pose[1]))
-                    self.G_agg.add_node(node_current_pose, pos=self.pose[0:2])
-                    self.G_agg.add_edge(node_current_pose, node_edge_start)
+                    # add G_agg-edge from split point to edge start
+
+
+
+
+                    # node_current_pose = (int(self.pose[0]), int(self.pose[1]))
+                    # self.G_agg.add_node(node_current_pose, pos=self.pose[0:2])
+                    # self.G_agg.add_edge(node_current_pose, node_edge_start)
 
                     break
 
-        if self.step % 2 == 0:
+        if self.step % write_every == 0:
             self.render_poses_in_aerial()
             self.visualize_G_agg()
 
@@ -683,28 +695,38 @@ class SatelliteDriver(object):
 if __name__ == "__main__":
     driver = SatelliteDriver()
 
-    driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",  # works well (Austin only)
+    # driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",  # works well (Austin only)
+    #                   type="full")
+    # driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-053.pth",  # works well (Austin only)
+    #                   type="successor")
+
+
+    # driver.load_model(model_path="/data/autograph/checkpoints/dark-violet-91/e-104.pth",  # all-cities
+    #                   type="full")
+    # driver.load_model(model_path="/data/autograph/checkpoints/glamorous-energy-94/e-132.pth",  # all-cities
+    #                   type="successor")
+
+    driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # all-cities  (Austin only, BIG)
                       type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-053.pth",  # works well (Austin only)
+    driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # all-cities  (Austin only, BIG)
                       type="successor")
 
-    driver.load_satellite(impath="/data/lanegraph/woven-data/Austin.png")
+    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-update/pngs/austin/ATX_83_34021_46605.png")
 
     while True:
         driver.drive_freely()
 
+    print("Press arrow keys to drive")
 
-    # print("Press arrow keys to drive")
-    #
-    # def on_press(key):
-    #     driver.drive_keyboard(key)
-    #
-    #
-    # def on_release(key):
-    #     if key == Key.esc:
-    #         return False
-    #
-    # # Collect events until released
-    # with Listener(on_press=on_press) as listener:
-    #     listener.join()
+    def on_press(key):
+        driver.drive_keyboard(key)
+
+
+    def on_release(key):
+        if key == Key.esc:
+            return False
+
+    # Collect events until released
+    with Listener(on_press=on_press) as listener:
+        listener.join()
 

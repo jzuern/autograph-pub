@@ -633,7 +633,6 @@ def main():
                     trainer.evaluate_succ(epoch)
                 else:
                     trainer.evaluate_full(epoch)
-
             try:
                 wandb_run_name = wandb.run.name
             except:
