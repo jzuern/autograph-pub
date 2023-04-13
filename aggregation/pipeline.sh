@@ -12,9 +12,7 @@ for CITY in "${CITIES[@]}"; do
                                                            --out_path_root /data/autograph/test-all-cities/$CITY \
                                                            --sat_image_root /data/lanegraph/woven-data \
                                                            --source tracklets_dense \
-                                                           --crop_size 256 \
-                                                           --query_points ego \
-                                                           --max_num_samples 1000 \
+                                                           --max_num_samples 100 \
                                                            --num_parallel $NUM_PARALLEL \
                                                            --thread_id $tid &
     sleep 60 # sleep X sec to give time start generating

@@ -9,8 +9,12 @@ from scipy.spatial.distance import cdist
 import torch
 import os
 from sklearn.cluster import DBSCAN
+from collections import defaultdict
+from shapely.geometry import LineString
+
 from av2.geometry.interpolate import compute_midpoint_line
 from av2.map.map_api import ArgoverseStaticMap
+
 import matplotlib.pyplot as plt
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_angles,  get_oriented_crop, transform2vgg
 
@@ -168,6 +172,8 @@ def get_endpoints(succ_traj, crop_size):
     return len(endpoints_centroids)
 
 
+
+
 def iou_mask(mask1, mask2):
     # Calculates IoU between two binary masks
     mask1_area = np.count_nonzero(mask1 == 1)
@@ -177,18 +183,257 @@ def iou_mask(mask1, mask2):
     return iou
 
 
-def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_image):
-    # Get all trajectories that go through query point
 
-    dist_thrsh = 4  # in px
-    angle_thrsh = np.pi / 4  # in rad
+# merge function to  merge all sublist having common elements.
+def merge_common(lists):
+    neigh = defaultdict(set)
+    visited = set()
+    for each in lists:
+        for item in each:
+            neigh[item].update(each)
+
+    def comp(node, neigh=neigh, visited=visited, vis=visited.add):
+        nodes = set([node])
+        next_node = nodes.pop
+        while nodes:
+            node = next_node()
+            vis(node)
+            nodes |= neigh[node] - visited
+            yield node
+
+    for node in neigh:
+        if node not in visited:
+            yield sorted(comp(node))
+
+def connected_component_subgraphs(G):
+    # make an undirected copy of the digraph
+    UG = G.to_undirected()
+    for c in nx.connected_components(UG):
+        yield UG.subgraph(c)
+
+
+
+def get_supernodes(G, max_distance=0.1):
+
+    # Max distance is in unit pixel
+    print("Getting supernodes for graph with {} nodes".format(G.number_of_nodes()))
+
+    waypoints = nx.get_node_attributes(G, 'pos')
+    nodes = np.array([waypoints[i] for i in G.nodes()])
+    node_name_dict = {i: node_name for i, node_name in enumerate(G.nodes())}
+
+    distance_matrix = cdist(nodes, nodes, metric='euclidean')
+    close_indices = np.argwhere(distance_matrix < max_distance)
+
+    # convert according to node_name_dict
+    close_indices_ = []
+    for i, j in close_indices:
+        close_indices_.append([node_name_dict[i], node_name_dict[j]])
+    close_indices = close_indices_
+
+    close_indices_sets = list(merge_common(close_indices))
+
+    print("Getting supernodes for graph with {} nodes... done! Found {} supernodes.".format(G.number_of_nodes(), len(close_indices_sets)))
+
+    return close_indices_sets
+
+
+def crop_graph(g, x_min, x_max, y_min, y_max):
+
+    g_ = g.copy(as_view=False)
+    for node in g.nodes():
+        if g.nodes[node]['pos'][0] < x_min or g.nodes[node]['pos'][0] > x_max or g.nodes[node]['pos'][1] < y_min or g.nodes[node]['pos'][1] > y_max:
+            g_.remove_node(node)
+
+    return g_
+
+
+def remove_redundant_nodes(obj_boxes, obj_relation_triplets, redundant_distance_threshold_px=10.0):
+
+    # remove "1" column
+    obj_relation_triplets = obj_relation_triplets[:, 0:2]
+
+    # find close indices
+    distance_matrix = cdist(obj_boxes, obj_boxes, metric='euclidean')
+    close_indices = np.argwhere(distance_matrix < redundant_distance_threshold_px)
+
+    # remove rows with same values
+    close_indices = np.delete(close_indices, np.where((close_indices[:, 0] == close_indices[:, 1])), axis=0)
+
+    close_indices_sets = list(merge_common(close_indices))
+
+    # make dict
+    map_to_from = {}
+    for c in close_indices_sets:
+        c = list(c)  # convert set to list
+        idx_to = c[0]
+        indices_from = c[1:]
+        map_to_from[idx_to] = indices_from
+
+    # replace redundant nodes
+    obj_relation_triplets_ = obj_relation_triplets.copy()
+    to_remove_indices = set()
+
+    for index_to, indices_from in map_to_from.items():
+        for index_from in indices_from:
+            # print('Replacing node ', index_from, ' with ', index_to)
+            obj_relation_triplets_[obj_relation_triplets == index_from] = index_to
+            to_remove_indices.add(index_from)
+    obj_relation_triplets = obj_relation_triplets_.copy()
+    to_remove_indices = list(to_remove_indices)
+
+    # Now we remove the non-connected nodes from the graph
+    curr_indices = range(len(obj_boxes))
+    new_indices = []
+    counter = 0
+    for i in curr_indices:
+        new_indices.append(counter)
+        if i not in to_remove_indices:
+            counter += 1
+
+    index_map = dict(zip(curr_indices, new_indices))
+
+    # perform remapping in obj_relation_triplets
+    obj_relation_triplets_ = obj_relation_triplets.copy()
+    for i in range(len(obj_relation_triplets)):
+        obj_relation_triplets_[i, 0] = index_map[obj_relation_triplets[i, 0]]
+        obj_relation_triplets_[i, 1] = index_map[obj_relation_triplets[i, 1]]
+    obj_relation_triplets = obj_relation_triplets_.copy()
+
+    # Make unique
+    obj_relation_triplets = np.unique(obj_relation_triplets, axis=0)
+
+    valid_indices = np.ones(len(obj_boxes), dtype=np.uint8)
+    valid_indices[to_remove_indices] = 0
+    valid_indices = valid_indices.astype(np.bool)
+
+    obj_boxes = obj_boxes[valid_indices]
+
+    # Generate new obj_relations
+    obj_relations = np.zeros([len(obj_boxes), len(obj_boxes)], dtype=np.uint8)
+    for triplet in obj_relation_triplets:
+        obj_relations[triplet[0], triplet[1]] = 1
+
+    # add "1" column
+    obj_relation_triplets = np.hstack([obj_relation_triplets, np.ones([len(obj_relation_triplets), 1], dtype=np.uint8)])
+
+    return obj_boxes, obj_relation_triplets, obj_relations, distance_matrix
+
+
+def filter_subgraph(G, subgraph, ego_node, max_distance=256):
+    """
+    Filters subgraph based on spatial distance to ego-node. If a node is removed, all downstream nodes are also removed.
+    :param subgraph:
+    :param ego_node:
+    :return:
+    """
+
+    subgraph_from_ego = nx.bfs_tree(subgraph, ego_node)
+
+    # Remove all nodes that are too far away from the ego-node
+    subgraph_from_ego_ = subgraph_from_ego.copy()
+    for n in subgraph_from_ego_.nodes():
+        if np.linalg.norm(G.nodes[n]["pos"] - G.nodes[ego_node]["pos"]) > max_distance:
+            subgraph_from_ego.remove_node(n)
+
+    subgraph_from_ego_ = subgraph_from_ego.copy()
+    # Remove all nodes without connection to ego_node
+    for n in subgraph_from_ego_.nodes():
+        if not nx.has_path(subgraph_from_ego, ego_node, n):
+            subgraph_from_ego.remove_node(n)
+
+    return subgraph_from_ego
+
+
+def merge_close_graph_nodes(graph):
+
+    node_positions = np.array([graph.nodes[n]["pos"] for n in graph.nodes()])
+
+    edges = np.array(list(graph.edges()))
+    edge_triplets = np.vstack((edges[:, 0], edges[:, 1], np.ones(len(edges), dtype=np.uint8))).T
+
+    print("1-Number of edges before: ", len(edge_triplets))
+
+    # # remove overlapping nodes with very similar coordinates and connect
+    node_positions, edge_triplets, _, _ = remove_redundant_nodes(node_positions, edge_triplets, redundant_distance_threshold_px=10.0)
+    print("2-Number of edges after removing redundant nodes: ", len(edge_triplets))
+
+    # Convert to networkx directional graph
+    G = nx.DiGraph()
+
+    for ii, node_pos in enumerate(node_positions):
+        G.add_node(ii, pos=node_pos[0:2])
+    for e in edge_triplets:
+        G.add_edge(e[0], e[1])
+
+    return G
+
+
+def find_successor_annotations(annot):
+
+    # convert to shapely linestrings
+    lines = [LineString([(l[0, 0], l[0, 1]), (l[1, 0], l[1, 1])]) for l in annot if l.shape[0] == 2]
+
+    # cluster lines into connected components
+    clusters = []
+    for line in lines:
+        if len(clusters) == 0:
+            clusters.append([line])
+        else:
+            found = False
+            for cluster in clusters:
+                for cline in cluster:
+                    if line.distance(cline) < 1e-3:
+                        cluster.append(line)
+                        found = True
+                        break
+                if found:
+                    break
+            if not found:
+                clusters.append([line])
+
+    # convert back to annot
+    annot_successor = []
+    for cluster in clusters:
+        annot_c = []
+        for line in cluster:
+            annot_c.append(np.array(line.coords))
+
+        annot_c = np.vstack(annot_c)
+
+        # # take first element and then every second element
+        # annot_c0 = annot_c[0, :]
+        # annot_c1 = annot_c[1::2, :]
+        # annot_c = np.vstack([annot_c0, annot_c1])
+
+        annot_successor.append(annot_c)
+
+    return annot_successor
+
+
+
+
+
+
+
+
+
+
+def merge_successor_trajectories(q, trajectories_all, sat_image,
+                                 trajectories_ped=[],
+                                 query_distance_threshold=4,  # in px
+                                 joining_distance_threshold=4,  # in px
+                                 joining_angle_threshold=np.pi/4  # in rad
+     ):
+
+    # Get all trajectories that go through query point
 
     sat_image_viz = sat_image.copy()
 
     trajectories_close_q = []
     for t in trajectories_all:
         min_distance_from_q = np.min(np.linalg.norm(t - q, axis=1))
-        if min_distance_from_q < dist_thrsh:
+        if min_distance_from_q < query_distance_threshold:
             closest_index = np.argmin(np.linalg.norm(t - q, axis=1))
             t = t[closest_index:]
             if len(t) > 2:
@@ -196,6 +441,7 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
 
     for t in trajectories_all:
         for i in range(len(t)-1):
+            # cv2.circle(sat_image_viz, tuple(t[i].astype(int)), 2, (255, 0, 0), -1)
             cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1, cv2.LINE_AA)
 
 
@@ -214,8 +460,8 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
             min_dist = np.amin(cdist(t0, t1), axis=0)
             min_angle = np.amin(cdist(angles0[:, np.newaxis], angles1[:, np.newaxis]), axis=0)
 
-            crit_angle = min_angle < angle_thrsh
-            crit_dist = min_dist < dist_thrsh
+            crit_angle = min_angle < joining_angle_threshold
+            crit_dist = min_dist < joining_distance_threshold
 
             crit = crit_angle * crit_dist
 
@@ -278,8 +524,6 @@ def merge_successor_trajectories(q, trajectories_all, trajectories_ped, sat_imag
     mask_total[:, :, 1] = mask_veh
 
     return succ_traj,  mask_total, mask_angle_colorized, sat_image_viz
-
-
 
 
 
