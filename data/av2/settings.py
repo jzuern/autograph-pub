@@ -20,6 +20,12 @@ FRAC_SUCC_GRAPH_PIXELS = 0.03  # fraction of pixels in the successor visualizati
 # END PREPROCESSING FILTERING SETTINGS
 
 
+crop_size = 256  # This is the actual crop size
+crop_size_large = 2 * crop_size  # This is twice the actual crop size afterwards
+
+
+
+
 def kabsch_umeyama(A, B):
 
     '''

@@ -245,6 +245,9 @@ def crop_graph(g, x_min, x_max, y_min, y_max):
         if g.nodes[node]['pos'][0] < x_min or g.nodes[node]['pos'][0] > x_max or g.nodes[node]['pos'][1] < y_min or g.nodes[node]['pos'][1] > y_max:
             g_.remove_node(node)
 
+
+    print("Cropping graph with {} nodes... done! New graph has {} nodes.".format(g.number_of_nodes(), g_.number_of_nodes()))
+
     return g_
 
 
@@ -486,7 +489,6 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
         for i in range(len(t)-1):
             cv2.line(mask_ped, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
             cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1, cv2.LINE_AA)
-
 
     # paint into angle mask
     mask_angle = np.zeros(sat_image.shape[0:2], dtype=np.float32)

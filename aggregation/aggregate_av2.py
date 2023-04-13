@@ -830,15 +830,16 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, trajectories_, crop_
     return sat_image_crop, tracklet_image_crop, drivable_gt_crop, [crop_center_x, crop_center_y, angle]
 
 
-def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_ped_, G_annot,
+def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, G_annot,
                         sat_image_, tracklets_image, drivable_gt, out_path_root, max_num_samples=100, crop_size=256):
 
     if args.source == "lanegraph":
 
-        starting_nodes = [n for n in G_annot.nodes() if len(list(G_annot.predecessors(n))) == 0]
-        print("     Found {} starting nodes.".format(len(starting_nodes)))
+        sample_num = 0
+        while sample_num < max_num_samples:
 
-        for start_node in starting_nodes:
+            start_node = np.random.choice(G_annot.nodes)
+
             successor_subgraph = nx.bfs_tree(G_annot, start_node)
 
             # Generate Agent Trajectory
@@ -851,11 +852,10 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
                 curr_node = successors[np.random.randint(0, len(successors))]
                 agent_trajectory.append(curr_node)
 
-            # Visualize the graph for debugging
-            # visualize_graph(G, successor_subgraph, agent_visited_nodes)
 
             # leave out the last nodes cause otherwise future trajectory is ending in image
             agent_trajectory = agent_trajectory[0:-10]
+            agent_trajectory = agent_trajectory[::5]
             if len(agent_trajectory) == 0:
                 continue
 
@@ -879,47 +879,196 @@ def process_chunk_final(args, city_name, trajectories_vehicles_, trajectories_pe
                 y_true = ego_x_y_yaw[1]
                 yaw_true = ego_x_y_yaw[2]
 
-                xs_noise = np.random.default_rng().normal(loc=x_true, scale=5, size=1)
-                ys_noise = np.random.default_rng().normal(loc=y_true, scale=5, size=1)
-                yaws_noise = np.random.default_rng().normal(loc=yaw_true, scale=0.3, size=1)
+                x_noise = int(np.random.default_rng().normal(loc=x_true, scale=5, size=1)[0])
+                y_noise = int(np.random.default_rng().normal(loc=y_true, scale=5, size=1)[0])
+                yaw_noise = np.random.default_rng().normal(loc=yaw_true, scale=0.3, size=1)[0]
 
-                # iterate over noise samples
-                for x_noise, y_noise, yaw_noise in zip(xs_noise, ys_noise, yaws_noise):
+                dataset_split = get_dataset_split(city_name, x_noise, y_noise)
+                if dataset_split == None:
+                    continue
+                out_path = os.path.join(out_path_root, dataset_split)
+                sample_id = "{}-{}-{}".format(city_name, x_noise, y_noise)
 
-                    # Source points are around center in satellite image crop
-                    center = np.array([512, 512])
+                if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
+                    continue
 
-                    pos_noise = np.array([x_noise, y_noise])
-                    R_noise = np.array([[np.cos(yaw_noise), -np.sin(yaw_noise)],
-                                        [np.sin(yaw_noise),  np.cos(yaw_noise)]])
 
-                    successor_subgraph_visible = filter_subgraph(G_annot, successor_subgraph, curr_node, max_distance=300)
+                # Source points are around center in satellite image crop
+                center = np.array([512, 512])
 
-                    if successor_subgraph_visible.number_of_edges() == 0:
+                pos_noise = np.array([x_noise, y_noise])
+                R_noise = np.array([[np.cos(yaw_noise), -np.sin(yaw_noise)],
+                                    [np.sin(yaw_noise),  np.cos(yaw_noise)]])
+
+                #subgraph_visible = filter_subgraph(G_annot, successor_subgraph, curr_node, max_distance=300)
+
+                subgraph_visible = crop_graph(G_annot, x_noise-500, x_noise+500, y_noise-500, y_noise+500)
+
+                if subgraph_visible.number_of_edges() == 0:
+                    continue
+
+                # max_out_edges = max(subgraph_visible.out_degree(node) for node in subgraph_visible.nodes())
+                # num_nodes = subgraph_visible.number_of_nodes()
+                #
+                # # we need large enough successor graphs
+                # if num_nodes < 10:
+                #     continue
+
+                # # only take few samples where there is only one out edge
+                # if max_out_edges == 1:
+                #     continue
+
+                src_pts = np.array([[-128,  0],
+                                    [-128, -255],
+                                    [ 127, -255],
+                                    [ 127,  0]])
+                src_pts = (np.matmul(R_noise, src_pts.T).T + center).astype(np.float32)
+                dst_pts = np.array([[0, crop_size - 1],
+                                    [0, 0],
+                                    [crop_size - 1, 0],
+                                    [crop_size - 1, crop_size - 1]],
+                                   dtype="float32")
+
+                # the perspective transformation matrix
+                M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+
+
+                sat_image_crop_ = sat_image_[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
+                                             int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                sat_image_crop = cv2.warpPerspective(sat_image_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
+
+                drivable_gt_crop_ = drivable_gt[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
+                                                       int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                drivable_gt_crop = cv2.warpPerspective(drivable_gt_crop_, M, (crop_size, crop_size), cv2.INTER_NEAREST)
+
+
+                for n in subgraph_visible.nodes():
+                    node_pos = G_annot.nodes[n]["pos"]
+                    node_pos = node_pos - pos_noise + center
+                    node_pos = cv2.perspectiveTransform(node_pos[None, None, :], M)
+                    node_pos = node_pos[0, 0, :].astype(np.int32)
+                    subgraph_visible.nodes[n]["pos"] = node_pos
+
+                # make list of annots out of edges of subgraph
+                roots = [n for (n, d) in subgraph_visible.in_degree if d == 0]
+                leafs = [n for (n, d) in subgraph_visible.out_degree if d == 0]
+
+                branches = []
+                for root in roots:
+                    for path in nx.all_simple_paths(subgraph_visible, root, leafs):
+                        if len(path) > 2:
+                            branches.append(path)
+
+                #branches = list(nx.strongly_connected_components(subgraph_visible))
+
+
+                annots = []
+                for branch in branches:
+                    coordinates = [subgraph_visible.nodes[n]["pos"] for n in branch]
+                    if len(coordinates) > 1:
+                        coordinates = np.array(coordinates)
+                        annots.append(coordinates)
+
+                query_distance_threshold = 10
+                joining_distance_threshold = 4
+                joining_angle_threshold = np.pi / 4
+
+                do_debugging = False
+                if do_debugging:
+                    sat_image_crop_viz = cv2.cvtColor(sat_image_crop, cv2.COLOR_BGR2RGB)
+                    cv2.imshow('sat_image_viz', sat_image_crop_viz)
+                    cv2.waitKey(10)
+
+                    def viz(event, mouseX, mouseY, flags, param):
+                        if event == cv2.EVENT_LBUTTONDOWN:
+                            q = np.array([mouseX, mouseY])
+
+                            succ_traj, mask_total, mask_angle_colorized, sat_image_viz = \
+                                merge_successor_trajectories(q, annots, sat_image_crop_viz,
+                                                             trajectories_ped=[],
+                                                             query_distance_threshold=query_distance_threshold,
+                                                             joining_distance_threshold=joining_distance_threshold,
+                                                             joining_angle_threshold=joining_angle_threshold)
+
+                            if sat_image_viz is not None:
+                                sat_image_viz = cv2.circle(sat_image_viz, (mouseX, mouseY), 5, (0, 0, 0), -1)
+                                cv2.imshow('sat_image_viz', sat_image_viz)
+
+                    cv2.namedWindow('sat_image_viz')
+                    cv2.setMouseCallback('sat_image_viz', viz)
+                    cv2.waitKey(1)
+                    cv2.waitKey(0)
+
+                query_points = np.array([[crop_size // 2, crop_size - 1]])
+
+                tracklets_im_list = []
+
+                for i_query, q in enumerate(query_points):
+
+                    succ_traj, mask_total, mask_angle_colorized, sat_image_viz = \
+                        merge_successor_trajectories(q, annots, sat_image_crop,
+                                                     trajectories_ped=[],
+                                                     query_distance_threshold=query_distance_threshold,
+                                                     joining_distance_threshold=joining_distance_threshold,
+                                                     joining_angle_threshold=joining_angle_threshold)
+
+                    num_clusters = get_endpoints(succ_traj, crop_size)
+
+                    if num_clusters > 1:
+                        sample_type = "branching"
+                    else:
+                        sample_type = "straight"
+
+                    # Filter out all samples that do not fit in quality criteria
+                    if len(succ_traj) < N_MIN_SUCC_TRAJECTORIES:
+                        logging.debug("Too few successor trajectories")
                         continue
 
-                    max_out_edges = max(successor_subgraph_visible.out_degree(node) for node in successor_subgraph_visible.nodes())
-                    num_nodes = successor_subgraph_visible.number_of_nodes()
-
-                    # we need large enough successor graphs
-                    if num_nodes < 10:
+                    # Minimum of X percent of pixels must be covered by the trajectory
+                    mask_succ_sparse = mask_total[0].copy()
+                    if np.sum(mask_succ_sparse > 128) < FRAC_SUCC_GRAPH_PIXELS * np.prod(
+                            mask_succ_sparse.shape) and args.source == "tracklets_joint":
+                        logging.debug("Not enough pixels covered with successor graph. Skipping")
                         continue
 
-                    # only take few samples where there is only one out edge
-                    if max_out_edges == 1:
+                    # Must be sufficiently dissimilar from any previous sample
+                    max_iou = max([iou_mask(mask_succ_sparse, m) for m in tracklets_im_list]) if len(
+                        tracklets_im_list) > 0 else 0
+                    if max_iou > IOU_SIMILARITY_THRESHOLD:
+                        logging.info("Sample too similar to previous samples. Skipping")
                         continue
 
-                    # make list of annots out of edges of subgraph
+                    tracklets_im_list.append(mask_succ_sparse)
 
-                    roots = [n for (n, d) in successor_subgraph_visible.in_degree if d == 0]
-                    print(roots)
+                    [cv2.circle(sat_image_viz, (qq[0], qq[1]), 2, (0, 150, 255), -1) for qq in query_points]
 
-                    leafs = [n for (n, d) in successor_subgraph_visible.out_degree if d == 0]
-                    print(leafs)
+                    pos_encoding = np.zeros(sat_image_crop.shape, dtype=np.float32)
+                    x, y = np.meshgrid(np.arange(sat_image_crop.shape[1]), np.arange(sat_image_crop.shape[0]))
+                    pos_encoding[q[1], q[0], 0] = 1
+                    pos_encoding[..., 1] = np.abs((x - q[0])) / sat_image_crop.shape[1]
+                    pos_encoding[..., 2] = np.abs((y - q[1])) / sat_image_crop.shape[0]
+                    pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
-                    df1 = nx.algorithms.all_simple_paths(successor_subgraph_visible, roots[0], leafs)
+                    sample_num += 1
+                    print("---- TID: {}/{}: Sample {} / {} | Saving to {}/{}/{}-{}".format(args.thread_id,
+                                                                                           args.num_parallel, out_path,
+                                                                                           sample_type, sample_id,
+                                                                                           i_query, sample_num,
+                                                                                           max_num_samples))
 
-                    print(df1)
+                    Image.fromarray(pos_encoding).save(
+                        "{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
+                    Image.fromarray(sat_image_crop).save(
+                        "{}/{}/{}-{}-rgb.png".format(out_path, sample_type, sample_id, i_query))
+                    Image.fromarray(sat_image_viz).save(
+                        "{}/{}/{}-{}-rgb-viz.png".format(out_path, sample_type, sample_id, i_query))
+                    Image.fromarray(mask_total).save(
+                        "{}/{}/{}-{}-masks.png".format(out_path, sample_type, sample_id, i_query))
+                    Image.fromarray(drivable_gt_crop.astype(np.uint8)).save(
+                        "{}/{}/{}-{}-drivable-gt.png".format(out_path, sample_type, sample_id, i_query))
+                    Image.fromarray(mask_angle_colorized).save(
+                        "{}/{}/{}-{}-angles.png".format(out_path, sample_type, sample_id, i_query))
+
 
     elif "tracklets" in args.source:
         annot_veh_ = trajectories_vehicles_
@@ -1309,7 +1458,7 @@ if __name__ == "__main__":
         G_tiles.append(nx.read_gpickle(graph_file))
 
     # join all tiles
-    G_annot = nx.Graph()
+    G_annot = nx.DiGraph()
     for G_tile in G_tiles:
         G_annot = nx.union(G_annot, G_tile, rename=("G", "H"))
 
@@ -1400,7 +1549,7 @@ if __name__ == "__main__":
 
     # single core
     if num_cpus <= 1:
-        process_chunk_final(args,
+        process_samples(args,
                             city_name,
                             trajectories_,
                             trajectories_ped_,
