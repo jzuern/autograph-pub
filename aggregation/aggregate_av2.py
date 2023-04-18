@@ -1552,32 +1552,32 @@ if __name__ == "__main__":
     #         traj_length += np.linalg.norm(t[i+1] - t[i])
     # print("     Summed length of pedestrian trajectories: ", traj_length)
 
-    viz_file = os.path.join(args.sat_image_root, "{}-viz-tracklets.png".format(city_name))
-    tracklet_file = os.path.join(args.sat_image_root, "{}-tracklets.png".format(city_name))
+    viz_file = os.path.join(args.urbanlanegraph_root, "{}/{}-viz-tracklets.png".format(city_name, city_name))
+    tracklet_file = os.path.join(args.urbanlanegraph_root, "{}/{}-tracklets.png".format(city_name, city_name))
 
-    # # Visualize tracklets
-    # sat_image_viz = sat_image_.copy()
-    #
-    # tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
-    #
-    # for t in tqdm(trajectories_):
-    #     rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
-    #     rc = (int(rc[0]), int(rc[1]), int(rc[2]))
-    #     for i in range(len(t)-1):
-    #         cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
-    #         cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
-    # for t in tqdm(trajectories_ped_):
-    #     rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
-    #     rc = (int(rc[0]), int(rc[1]), int(rc[2]))
-    #     for i in range(len(t)-1):
-    #         cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
-    #         cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (0, 255, 0), 3)
-    #
-    # cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
-    # print("Saved tracklet visualization to {}".format(viz_file))
-    # cv2.imwrite(tracklet_file, tracklets_image)
-    # print("Saved tracklet visualization to {}".format(tracklet_file))
-    # del sat_image_viz
+    # Visualize tracklets
+    sat_image_viz = sat_image_.copy()
+
+    tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
+
+    for t in tqdm(trajectories_):
+        rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
+        rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+        for i in range(len(t)-1):
+            cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+            cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
+    for t in tqdm(trajectories_ped_):
+        rc = (np.array(plt.get_cmap('magma')(np.random.rand())) * 255)[0:3]
+        rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+        for i in range(len(t)-1):
+            cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
+            cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (0, 255, 0), 3)
+
+    cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
+    print("Saved tracklet visualization to {}".format(viz_file))
+    cv2.imwrite(tracklet_file, tracklets_image)
+    print("Saved tracklet visualization to {}".format(tracklet_file))
+    del sat_image_viz
 
     tracklets_image = np.asarray(Image.open(tracklet_file)).astype(np.uint8)
     tracklets_image = cv2.cvtColor(tracklets_image, cv2.COLOR_BGR2RGB)
