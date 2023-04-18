@@ -3,7 +3,7 @@ export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 # iterate over all cities
 #CITIES=(pittsburgh washington paloalto austin detroit miami)
 CITIES=(austin)
-SOURCES=(lanegraph, tracklets_raw, tracklets_joint)
+SOURCES=(lanegraph tracklets_raw tracklets_joint)
 NUM_PARALLEL=1
 
 for CITY in "${CITIES[@]}"; do
@@ -12,10 +12,10 @@ for CITY in "${CITIES[@]}"; do
       echo "Processing $CITY, $tid / $NUM_PARALLEL !"
       ~/anaconda3/envs/geometric/bin/python aggregate_av2.py --city_name $CITY\
                                                              --out_path_root /data/autograph/1804/$CITY\
-                                                             --sat_image_root /data/lanegraph/woven-data \
-                                                             --source $SOURCE \
-                                                             --max_num_samples 100 \
-                                                             --num_parallel $NUM_PARALLEL \
+                                                             --sat_image_root /data/lanegraph/woven-data\
+                                                             --source $SOURCE\
+                                                             --max_num_samples 100\
+                                                             --num_parallel $NUM_PARALLEL\
                                                              --thread_id $tid &
       sleep 120 # sleep to give time start generating
     done

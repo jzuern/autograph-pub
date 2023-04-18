@@ -55,10 +55,10 @@ export NUM_GPUS=1
 
 
 ## SuccNet tracklet-supervised (TrackletNet D + A)
-WANDB_API_KEY=$WANDB_API_KEY ~/anaconda3/envs/geometric/bin/python train_regressor_pos_query.py \
-  --config cfg-rittersport.yaml \
-  --num_gpus $NUM_GPUS \
-  --target successor \
-  --input_layers rgb+drivable+angles \
-  --full-checkpoint /data/autograph/checkpoints/local_run_full/e-003.pth \
-  --dataset_name test-austin/tracklets_joint -d
+#WANDB_API_KEY=$WANDB_API_KEY ~/anaconda3/envs/geometric/bin/python train_regressor_pos_query.py \
+#  --config cfg-rittersport.yaml \
+#  --num_gpus $NUM_GPUS \
+#  --target successor \
+#  --input_layers rgb+drivable+angles \
+#  --full-checkpoint /data/autograph/checkpoints/local_run_full/e-003.pth \
+#  --dataset_name test-austin/tracklets_joint -d

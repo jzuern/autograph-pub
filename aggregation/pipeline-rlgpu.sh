@@ -3,7 +3,7 @@ export PYTHONPATH=$PYTHONPATH:/home/buechner/zuern/self-supervised-graph
 # iterate over all cities
 #CITIES=(pittsburgh washington paloalto austin detroit miami)
 CITIES=(austin)
-SOURCES=(lanegraph, tracklets_raw, tracklets_joint)
+SOURCES=(lanegraph tracklets_raw tracklets_joint)
 NUM_PARALLEL=12
 
 for CITY in "${CITIES[@]}"; do
