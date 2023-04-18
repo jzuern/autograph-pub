@@ -57,13 +57,14 @@ def colorize(mask):
 
 
 class SatelliteDriver(object):
-    def __init__(self):
+    def __init__(self, debug=False):
         self.aerial_image = None
         self.init_pose = np.array([1163, 2982, -2.69])
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
         self.time = time.time()
+        self.debug = debug
 
         self.crop_shape = (256, 256)
 
@@ -403,6 +404,7 @@ class SatelliteDriver(object):
         pred_succ = pred_succ[0, 0].cpu().detach().numpy()
         pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
 
+        cv2.imshow("pred_succ", pred_succ)
 
         skeleton = self.skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
         self.graph_skeleton = self.skeleton_to_graph(skeleton, pred_angles, pred_succ)
@@ -414,14 +416,17 @@ class SatelliteDriver(object):
 
 
         pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
-        pred_angles_color = self.ac.angle_to_color(pred_angles, mask=pred_succ > skeleton_threshold)
+        pred_angles_succ_color = self.ac.angle_to_color(pred_angles, mask=pred_succ > skeleton_threshold)
+        pred_angles_color = self.ac.angle_to_color(pred_angles, mask=pred_drivable > 0.3)
 
+        # pred_angles_color
+        cv2.imshow("pred_angles_color", pred_angles_color)
 
-
+        cv2.imshow("rgb", rgb)
 
 
         self.add_pred_to_canvas(skeleton)
-        self.add_graph_to_angle_canvas()
+        #self.add_graph_to_angle_canvas()
 
         pred_succ = (pred_succ * 255).astype(np.uint8)
         pred_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
@@ -438,12 +443,25 @@ class SatelliteDriver(object):
         node_positions = np.array([nodes[i]['o'] for i in nodes])
         [cv2.circle(pred_succ_viz, (int(p[1]), int(p[0])), 4, (0, 255, 0), -1) for p in node_positions]
 
-
         cv2.imshow("pred_succ_viz", pred_succ_viz)
         cv2.imshow("pred_drivable", pred_drivable)
-        cv2.imshow("pred_angles_color", pred_angles_color)
+        cv2.imshow("pred_angles_succ_color", pred_angles_succ_color)
 
-
+        if self.debug:
+            fig, axarr = plt.subplots(1, 6, figsize=(20, 20), sharex=True, sharey=True)
+            axarr[0].imshow(cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB))
+            axarr[0].title.set_text('rgb')
+            axarr[1].imshow(pred_drivable)
+            axarr[1].title.set_text('pred_drivable')
+            axarr[2].imshow(pred_succ)
+            axarr[2].title.set_text('pred_succ')
+            axarr[3].imshow(pred_angles_color)
+            axarr[3].title.set_text('pred_angles_color')
+            axarr[4].imshow(pred_angles_succ_color)
+            axarr[4].title.set_text('pred_angles_succ_color')
+            axarr[5].imshow(skeleton)
+            axarr[5].title.set_text('skeleton')
+            plt.show()
 
         cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_pred_succ_viz.png".format(self.step), pred_succ_viz)
 
@@ -508,7 +526,7 @@ class SatelliteDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        nx.write_gpickle(self.G_agg, "/home/zuern/Desktop/tmp/G_agg/{:04d}_G_agg.gpickle".format(self.step))
+        nx.write_gpickle(self.G_agg, "/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_G_agg.gpickle".format(self.step))
 
 
 
@@ -551,7 +569,7 @@ class SatelliteDriver(object):
             self.pose[0:2] -= np.array([delta[1], delta[0]])
 
         self.make_step()
-        cv2.waitKey(1)
+        cv2.waitKey(0)
 
 
     def drive_freely(self):
@@ -693,7 +711,7 @@ class SatelliteDriver(object):
 
 
 if __name__ == "__main__":
-    driver = SatelliteDriver()
+    driver = SatelliteDriver(debug=True)
 
     # driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",  # works well (Austin only)
     #                   type="full")
@@ -711,7 +729,7 @@ if __name__ == "__main__":
     driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # all-cities  (Austin only, BIG)
                       type="successor")
 
-    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-update/pngs/austin/ATX_83_34021_46605.png")
+    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-dataset-dev/Austin/tiles/eval/ATX_83_34021_46605.png")
 
     while True:
         driver.drive_freely()

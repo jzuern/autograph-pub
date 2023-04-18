@@ -160,16 +160,16 @@ def get_endpoints(succ_traj, crop_size):
 
     # Cluster endpoints
     try:
-        clustering = DBSCAN(eps=40, min_samples=2).fit(endpoints)
+        clustering = DBSCAN(eps=40, min_samples=1).fit(endpoints)
     except:
-        return 0
+        return 0, endpoints
 
     endpoints_centroids = []
     for c in np.unique(clustering.labels_):
         endpoints_centroids.append(np.mean(endpoints[clustering.labels_ == c], axis=0))
     endpoints_centroids = np.array(endpoints_centroids)
 
-    return len(endpoints_centroids)
+    return len(endpoints_centroids), endpoints
 
 
 
@@ -246,7 +246,7 @@ def crop_graph(g, x_min, x_max, y_min, y_max):
             g_.remove_node(node)
 
 
-    print("Cropping graph with {} nodes... done! New graph has {} nodes.".format(g.number_of_nodes(), g_.number_of_nodes()))
+    # print("Cropping graph with {} nodes... done! New graph has {} nodes.".format(g.number_of_nodes(), g_.number_of_nodes()))
 
     return g_
 
@@ -466,6 +466,7 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
             crit_angle = min_angle < joining_angle_threshold
             crit_dist = min_dist < joining_distance_threshold
 
+            # logical AND
             crit = crit_angle * crit_dist
 
             if np.any(crit):

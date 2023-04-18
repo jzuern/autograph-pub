@@ -840,7 +840,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
             start_node = np.random.choice(G_annot.nodes)
 
-            successor_subgraph = nx.bfs_tree(G_annot, start_node)
+            # successor_subgraph = nx.bfs_tree(G_annot, start_node)
 
             # Generate Agent Trajectory
             agent_trajectory = [start_node]
@@ -892,7 +892,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
                     continue
 
-
                 # Source points are around center in satellite image crop
                 center = np.array([512, 512])
 
@@ -901,7 +900,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                     [np.sin(yaw_noise),  np.cos(yaw_noise)]])
 
                 #subgraph_visible = filter_subgraph(G_annot, successor_subgraph, curr_node, max_distance=300)
-
                 subgraph_visible = crop_graph(G_annot, x_noise-500, x_noise+500, y_noise-500, y_noise+500)
 
                 if subgraph_visible.number_of_edges() == 0:
@@ -949,6 +947,12 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     node_pos = node_pos[0, 0, :].astype(np.int32)
                     subgraph_visible.nodes[n]["pos"] = node_pos
 
+                # remove subgraph_visible nodes outside of crop
+                for n in list(subgraph_visible.nodes()):
+                    node_pos = subgraph_visible.nodes[n]["pos"]
+                    if node_pos[0] < 0 or node_pos[0] >= crop_size or node_pos[1] < 0 or node_pos[1] >= crop_size:
+                        subgraph_visible.remove_node(n)
+
                 # make list of annots out of edges of subgraph
                 roots = [n for (n, d) in subgraph_visible.in_degree if d == 0]
                 leafs = [n for (n, d) in subgraph_visible.out_degree if d == 0]
@@ -959,9 +963,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                         if len(path) > 2:
                             branches.append(path)
 
-                #branches = list(nx.strongly_connected_components(subgraph_visible))
-
-
                 annots = []
                 for branch in branches:
                     coordinates = [subgraph_visible.nodes[n]["pos"] for n in branch]
@@ -971,7 +972,12 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
                 query_distance_threshold = 10
                 joining_distance_threshold = 4
-                joining_angle_threshold = np.pi / 4
+                joining_angle_threshold = np.pi / 8
+
+                # print("leafs coordinates")
+                # for leaf in leafs:
+                #     print(subgraph_visible.nodes[leaf]["pos"])
+
 
                 do_debugging = False
                 if do_debugging:
@@ -989,6 +995,11 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                                              query_distance_threshold=query_distance_threshold,
                                                              joining_distance_threshold=joining_distance_threshold,
                                                              joining_angle_threshold=joining_angle_threshold)
+
+                            _, endpoints = get_endpoints(succ_traj, crop_size)
+                            endpoints = np.unique(endpoints, axis=0)
+
+                            print("endpoints", endpoints)
 
                             if sat_image_viz is not None:
                                 sat_image_viz = cv2.circle(sat_image_viz, (mouseX, mouseY), 5, (0, 0, 0), -1)
@@ -1012,9 +1023,10 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                                      joining_distance_threshold=joining_distance_threshold,
                                                      joining_angle_threshold=joining_angle_threshold)
 
-                    num_clusters = get_endpoints(succ_traj, crop_size)
+                    _, endpoints = get_endpoints(succ_traj, crop_size)
+                    endpoints = np.unique(endpoints, axis=0)
 
-                    if num_clusters > 1:
+                    if len(endpoints) > 1:
                         sample_type = "branching"
                     else:
                         sample_type = "straight"
@@ -1221,13 +1233,12 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                                  joining_distance_threshold=joining_distance_threshold,
                                                  joining_angle_threshold=joining_angle_threshold)
 
-                num_clusters = get_endpoints(succ_traj, crop_size)
+                num_clusters, _ = get_endpoints(succ_traj, crop_size)
 
                 if num_clusters > 1:
                     sample_type = "branching"
                 else:
                     sample_type = "straight"
-
                 # Filter out all samples that do not fit in quality criteria
                 if len(succ_traj) < N_MIN_SUCC_TRAJECTORIES:
                     logging.debug("Too few successor trajectories")
