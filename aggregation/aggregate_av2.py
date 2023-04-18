@@ -830,7 +830,7 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, trajectories_, crop_
 
 
 def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, G_annot,
-                        sat_image_, tracklets_image, drivable_gt, out_path_root, max_num_samples=100, crop_size=256):
+                        sat_image_, tracklets_image, drivable_gt, out_path_root, max_num_samples=100, crop_size=256, y_min_cut=0):
 
     if args.source == "lanegraph":
 
@@ -1495,15 +1495,13 @@ if __name__ == "__main__":
     trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
     trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
 
-    # # Visualization
-    # import matplotlib.pyplot as plt
-    # for lane in lanes_[0:1000]:
-    #     plt.plot(lane[:, 0], lane[:, 1], color="black")
-    # for trajectory in trajectories_[::10]:
-    #     plt.plot(trajectory[:, 0], trajectory[:, 1], color="red")
-    # for trajectory in trajectories_ped_[::10]:
-    #     plt.plot(trajectory[:, 0], trajectory[:, 1], color="green")
-    # plt.show()
+    y_min_cut = 0
+
+    node_pos = [G_annot.nodes[n]["pos"] for n in G_annot.nodes]
+    node_pos = np.array(node_pos)
+    print("node pos extrema: ",
+          np.min(node_pos[:, 0]), np.max(node_pos[:, 0]),
+          np.min(node_pos[:, 1]), np.max(node_pos[:, 1]))
 
     if args.thread_id > 0:  # if we are parallel
         num_y_pixels = sat_image_.shape[0]
@@ -1521,7 +1519,7 @@ if __name__ == "__main__":
         trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
 
         for node in G_annot.nodes:
-            G_annot.nodes[node]["pos"] = (G_annot.nodes[node]["pos"][0], G_annot.nodes[node]["pos"][1] - y_min_cut)
+            G_annot.nodes[node]["pos"][1] = G_annot.nodes[node]["pos"][1] - y_min_cut
 
         # delete nodes outside of image
         nodes_to_delete = []
@@ -1529,7 +1527,6 @@ if __name__ == "__main__":
             if G_annot.nodes[node]["pos"][1] < 0 or G_annot.nodes[node]["pos"][1] >= sat_image_.shape[0]:
                 nodes_to_delete.append(node)
         G_annot.remove_nodes_from(nodes_to_delete)
-
 
         print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}, G_annot.number_of_nodes(): {}".
               format(args.thread_id, sat_image_.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
@@ -1597,4 +1594,4 @@ if __name__ == "__main__":
                             out_path_root,
                             args.max_num_samples,
                             crop_size=args.crop_size,
-                            )
+                            y_min_cut=y_min_cut)

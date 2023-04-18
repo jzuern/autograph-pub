@@ -696,8 +696,6 @@ def main():
             print("Saving checkpoint to {}".format(checkpoint_name))
             torch.save(model.state_dict(), checkpoint_name)
 
-            exit()
-
 
 if __name__ == '__main__':
     main()
