@@ -12,7 +12,7 @@ for CITY in "${CITIES[@]}"; do
       echo "Processing $CITY, $tid / $NUM_PARALLEL !"
       /home/buechner/zuern/geometric/bin/python aggregate_av2.py --city_name $CITY\
                                                              --out_path_root /data/buechner/zuern/autograph/1804/$CITY \
-                                                             --sat_image_root /home/buechner/zuern/urbanlanegraph-dataset/ \
+                                                             --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
                                                              --source $SOURCE \
                                                              --max_num_samples 100000 \
                                                              --num_parallel $NUM_PARALLEL \

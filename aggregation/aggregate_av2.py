@@ -1299,6 +1299,7 @@ if __name__ == "__main__":
     parser.add_argument("--export_final", action="store_true")
     parser.add_argument("--city_name", type=str, default="data")
     parser.add_argument("--sat_image_root", type=str, default="/data/lanegraph/woven-data/")
+    parser.add_argument("--urbanlanegraph_root", type=str, default="/data/lanegraph/urbanlanegraph-dataset-dev/")
     parser.add_argument("--out_path_root", type=str, default="data")
     parser.add_argument("--num_cpus", type=int, default=1)
     parser.add_argument("--max_num_samples", type=int, default=100, help="Number of samples to generate per city")
@@ -1341,8 +1342,8 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(out_path_root, 'test', 'branching'), exist_ok=True)
     os.makedirs(os.path.join(out_path_root, 'test', 'straight'), exist_ok=True)
 
-    sat_image_ = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}.png".format(city_name)))).astype(np.uint8)
-    drivable_gt = np.asarray(Image.open(os.path.join(args.sat_image_root, "{}_drivable.png".format(city_name)))).astype(np.uint8)
+    sat_image_ = np.asarray(Image.open(os.path.join(args.urbanlanegraph_root, "{}/{}.png".format(city_name, city_name)))).astype(np.uint8)
+    drivable_gt = np.asarray(Image.open(os.path.join(args.urbanlanegraph_root, "{}/{}_drivable.png".format(city_name, city_name)))).astype(np.uint8)
     drivable_gt[drivable_gt > 1] = 255
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
@@ -1476,7 +1477,7 @@ if __name__ == "__main__":
         trajectories_ped_pred_ = np.load("data/trajectories_ped_pred_{}.npy".format(city_name), allow_pickle=True)  # PRED PEDESTRIANS
 
     # get lanes from graph file
-    graph_files = glob(os.path.join("/data/lanegraph/urbanlanegraph-dataset-dev/{}/tiles/*/*.gpickle".format(city_name)))
+    graph_files = glob(os.path.join(args.urbanlanegraph_root, "{}/tiles/*/*.gpickle".format(city_name)))
     G_tiles = []
     for graph_file in graph_files:
         G_tiles.append(nx.read_gpickle(graph_file))
