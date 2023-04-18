@@ -21,6 +21,7 @@ from aggregation.utils import AngleColorizer
 from data.datasets import SuccessorRegressorDataset
 from lanegnn.utils import ParamLib, make_image_grid
 import glob
+import GPUtil
 
 
 def weighted_mse_loss(input, target, weight):
@@ -153,7 +154,6 @@ class Trainer():
                 target_drivable = data["drivable"].cuda()
                 target_angles = data["angles_xy"].cuda()
 
-
                 (pred, features) = self.model(in_tensor)
                 pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
 
@@ -176,7 +176,13 @@ class Trainer():
                     pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
                     pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
-                in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+                if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+                    in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                elif self.params.input_layers == "rgb+drivable":
+                    in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
+                elif self.params.input_layers == "rgb+drivable+angles":
+                    in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+
                 target_succ = data["mask_successor"].cuda()
 
                 (pred_succ, features) = self.model(in_tensor)
@@ -373,7 +379,6 @@ class Trainer():
         mask_preds = []
         mask_targets = []
         mask_gts = []
-
         angle_preds = []
         angle_targets = []
 
@@ -393,7 +398,13 @@ class Trainer():
                 pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
                 pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
-            in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+            if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+                in_tensor = torch.cat([rgb, pos_enc], dim=1)
+            elif self.params.input_layers == "rgb+drivable":
+                in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
+            elif self.params.input_layers == "rgb+drivable+angles":
+                in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+
             target_succ = data["mask_successor"].cuda()
 
             (pred_succ, features) = self.model(in_tensor)
@@ -521,11 +532,33 @@ def main():
     parser.add_argument('--stego', action="store_true", default=False, help="If True, applies stego loss")
     parser.add_argument('--visualize', action='store_true', help="visualize the dataset")
     parser.add_argument('--disable_wandb', '-d', action='store_true', help="disable wandb")
+
+    parser.add_argument('--dataset_name', type=str, help="which dataset to use for training")
     parser.add_argument('--target', type=str, help="which target to use for training", choices=["full", "successor"])
+    parser.add_argument('--input_layers', type=str, help="which input layers to use for training",
+                        choices=["rgb", "rgb+drivable", "rgb+drivable+angles"])
     parser.add_argument('--inference', action='store_true', help="perform inference instead of training")
     parser.add_argument('--full-checkpoint', type=str, default=None, help="path to full checkpoint for inference")
+    parser.add_argument('--num_gpus', type=int, default=1, help="number of gpus to use")
+
 
     opt = parser.parse_args()
+
+    available_gpus = []
+    while len(available_gpus) < opt.num_gpus:
+        print("Waiting for {} GPUs to become available...".format(opt.num_gpus))
+        available_gpus = GPUtil.getAvailable(order='first', limit=10, maxLoad=0.3, maxMemory=0.3, includeNan=False, excludeID=[], excludeUUID=[])
+        if len(available_gpus) >= opt.num_gpus:
+            break
+        time.sleep(10)
+    print("Available GPUs: ", available_gpus)
+
+    available_gpus = available_gpus[:opt.num_gpus]
+
+    # set torch available gpus
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(gpu) for gpu in available_gpus])
+
+
 
     params = ParamLib(opt.config)
     params.main.overwrite(opt)
@@ -534,8 +567,12 @@ def main():
     params.visualize = opt.visualize
     params.stego = opt.stego
     params.target = opt.target
+    params.input_layers = opt.input_layers
+    params.dataset_name = opt.dataset_name
 
     print("Batch size summed over all GPUs: ", params.model.batch_size_reg)
+
+    print("Params: ", params)
 
     if not params.main.disable_wandb:
         wandb.init(
@@ -554,7 +591,14 @@ def main():
         num_out_channels = 3  # drivable, angles
     elif opt.target == "successor":
         if opt.full_checkpoint is not None:
-            num_in_channels = 9  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+            if opt.input_layers == "rgb":   # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+                num_in_channels = 6
+            elif opt.input_layers == "rgb+drivable":
+                num_in_channels = 7
+            elif opt.input_layers == "rgb+drivable+angles":
+                num_in_channels = 9
+            else:
+                raise ValueError("Unknown input layers: ", opt.input_layers)
         else:
             num_in_channels = 6  # rgb, pos_encoding
         num_out_channels = 1  # drivable
@@ -599,8 +643,9 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, 'all-cities', "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
-    val_path = os.path.join(params.paths.dataroot, 'all-cities', "*", "val", "*")
+    train_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
+    val_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "eval", "*")
+    test_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "test", "*")
 
     dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5,
                                               frac_straight=0.5)
@@ -627,7 +672,7 @@ def main():
         # Evaluate
         trainer.train(epoch)
 
-        if epoch % 1 == 0:
+        if epoch % 5 == 0:
             with torch.no_grad():
                 if opt.target == "successor":
                     trainer.evaluate_succ(epoch)
@@ -650,6 +695,8 @@ def main():
 
             print("Saving checkpoint to {}".format(checkpoint_name))
             torch.save(model.state_dict(), checkpoint_name)
+
+            exit()
 
 
 if __name__ == '__main__':

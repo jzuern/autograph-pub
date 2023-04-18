@@ -102,6 +102,14 @@ class ParamLib:
         #self.create_dir_structure()
         self.add_system_paths()
 
+    def __str__(self):
+
+        return str(vars(self.main)) + "\n" + \
+                str(vars(self.paths)) + "\n" + \
+                str(vars(self.preprocessing)) + "\n" + \
+                str(vars(self.model)) + "\n" + \
+                str(vars(self.driving))
+
     def load_config_file(self, path: str):
         """
         Loads a config YAML file and sets the different dictionaries.
@@ -161,6 +169,9 @@ class ParamLib:
         """
         sys.path.insert(0, self.paths.package)
         #sys.path.insert(0, os.path.join(self.paths.package, 'utils'))
+
+
+
 
 def get_crop_mask_img(x,y,angle, rgb_context):
     mid_x = x

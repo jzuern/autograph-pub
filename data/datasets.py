@@ -36,6 +36,10 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
+        if len(self.sdf_files) == 0:
+            raise ValueError("No files found in {}".format(path))
+
+
         # only use files for which we have all modalities
         file_ids_sdf = [get_id(f) for f in self.sdf_files]
         file_ids_angles = [get_id(f) for f in self.angles_files]
