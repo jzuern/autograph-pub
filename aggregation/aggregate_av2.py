@@ -1520,7 +1520,20 @@ if __name__ == "__main__":
         trajectories_ = [t for t in trajectories_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
         trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
 
-        print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}".format(args.thread_id, sat_image_.shape, len(trajectories_), len(trajectories_ped_)))
+        for node in G_annot.nodes:
+            G_annot.nodes[node]["pos"] = (G_annot.nodes[node]["pos"][0], G_annot.nodes[node]["pos"][1] - y_min_cut)
+
+        # delete nodes outside of image
+        nodes_to_delete = []
+        for node in G_annot.nodes:
+            if G_annot.nodes[node]["pos"][1] < 0 or G_annot.nodes[node]["pos"][1] >= sat_image_.shape[0]:
+                nodes_to_delete.append(node)
+        G_annot.remove_nodes_from(nodes_to_delete)
+
+
+        print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}, G_annot.number_of_nodes(): {}".
+              format(args.thread_id, sat_image_.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
+
         if len(trajectories_) == 0:
             print("No trajectories in this thread. Exiting...")
             exit(0)
