@@ -1,9 +1,8 @@
 from pathlib import Path
-
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from PIL import Image
-Image.MAX_IMAGE_PIXELS = 2334477275000
+Image.MAX_IMAGE_PIXELS = None
 import os
 import cv2
 import argparse
@@ -14,7 +13,6 @@ import pickle
 import time
 import networkx as nx
 
-
 from data.av2.settings import *
 from aggregation.utils import get_scenario_centerlines, resample_trajectory, Tracklet, \
     filter_tracklet, merge_successor_trajectories, iou_mask, smooth_trajectory, get_endpoints, \
@@ -22,7 +20,8 @@ from aggregation.utils import get_scenario_centerlines, resample_trajectory, Tra
 
 
 # random shuffle seed
-np.random.seed(seed=int(time.time()))
+# np.random.seed(seed=int(time.time()))
+np.random.seed(seed=0)
 
 
 def get_dataset_split(city_name, x, y):
@@ -840,8 +839,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
             start_node = np.random.choice(G_annot.nodes)
 
-            # successor_subgraph = nx.bfs_tree(G_annot, start_node)
-
             # Generate Agent Trajectory
             agent_trajectory = [start_node]
             curr_node = start_node
@@ -902,19 +899,11 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 #subgraph_visible = filter_subgraph(G_annot, successor_subgraph, curr_node, max_distance=300)
                 subgraph_visible = crop_graph(G_annot, x_noise-500, x_noise+500, y_noise-500, y_noise+500)
 
-                if subgraph_visible.number_of_edges() == 0:
+                if subgraph_visible.number_of_edges() < 10:
                     continue
 
-                # max_out_edges = max(subgraph_visible.out_degree(node) for node in subgraph_visible.nodes())
-                # num_nodes = subgraph_visible.number_of_nodes()
-                #
-                # # we need large enough successor graphs
-                # if num_nodes < 10:
-                #     continue
-
-                # # only take few samples where there is only one out edge
-                # if max_out_edges == 1:
-                #     continue
+                if subgraph_visible.number_of_nodes() < 10:
+                    continue
 
                 src_pts = np.array([[-128,  0],
                                     [-128, -255],
@@ -930,16 +919,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 # the perspective transformation matrix
                 M = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
-
-                sat_image_crop_ = sat_image_[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
-                                             int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
-                sat_image_crop = cv2.warpPerspective(sat_image_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
-
-                drivable_gt_crop_ = drivable_gt[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
-                                                       int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
-                drivable_gt_crop = cv2.warpPerspective(drivable_gt_crop_, M, (crop_size, crop_size), cv2.INTER_NEAREST)
-
-
                 for n in subgraph_visible.nodes():
                     node_pos = G_annot.nodes[n]["pos"]
                     node_pos = node_pos - pos_noise + center
@@ -953,9 +932,26 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     if node_pos[0] < 0 or node_pos[0] >= crop_size or node_pos[1] < 0 or node_pos[1] >= crop_size:
                         subgraph_visible.remove_node(n)
 
+                # Skip if no nodes left
+                if subgraph_visible.number_of_nodes() == 0:
+                    logging.log(logging.INFO, "No nodes left after subgraph_visible cropping")
+                    continue
+
+                sat_image_crop_ = sat_image_[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
+                                             int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                sat_image_crop = cv2.warpPerspective(sat_image_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
+
+                drivable_gt_crop_ = drivable_gt[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
+                                                       int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                drivable_gt_crop = cv2.warpPerspective(drivable_gt_crop_, M, (crop_size, crop_size), cv2.INTER_NEAREST)
+
+
                 # make list of annots out of edges of subgraph
                 roots = [n for (n, d) in subgraph_visible.in_degree if d == 0]
                 leafs = [n for (n, d) in subgraph_visible.out_degree if d == 0]
+
+                # print("roots: ", roots)
+                # print("leafs: ", leafs)
 
                 branches = []
                 for root in roots:
@@ -963,52 +959,39 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                         if len(path) > 2:
                             branches.append(path)
 
-                annots = []
+
+                # print("branches: ", branches)
+
+
+                annots_ = []
                 for branch in branches:
                     coordinates = [subgraph_visible.nodes[n]["pos"] for n in branch]
                     if len(coordinates) > 1:
                         coordinates = np.array(coordinates)
-                        annots.append(coordinates)
+                        annots_.append(coordinates)
+
+                # print("annots_: ", annots_)
+
+
+                # split annotation that has a sharp turn
+                annots = []
+                for annot in annots_:
+                    angles = np.arctan2(annot[1:, 1] - annot[:-1, 1], annot[1:, 0] - annot[:-1, 0])
+                    # sudden changes in angle
+                    change_indices = np.where(np.logical_and(np.abs(np.diff(angles)) > 1 * np.pi / 4,
+                                                             np.abs(np.diff(angles)) < 7 * np.pi / 4))[0]
+                    if len(change_indices) == 0:
+                        annots.append(annot)
+                    else:
+                        for index in change_indices:
+                            annots.append(annot[:index+2])
+                            annots.append(annot[index+1:])
+
+                # print("annots: ", annots)
 
                 query_distance_threshold = 10
                 joining_distance_threshold = 4
                 joining_angle_threshold = np.pi / 8
-
-                # print("leafs coordinates")
-                # for leaf in leafs:
-                #     print(subgraph_visible.nodes[leaf]["pos"])
-
-
-                do_debugging = False
-                if do_debugging:
-                    sat_image_crop_viz = cv2.cvtColor(sat_image_crop, cv2.COLOR_BGR2RGB)
-                    cv2.imshow('sat_image_viz', sat_image_crop_viz)
-                    cv2.waitKey(10)
-
-                    def viz(event, mouseX, mouseY, flags, param):
-                        if event == cv2.EVENT_LBUTTONDOWN:
-                            q = np.array([mouseX, mouseY])
-
-                            succ_traj, mask_total, mask_angle_colorized, sat_image_viz = \
-                                merge_successor_trajectories(q, annots, sat_image_crop_viz,
-                                                             trajectories_ped=[],
-                                                             query_distance_threshold=query_distance_threshold,
-                                                             joining_distance_threshold=joining_distance_threshold,
-                                                             joining_angle_threshold=joining_angle_threshold)
-
-                            _, endpoints = get_endpoints(succ_traj, crop_size)
-                            endpoints = np.unique(endpoints, axis=0)
-
-                            print("endpoints", endpoints)
-
-                            if sat_image_viz is not None:
-                                sat_image_viz = cv2.circle(sat_image_viz, (mouseX, mouseY), 5, (0, 0, 0), -1)
-                                cv2.imshow('sat_image_viz', sat_image_viz)
-
-                    cv2.namedWindow('sat_image_viz')
-                    cv2.setMouseCallback('sat_image_viz', viz)
-                    cv2.waitKey(1)
-                    cv2.waitKey(0)
 
                 query_points = np.array([[crop_size // 2, crop_size - 1]])
 
@@ -1023,16 +1006,46 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                                      joining_distance_threshold=joining_distance_threshold,
                                                      joining_angle_threshold=joining_angle_threshold)
 
-                    _, endpoints = get_endpoints(succ_traj, crop_size)
-                    endpoints = np.unique(endpoints, axis=0)
+                    num_clusters, endpoints = get_endpoints(succ_traj, crop_size)
 
-                    if len(endpoints) > 1:
+                    # print("num_clusters", num_clusters)
+
+                    if num_clusters > 1:
                         sample_type = "branching"
                     else:
                         sample_type = "straight"
 
+                    do_debugging = False
+                    # if num_clusters > 1:
+                    #     do_debugging = True
+                    if do_debugging:
+                        sat_image_crop_viz = cv2.cvtColor(sat_image_crop, cv2.COLOR_BGR2RGB)
+                        cv2.imshow('sat_image_viz', sat_image_crop_viz)
+                        cv2.waitKey(10)
+
+                        def viz(event, mouseX, mouseY, flags, param):
+                            if event == cv2.EVENT_LBUTTONDOWN:
+                                q = np.array([mouseX, mouseY])
+                                print(q)
+
+                                succ_traj, mask_total, mask_angle_colorized, sat_image_viz = \
+                                    merge_successor_trajectories(q, annots, sat_image_crop_viz,
+                                                                 trajectories_ped=[],
+                                                                 query_distance_threshold=query_distance_threshold,
+                                                                 joining_distance_threshold=joining_distance_threshold,
+                                                                 joining_angle_threshold=joining_angle_threshold)
+
+                                if sat_image_viz is not None:
+                                    sat_image_viz = cv2.circle(sat_image_viz, (mouseX, mouseY), 5, (0, 0, 0), -1)
+                                    cv2.imshow('sat_image_viz', sat_image_viz)
+
+                        cv2.namedWindow('sat_image_viz')
+                        cv2.setMouseCallback('sat_image_viz', viz)
+                        cv2.waitKey(1)
+                        cv2.waitKey(0)
+
                     # Filter out all samples that do not fit in quality criteria
-                    if len(succ_traj) < N_MIN_SUCC_TRAJECTORIES:
+                    if len(succ_traj) < 1:
                         logging.debug("Too few successor trajectories")
                         continue
 
@@ -1062,11 +1075,9 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
                     sample_num += 1
-                    print("---- TID: {}/{}: Sample {} / {} | Saving to {}/{}/{}-{}".format(args.thread_id,
-                                                                                           args.num_parallel, out_path,
-                                                                                           sample_type, sample_id,
-                                                                                           i_query, sample_num,
-                                                                                           max_num_samples))
+                    print("---- TID: {}/{}: Sample {}/{}/{}/{} ({}/{})".format(args.thread_id, args.num_parallel,
+                                                                               out_path, sample_type, sample_id,
+                                                                               i_query, sample_num, max_num_samples))
 
                     Image.fromarray(pos_encoding).save(
                         "{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
@@ -1184,6 +1195,17 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
             else:
                 raise ValueError("Invalid source")
 
+            # Get query points
+            if args.query_points == "random":
+                query_points = np.argwhere(tracklet_image_crop[:, :, 0] > 0)
+                query_points = np.fliplr(query_points)
+                np.random.shuffle(query_points)
+                query_points = query_points[:NUM_QUERY_POINTS]
+            elif args.query_points == "ego":
+                query_points = np.array([[crop_size//2, crop_size-1]])
+            else:
+                raise ValueError("Invalid query_points mode")
+
             do_debugging = False
             if do_debugging:
                 sat_image_crop_viz = cv2.cvtColor(sat_image_crop, cv2.COLOR_BGR2RGB)
@@ -1211,16 +1233,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 cv2.waitKey(1)
                 cv2.waitKey(0)
 
-            # Get query points
-            if args.query_points == "random":
-                query_points = np.argwhere(tracklet_image_crop[:, :, 0] > 0)
-                query_points = np.fliplr(query_points)
-                np.random.shuffle(query_points)
-                query_points = query_points[:NUM_QUERY_POINTS]
-            elif args.query_points == "ego":
-                query_points = np.array([[crop_size//2, crop_size-1]])
-            else:
-                raise ValueError("Invalid query_points mode")
+
 
             tracklets_im_list = []
 
@@ -1268,7 +1281,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
                 sample_num += 1
-                print("---- TID: {}/{}: Sample {} / {} | Saving to {}/{}/{}-{}".format(args.thread_id, args.num_parallel, out_path, sample_type, sample_id, i_query, sample_num, max_num_samples))
+                print("---- TID: {}/{}: Sample {}/{}/{}/{} ({}/{})".format(args.thread_id, args.num_parallel, out_path, sample_type, sample_id, i_query, sample_num, max_num_samples))
 
                 Image.fromarray(pos_encoding).save("{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
                 Image.fromarray(sat_image_crop).save("{}/{}/{}-{}-rgb.png".format(out_path, sample_type, sample_id, i_query))

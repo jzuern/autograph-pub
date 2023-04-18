@@ -414,14 +414,6 @@ def find_successor_annotations(annot):
     return annot_successor
 
 
-
-
-
-
-
-
-
-
 def merge_successor_trajectories(q, trajectories_all, sat_image,
                                  trajectories_ped=[],
                                  query_distance_threshold=4,  # in px
@@ -444,7 +436,6 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
 
     for t in trajectories_all:
         for i in range(len(t)-1):
-            # cv2.circle(sat_image_viz, tuple(t[i].astype(int)), 2, (255, 0, 0), -1)
             cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1, cv2.LINE_AA)
 
 
@@ -453,15 +444,18 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
     for t0 in trajectories_close_q:
         for t1 in trajectories_all:
 
-            angles0 = np.arctan2(t0[1:, 1] - t0[:-1, 1], t0[1:, 0] - t0[:-1, 0])
+            angles0 = np.arctan2(t0[1:, 1] - t0[:-1, 1],
+                                 t0[1:, 0] - t0[:-1, 0]) + np.pi
             angles0 = np.concatenate([angles0, [angles0[-1]]])
 
-            angles1 = np.arctan2(t1[1:, 1] - t1[:-1, 1], t1[1:, 0] - t1[:-1, 0])
+            angles1 = np.arctan2(t1[1:, 1] - t1[:-1, 1],
+                                 t1[1:, 0] - t1[:-1, 0]) + np.pi
             angles1 = np.concatenate([angles1, [angles1[-1]]])
 
             # check if t1 is close to t0 at any point
             min_dist = np.amin(cdist(t0, t1), axis=0)
-            min_angle = np.amin(cdist(angles0[:, np.newaxis], angles1[:, np.newaxis]), axis=0)
+            min_angle = np.amin(cdist(angles0[:, np.newaxis],
+                                      angles1[:, np.newaxis]), axis=0)
 
             crit_angle = min_angle < joining_angle_threshold
             crit_dist = min_dist < joining_distance_threshold
@@ -473,7 +467,28 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
                 # if so, merge the trajectories
                 # find the first point where the criteria is met
                 first_crit = np.where(crit)[0][0]
+
                 trajectories_2.append(t1[first_crit:])
+
+                # fig, axarr = plt.subplots(1, 4, figsize=(10, 5))
+                # axarr[0].imshow(sat_image_viz, alpha=0.5)
+                # axarr[0].plot(t0[:, 0], t0[:, 1], 'rx')
+                # axarr[0].plot(t1[:, 0], t1[:, 1], 'b.')
+                #
+                # axarr[1].plot(angles0, 'r')
+                # axarr[1].plot(angles1, 'b')
+                # axarr[1].title.set_text("angles")
+                #
+                # axarr[2].plot(min_dist, 'k')
+                # axarr[2].title.set_text("min_dist")
+                # axarr[3].plot(min_angle, 'k')
+                # axarr[3].title.set_text("min_angle")
+                #
+                # plt.show()
+
+                cv2.circle(sat_image_viz, tuple(t1[first_crit].astype(int)), 2, (0, 255, 0), -1)
+
+
 
     for t2 in trajectories_2:
         for i in range(len(t2)-1):
@@ -503,13 +518,6 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
     # convert using color map
     mask_angle_colorized = AngleColorizer().angle_to_color(mask_angle)
     mask_angle_colorized[mask_angle == 0] = 0
-
-    # import matplotlib.pyplot as plt
-    # fig, ax = plt.subplots(1, 3, figsize=(15, 5))
-    # ax[0].imshow(mask_angle)
-    # ax[1].imshow(mask_angle_colorized)
-    # ax[2].imshow(sat_image_viz)
-    # plt.show()
 
     succ_traj = trajectories_2 + trajectories_close_q
 
