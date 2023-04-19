@@ -11,10 +11,10 @@ for CITY in "${CITIES[@]}"; do
     for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
       echo "Processing $CITY, $tid / $NUM_PARALLEL !"
       /home/buechner/zuern/geometric/bin/python aggregate_av2.py --city_name $CITY\
-                                                             --out_path_root /data/buechner/zuern/autograph/1804/$CITY \
+                                                             --out_path_root /data/buechner/zuern/autograph/1804/$SOURCE/$CITY \
                                                              --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
                                                              --source $SOURCE \
-                                                             --max_num_samples 100000 \
+                                                             --max_num_samples 10000 \
                                                              --num_parallel $NUM_PARALLEL \
                                                              --thread_id $tid &
       sleep 120 # sleep to give time start generating
