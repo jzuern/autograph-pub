@@ -1,6 +1,4 @@
-from builtins import Exception
 import os
-import networkx as nx
 import wandb
 import argparse
 from tqdm import tqdm
@@ -10,11 +8,11 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.nn import DataParallel
-import matplotlib.pyplot as plt
-import cv2
 from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 import torchvision.models as models
 from torchmetrics import JaccardIndex, Precision, Recall, F1Score
+import matplotlib.pyplot as plt
+import cv2
 from collections import OrderedDict
 from matplotlib import cm
 from aggregation.utils import AngleColorizer
@@ -544,19 +542,19 @@ def main():
 
     opt = parser.parse_args()
 
-    available_gpus = []
-    while len(available_gpus) < opt.num_gpus:
-        print("Waiting for {} GPUs to become available...".format(opt.num_gpus))
-        available_gpus = GPUtil.getAvailable(order='first', limit=10, maxLoad=0.3, maxMemory=0.3, includeNan=False, excludeID=[], excludeUUID=[])
-        if len(available_gpus) >= opt.num_gpus:
-            break
-        time.sleep(10)
-    print("Available GPUs: ", available_gpus)
-
-    available_gpus = available_gpus[:opt.num_gpus]
-
-    # set torch available gpus
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(gpu) for gpu in available_gpus])
+    # available_gpus = []
+    # while len(available_gpus) < opt.num_gpus:
+    #     print("Waiting for {} GPUs to become available...".format(opt.num_gpus))
+    #     available_gpus = GPUtil.getAvailable(order='first', limit=10, maxLoad=0.3, maxMemory=0.3, includeNan=False, excludeID=[], excludeUUID=[])
+    #     if len(available_gpus) >= opt.num_gpus:
+    #         break
+    #     time.sleep(10)
+    # print("Available GPUs: ", available_gpus)
+    #
+    # available_gpus = available_gpus[:opt.num_gpus]
+    #
+    # # set torch available gpus
+    # os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(gpu) for gpu in available_gpus])
 
 
 

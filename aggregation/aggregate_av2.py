@@ -837,7 +837,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
         sample_num = 0
         while sample_num < max_num_samples:
 
-            print("Processing sample {}...".format(sample_num))
+            #print("Processing sample {}...".format(sample_num))
 
             start_node = np.random.choice(G_annot.nodes)
 
