@@ -17,7 +17,7 @@ import networkx as nx
 import matplotlib
 from aggregation.utils import smooth_trajectory, similarity_check, out_of_bounds_check, visualize_graph
 import time
-import pickle
+from utils import aggregate, colorize
 
 
 keyboard = Controller()
@@ -29,31 +29,26 @@ keyboard = Controller()
 skeleton_threshold = 0.05  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
-write_every = 5            # write to disk every n steps
-
-
-viz = False
-if viz:
-    print("Visualizing graph from previous run...")
-    fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-    ax.imshow(np.asarray(Image.open("aerial_image.png")))
-    fname = sorted(glob.glob("/home/zuern/Desktop/tmp/G_agg/*.gpickle"))[-1]
-    G_agg = pickle.load(open(fname, "rb"))
-    visualize_graph(G_agg, ax)
-    plt.show()
+write_every = 1            # write to disk every n steps
 
 
 
-def colorize(mask):
+# CVPR graph aggregation
+threshold_px = 10
+threshold_rad = 0.2
+closest_lat_thresh = 10
 
-    # normalize mask
-    mask = np.log(mask + 1e-8)
-    mask = mask - np.min(mask)
-    mask = mask / np.max(mask)
 
-    mask = (mask * 255.).astype(np.uint8)
-    mask = cv2.applyColorMap(mask, cv2.COLORMAP_MAGMA)
-    return mask
+# viz = False
+# if viz:
+#     print("Visualizing graph from previous run...")
+#     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+#     ax.imshow(np.asarray(Image.open("aerial_image.png")))
+#     fname = sorted(glob.glob("/home/zuern/Desktop/tmp/G_agg/*.gpickle"))[-1]
+#     G_agg = pickle.load(open(fname, "rb"))
+#     visualize_graph(G_agg, ax)
+#     plt.show()
+
 
 
 class SatelliteDriver(object):
@@ -67,6 +62,7 @@ class SatelliteDriver(object):
         self.debug = debug
 
         self.crop_shape = (256, 256)
+        self.graphs = []  # list of graphs from each step
 
         self.canvas_log_odds = None
         self.canvas_angles = None
@@ -78,7 +74,7 @@ class SatelliteDriver(object):
         self.step = 0
         self.graph_skeleton = None
 
-        self.G_agg = nx.DiGraph()
+        self.G_agg_mine = nx.DiGraph()
 
 
     def load_model(self, model_path, type=None):
@@ -196,6 +192,7 @@ class SatelliteDriver(object):
         M = cv2.getPerspectiveTransform(src_pts, dst_pts)
 
         return M
+
 
     def add_pred_to_canvas(self, pred):
 
@@ -424,9 +421,7 @@ class SatelliteDriver(object):
 
         cv2.imshow("rgb", rgb)
 
-
         self.add_pred_to_canvas(skeleton)
-        #self.add_graph_to_angle_canvas()
 
         pred_succ = (pred_succ * 255).astype(np.uint8)
         pred_succ_viz = cv2.addWeighted(rgb, 0.5, cv2.applyColorMap(pred_succ, cv2.COLORMAP_MAGMA), 0.5, 0)
@@ -467,6 +462,23 @@ class SatelliteDriver(object):
 
         self.step += 1
 
+    def aggregate_graphs(self, graphs):
+
+        # Aggregate all graphs
+        G_pred_agg = nx.DiGraph()
+        for pred_agg_idx, G in enumerate(graphs):
+            G_pred_agg, merging_map = aggregate(G_pred_agg, G,
+                                                visited_edges=[],
+                                                threshold_px=threshold_px,
+                                                threshold_rad=threshold_rad,
+                                                closest_lat_thresh=closest_lat_thresh,
+                                                w_decay=False,
+                                                remove=False)
+
+        return G_pred_agg
+
+
+
     def yaw_check(self, yaw):
         if yaw > 2 * np.pi:
             yaw -= 2 * np.pi
@@ -475,23 +487,23 @@ class SatelliteDriver(object):
         return yaw
 
 
-    def visualize_G_agg(self):
+    def visualize_write_G_agg(self, G_agg, name="G_agg"):
 
         G_agg_viz = self.aerial_image.copy()
         G_agg_viz = G_agg_viz // 2
 
-        if len(self.G_agg.edges) == 0:
+        if len(G_agg.edges) == 0:
             return
 
         # history colors linearly interpolated
-        colors = matplotlib.cm.get_cmap('jet')(np.linspace(0, 1, len(list(self.G_agg.edges))))
+        colors = matplotlib.cm.get_cmap('jet')(np.linspace(0, 1, len(list(G_agg.edges))))
         colors = (colors[:, 0:3] * 255).astype(np.uint8)
         colors = [tuple(color.tolist()) for color in colors]
 
-        for i, edge in enumerate(self.G_agg.edges):
+        for i, edge in enumerate(G_agg.edges):
             # edge as arrow
-            start = self.G_agg.nodes[edge[0]]["pos"]
-            end = self.G_agg.nodes[edge[1]]["pos"]
+            start = G_agg.nodes[edge[0]]["pos"]
+            end = G_agg.nodes[edge[1]]["pos"]
             start = (int(start[0]), int(start[1]))
             end = (int(end[0]), int(end[1]))
 
@@ -517,7 +529,7 @@ class SatelliteDriver(object):
 
             cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
-        cv2.imwrite("/home/zuern/Desktop/tmp/G_agg/{:04d}_G_agg_viz.png".format(self.step), G_agg_viz)
+        cv2.imwrite("/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}_viz.png".format(self.step, name), G_agg_viz)
 
         margin = 400
         G_agg_viz = G_agg_viz[int(self.pose[1]) - margin:int(self.pose[1]) + margin,
@@ -526,7 +538,7 @@ class SatelliteDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        nx.write_gpickle(self.G_agg, "/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_G_agg.gpickle".format(self.step))
+        # nx.write_gpickle(self.G_agg_mine, "/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}.gpickle".format(self.step, name))
 
 
 
@@ -583,17 +595,42 @@ class SatelliteDriver(object):
             self.make_step()
             return
 
-        g = self.graph_skeleton
+        G_current_local = self.graph_skeleton
+        G_current_global = nx.DiGraph()
+
+        # add nodes and edges from self.graph_skeleton and transform to global coordinates (for cvpr aggregation)
+        for node in G_current_local.nodes:
+            # transform pos_start to global coordinates
+            pos_local = nx.get_node_attributes(G_current_local, "pts")[node][0].astype(np.float32)
+            pos_local = np.array([pos_local[1], pos_local[0]])
+            pos_local = np.array([128, 256]) - pos_local
+
+            pos_global = np.zeros(2)
+            pos_global[0] = self.pose[0] - pos_local[0] * np.cos(self.pose[2]) + pos_local[1] * np.sin(self.pose[2])
+            pos_global[1] = self.pose[1] - pos_local[0] * np.sin(self.pose[2]) - pos_local[1] * np.cos(self.pose[2])
+            G_current_global.add_node(node,
+                                      pos=pos_global,
+                                      weight=1.0,
+                                      score=1.0,)
+
+        for edge in G_current_local.edges:
+            G_current_global.add_edge(edge[0], edge[1])
+
+        self.graphs.append(G_current_global)
+
+        G_agg_cvpr = self.aggregate_graphs(self.graphs)
+
+
         successor_points = []
-        for node in g.nodes:
-            if len(list(g.successors(node))) >= 1:
+        for node in G_current_local.nodes:
+            if len(list(G_current_local.successors(node))) >= 1:
                 successor_points.append(node)
 
         succ_edges = []
         for successor_point in successor_points:
-            succ = list(g.successors(successor_point))
+            succ = list(G_current_local.successors(successor_point))
             for successor in succ:
-                succ_edges.append(g.edges[successor_point, successor])
+                succ_edges.append(G_current_local.edges[successor_point, successor])
 
         if len(succ_edges) == 0:
             print("     No successor edges found.")
@@ -604,17 +641,13 @@ class SatelliteDriver(object):
             if num_points_in_edge < edge_end_idx+1:
                 continue
 
-            pos_start_local = np.array([edge["pts"][edge_start_idx][1], edge["pts"][edge_start_idx][0]])
-            pos_end_local = np.array([edge["pts"][edge_end_idx][1], edge["pts"][edge_end_idx][0]])
+            pos_start_local = np.array([edge["pts"][edge_start_idx][1],
+                                        edge["pts"][edge_start_idx][0]])
+            pos_end_local = np.array([edge["pts"][edge_end_idx][1],
+                                      edge["pts"][edge_end_idx][0]])
 
             pos_start_local = np.array([128, 256]) - pos_start_local
             pos_end_local = np.array([128, 256]) - pos_end_local
-
-            # throw out edges that start too far away from current pose
-            # dist = np.linalg.norm(pos_start_local)
-            # print(dist)
-            # if dist > 80:
-            #     continue
 
             edge_local = pos_end_local - pos_start_local
             angle_local = np.arctan2(-edge_local[0], edge_local[1])
@@ -632,7 +665,7 @@ class SatelliteDriver(object):
 
 
             # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
-            step_sizes = [40] # number of pixels to move forward along edge
+            step_sizes = [40]  # number of pixels to move forward along edge
 
             for step_size in step_sizes:
 
@@ -665,15 +698,11 @@ class SatelliteDriver(object):
                     node_edge_end = (int(edge_end_global[0]), int(edge_end_global[1]))
 
                     # add G_agg-edge from edge start to edge end
-                    self.G_agg.add_node(node_edge_start, pos=edge_start_global)
-                    self.G_agg.add_node(node_edge_end, pos=edge_end_global)
-                    self.G_agg.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
+                    self.G_agg_mine.add_node(node_edge_start, pos=edge_start_global)
+                    self.G_agg_mine.add_node(node_edge_end, pos=edge_end_global)
+                    self.G_agg_mine.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
 
                     # add G_agg-edge from split point to edge start
-
-
-
-
                     # node_current_pose = (int(self.pose[0]), int(self.pose[1]))
                     # self.G_agg.add_node(node_current_pose, pos=self.pose[0:2])
                     # self.G_agg.add_edge(node_current_pose, node_edge_start)
@@ -682,7 +711,20 @@ class SatelliteDriver(object):
 
         if self.step % write_every == 0:
             self.render_poses_in_aerial()
-            self.visualize_G_agg()
+            self.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
+            self.visualize_write_G_agg(self.G_agg_mine, "G_agg_mine")
+
+            fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+            [ax.set_aspect('equal') for ax in axarr]
+            axarr[0].set_title("g single")
+            axarr[1].set_title("G_agg_mine")
+            axarr[2].set_title("G_agg_cvpr")
+            [visualize_graph(g, axarr[0], node_color="g", edge_color="g") for g in self.graphs]
+            visualize_graph(self.G_agg_mine, axarr[1], node_color="b", edge_color="b")
+            visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
+            plt.show()
+
+
 
         print("     Pose queue size: {}".format(len(self.future_poses)))
 
@@ -711,25 +753,13 @@ class SatelliteDriver(object):
 
 
 if __name__ == "__main__":
-    driver = SatelliteDriver(debug=True)
+    driver = SatelliteDriver(debug=False)
 
-    # driver.load_model(model_path="/data/autograph/checkpoints/soft-river-75/e-028.pth",  # works well (Austin only)
-    #                   type="full")
-    # driver.load_model(model_path="/data/autograph/checkpoints/smart-river-76/e-053.pth",  # works well (Austin only)
-    #                   type="successor")
-
-
-    # driver.load_model(model_path="/data/autograph/checkpoints/dark-violet-91/e-104.pth",  # all-cities
-    #                   type="full")
-    # driver.load_model(model_path="/data/autograph/checkpoints/glamorous-energy-94/e-132.pth",  # all-cities
-    #                   type="successor")
-
-    driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # all-cities  (Austin only, BIG)
+    driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # (Austin only, BIG)
                       type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # all-cities  (Austin only, BIG)
+    driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # (Austin only, BIG)
                       type="successor")
-
-    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-dataset-dev/Austin/tiles/eval/ATX_83_34021_46605.png")
+    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-dataset-dev/Austin/tiles/eval/Austin_83_34021_46605.png")
 
     while True:
         driver.drive_freely()

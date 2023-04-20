@@ -16,6 +16,10 @@ WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_qu
   --num_gpus $NUM_GPUS \
   --dataset_name test-austin/tracklets_joint
 
+
+
+
+
 # SuccNet gt-supervised (TrackletNet A + D)
 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
