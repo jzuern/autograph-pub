@@ -20,8 +20,8 @@ from aggregation.utils import get_scenario_centerlines, resample_trajectory, Tra
 
 
 # random shuffle seed
-# np.random.seed(seed=int(time.time()))
-np.random.seed(seed=0)
+np.random.seed(seed=int(time.time()))
+# np.random.seed(seed=0)
 
 
 def get_dataset_split(city_name, x, y):
