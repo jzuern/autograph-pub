@@ -59,6 +59,9 @@ def crop_img_at_pose(img, pose, crop_size):
     img_crop_ = img[int(y - crop_size_large):int(y + crop_size_large),
                     int(x - crop_size_large):int(x + crop_size_large)].copy()
 
+    if img_crop_.dtype == bool:
+        img_crop_ = img_crop_.astype(np.uint8) * 255
+
     # Source points are around center in satellite image crop
     center = np.array([crop_size_large, crop_size_large])
 
@@ -1348,7 +1351,9 @@ if __name__ == "__main__":
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.urbanlanegraph_root, "{}/{}.png".format(city_name, city_name)))).astype(np.uint8)
     drivable_gt = np.asarray(Image.open(os.path.join(args.urbanlanegraph_root, "{}/{}_drivable.png".format(city_name, city_name)))).astype(np.uint8)
-    drivable_gt[drivable_gt > 1] = 255
+    drivable_gt[drivable_gt > 1] = 1
+    drivable_gt = drivable_gt.astype(bool)
+
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
     print("Exporting {} tracklet annotations!".format(args.source))
