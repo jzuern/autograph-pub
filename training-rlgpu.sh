@@ -36,7 +36,6 @@ WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_qu
   --num_gpus $NUM_GPUS \
   --target successor \
   --input_layers rgb \
-  --full-checkpoint /home/buechner/zuern/self-supervised-graph/checkpoints/XXXX.pth \
   --dataset_name test-austin/tracklets_raw
 
 # SuccNet tracklets_joint supervised (no TrackletNet)
@@ -45,7 +44,6 @@ WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_qu
   --num_gpus $NUM_GPUS \
   --target successor \
   --input_layers rgb \
-  --full-checkpoint /home/buechner/zuern/self-supervised-graph/checkpoints/XXXX.pth \
   --dataset_name test-austin/tracklets_joint
 
 
