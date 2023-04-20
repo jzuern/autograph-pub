@@ -6,9 +6,9 @@ export PYTHONPATH=$PYTHONPATH:/home/buechner/zuern/self-supervised-graph
 #CITIES=(pittsburgh washington paloalto austin detroit miami)
 CITIES=(austin)
 SOURCES=(tracklets_joint tracklets_raw lanegraph)
-NUM_PARALLEL=4
+NUM_PARALLEL=10
 
-parsing () {
+run () {
 
   for CITY in "${CITIES[@]}"; do
     for SOURCE in "${SOURCES[@]}"; do
@@ -18,9 +18,9 @@ parsing () {
                                                                --out_path_root /data/buechner/zuern/autograph/austin-real2/$SOURCE/$CITY \
                                                                --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
                                                                --source $SOURCE \
-                                                               --max_num_samples 10000 \
-                                                               --num_parallel $NUM_PARALLEL \
-                                                               --thread_id $tid &
+                                                               --max_num_samples 10000 &
+                                                               #--num_parallel $NUM_PARALLEL \
+                                                               #--thread_id $tid &
         sleep 60 # sleep to give time start generating
       done
       wait
@@ -30,14 +30,18 @@ parsing () {
   wait
 }
 
+# run
+run
 
-NUM_PARSING=10
 
-for ((i=1; i<=NUM_PARSING; i++)); do
-  echo "Parsing $i / $NUM_PARSING !"
-  parsing &
-  sleep 10 # sleep to give time start generating
-done
+
+#NUM_PARSING=1
+
+#for ((i=1; i<=NUM_PARSING; i++)); do
+#  echo "Parsing $i / $NUM_PARSING !"
+#  parsing &
+#  sleep 10 # sleep to give time start generating
+#done
 
 
 
