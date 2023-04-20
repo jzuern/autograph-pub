@@ -167,12 +167,15 @@ class Trainer():
                 loss_total = sum(loss_dict.values())
 
             elif self.params.target == "successor":
-                with torch.no_grad():
-                    (pred, _) = self.model_full(rgb)  # get from model
-                    pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear',
-                                                           align_corners=True)
-                    pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
-                    pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
+                if self.model_full is not None:
+                    with torch.no_grad():
+                        (pred, _) = self.model_full(rgb)  # get from model
+                        pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear',
+                                                               align_corners=True)
+                        pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
+                        pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
+                else:
+                    in_tensor = rgb
 
                 if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
                     in_tensor = torch.cat([rgb, pos_enc], dim=1)
