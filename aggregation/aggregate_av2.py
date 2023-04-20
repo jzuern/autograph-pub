@@ -12,6 +12,7 @@ from av2.datasets.motion_forecasting import scenario_serialization
 import pickle
 import time
 import networkx as nx
+import bitarray
 
 from data.av2.settings import *
 from aggregation.utils import get_scenario_centerlines, resample_trajectory, Tracklet, \
@@ -58,9 +59,6 @@ def crop_img_at_pose(img, pose, crop_size):
     # Crop source and dest points
     img_crop_ = img[int(y - crop_size_large):int(y + crop_size_large),
                     int(x - crop_size_large):int(x + crop_size_large)].copy()
-
-    if img_crop_.dtype == bool:
-        img_crop_ = img_crop_.astype(np.uint8) * 255
 
     # Source points are around center in satellite image crop
     center = np.array([crop_size_large, crop_size_large])
@@ -1350,10 +1348,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(out_path_root, 'test', 'straight'), exist_ok=True)
 
     sat_image_ = np.asarray(Image.open(os.path.join(args.urbanlanegraph_root, "{}/{}.png".format(city_name, city_name)))).astype(np.uint8)
-    drivable_gt = np.asarray(Image.open(os.path.join(args.urbanlanegraph_root, "{}/{}_drivable.png".format(city_name, city_name)))).astype(np.uint8)
-    drivable_gt[drivable_gt > 1] = 1
-    drivable_gt = drivable_gt.astype(bool)
-
+    drivable_gt_ = np.asarray(Image.open(os.path.join(args.urbanlanegraph_root, "{}/{}_drivable.png".format(city_name, city_name)))).astype(np.uint8)
 
     print("Satellite resolution: {}x{}".format(sat_image_.shape[1], sat_image_.shape[0]))
     print("Exporting {} tracklet annotations!".format(args.source))
@@ -1512,8 +1507,11 @@ if __name__ == "__main__":
         y_min_cut = int(num_y_pixels * float(args.thread_id - 1) / args.num_parallel)
         y_max_cut = int(num_y_pixels * float(args.thread_id) / args.num_parallel)
 
-        sat_image_ = np.ascontiguousarray(sat_image_[y_min_cut:y_max_cut, :, :])
-        drivable_gt = np.ascontiguousarray(drivable_gt[y_min_cut:y_max_cut, :])
+        sat_image = sat_image_[y_min_cut:y_max_cut, :, :].copy()
+        drivable_gt = drivable_gt_[y_min_cut:y_max_cut, :].copy()
+
+        del sat_image_
+        del drivable_gt_
 
         trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
         trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
@@ -1538,6 +1536,12 @@ if __name__ == "__main__":
         if len(trajectories_) == 0:
             print("No trajectories in this thread. Exiting...")
             exit(0)
+
+    else:
+        sat_image = sat_image_.copy()
+        drivable_gt = drivable_gt_.copy()
+        del sat_image_
+        del drivable_gt_
 
     # print("     Number of vehicle trajectories: ",  len(trajectories_))
     # print("     Number of pedestrian trajectories: ",  len(trajectories_ped_))
@@ -1592,7 +1596,7 @@ if __name__ == "__main__":
                             trajectories_,
                             trajectories_ped_,
                             G_annot,
-                            sat_image_,
+                            sat_image,
                             tracklets_image,
                             drivable_gt,
                             out_path_root,
