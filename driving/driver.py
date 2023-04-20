@@ -29,14 +29,14 @@ keyboard = Controller()
 skeleton_threshold = 0.05  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
-write_every = 1            # write to disk every n steps
+write_every = 10            # write to disk every n steps
 
 
 
 # CVPR graph aggregation
-threshold_px = 10
+threshold_px = 50
 threshold_rad = 0.2
-closest_lat_thresh = 10
+closest_lat_thresh = 20
 
 
 # viz = False
@@ -244,7 +244,7 @@ class SatelliteDriver(object):
 
         return rgb
 
-    def skeleton_to_graph(self, skeleton, pred_angles, pred_succ):
+    def skeleton_to_graph(self, skeleton):
         """Convert skeleton to graph"""
 
         # build graph from skeleton
@@ -260,7 +260,8 @@ class SatelliteDriver(object):
         if len(node_positions) == 0:
             return graph
 
-        start_node = np.argmin(np.linalg.norm(node_positions - np.array([128, 255]), axis=1))
+        # start_node = np.argmin(np.linalg.norm(node_positions - np.array([128, 255]), axis=1))
+        start_node = np.argmin(np.linalg.norm(node_positions - np.array([255, 128]), axis=1))
 
         # remove all edges that are not connected to closest node
         connected = nx.node_connected_component(graph, start_node)  # nodes of component that contains node 0
@@ -268,10 +269,21 @@ class SatelliteDriver(object):
 
         graph = graph.to_directed()
 
+
+
+        # adjust coordinates order
+        # add node positions to graph
+        for node in graph.nodes():
+            graph.nodes[node]['pos'] = graph.nodes[node]['o'][::-1]
+        for edge in graph.edges():
+            graph.edges[edge]['pts'] = graph.edges[edge]['pts'][:, ::-1]
+
+
         # now let every edge face away from the closest node
         edge_order = nx.dfs_edges(graph, source=start_node, depth_limit=None)
         edge_order = list(edge_order)
 
+        # print("start_node", start_node)
         # print("edge_order", edge_order)
         # print("graph.edges()", graph.edges())
 
@@ -280,6 +292,7 @@ class SatelliteDriver(object):
                 if graph.has_edge(e, s):
                     graph[s][e]['pts'] = np.flip(graph[e][s]['pts'], axis=0)
                     graph.remove_edge(e, s)
+
 
         return graph
 
@@ -373,7 +386,6 @@ class SatelliteDriver(object):
 
         pos_encoding = self.generate_pos_encoding()
         rgb = self.crop_satellite_at_pose(self.pose)
-        # rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB) # not the reason
 
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
         pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
@@ -404,13 +416,12 @@ class SatelliteDriver(object):
         cv2.imshow("pred_succ", pred_succ)
 
         skeleton = self.skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
-        self.graph_skeleton = self.skeleton_to_graph(skeleton, pred_angles, pred_succ)
+        self.graph_skeleton = self.skeleton_to_graph(skeleton)
 
         # make skeleton fatter
         skeleton = skeleton.astype(np.uint8) * 255
         skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
         skeleton = (skeleton / 255.0).astype(np.float32)
-
 
         pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
         pred_angles_succ_color = self.ac.angle_to_color(pred_angles, mask=pred_succ > skeleton_threshold)
@@ -418,7 +429,6 @@ class SatelliteDriver(object):
 
         # pred_angles_color
         cv2.imshow("pred_angles_color", pred_angles_color)
-
         cv2.imshow("rgb", rgb)
 
         self.add_pred_to_canvas(skeleton)
@@ -464,6 +474,28 @@ class SatelliteDriver(object):
 
     def aggregate_graphs(self, graphs):
 
+
+        # relabel nodes according to a global counter
+        graphs_relabel = []
+        global_counter = 0
+        for G in graphs:
+            relabel_dict = {}
+            for n in G.nodes():
+                relabel_dict[n] = global_counter
+                global_counter += 1
+            G = nx.relabel_nodes(G, relabel_dict)
+            graphs_relabel.append(G)
+
+        graphs = graphs_relabel
+
+
+        print("Aggregating {} graphs".format(len(graphs)))
+
+        fig, ax = plt.subplots(1, 2, figsize=(20, 10), sharex=True, sharey=True)
+
+        [visualize_graph(G, ax=ax[0]) for G in graphs]
+        ax[0].set_title("Graphs to aggregate")
+
         # Aggregate all graphs
         G_pred_agg = nx.DiGraph()
         for pred_agg_idx, G in enumerate(graphs):
@@ -474,6 +506,11 @@ class SatelliteDriver(object):
                                                 closest_lat_thresh=closest_lat_thresh,
                                                 w_decay=False,
                                                 remove=False)
+
+
+        visualize_graph(G_pred_agg, ax=ax[1])
+        ax[1].set_title("Aggregated Graph")
+        plt.show()
 
         return G_pred_agg
 
@@ -584,6 +621,31 @@ class SatelliteDriver(object):
         cv2.waitKey(0)
 
 
+
+    def crop_coordintates_to_global(self, pose, pos_local):
+        """
+        :param pose:
+        :param pos_local: local position in the image frame (origin is top left), shape (2,)
+        :return:
+        """
+
+        squeeze = False
+        if len(pos_local.shape) == 1:
+            squeeze = True
+            pos_local = np.expand_dims(pos_local, axis=0)
+
+        pos_local = np.array([[256, 128]]) - pos_local
+
+        pos_global = np.zeros_like(pos_local)
+        pos_global[:, 0] = pose[0] - pos_local[:, 1] * np.cos(pose[2]) + pos_local[:, 0] * np.sin(pose[2])
+        pos_global[:, 1] = pose[1] - pos_local[:, 1] * np.sin(pose[2]) - pos_local[:, 0] * np.cos(pose[2])
+
+        if squeeze:
+            pos_global = np.squeeze(pos_global, axis=0)
+
+        return pos_global
+
+
     def drive_freely(self):
 
         fps = 1 / (time.time() - self.time)
@@ -602,24 +664,19 @@ class SatelliteDriver(object):
         for node in G_current_local.nodes:
             # transform pos_start to global coordinates
             pos_local = nx.get_node_attributes(G_current_local, "pts")[node][0].astype(np.float32)
-            pos_local = np.array([pos_local[1], pos_local[0]])
-            pos_local = np.array([128, 256]) - pos_local
+            pos_global = self.crop_coordintates_to_global(self.pose, pos_local)
 
-            pos_global = np.zeros(2)
-            pos_global[0] = self.pose[0] - pos_local[0] * np.cos(self.pose[2]) + pos_local[1] * np.sin(self.pose[2])
-            pos_global[1] = self.pose[1] - pos_local[0] * np.sin(self.pose[2]) - pos_local[1] * np.cos(self.pose[2])
             G_current_global.add_node(node,
                                       pos=pos_global,
                                       weight=1.0,
                                       score=1.0,)
 
         for edge in G_current_local.edges:
-            G_current_global.add_edge(edge[0], edge[1])
+            edge_points = G_current_local.edges[edge]["pts"]
+            edge_points = self.crop_coordintates_to_global(self.pose, edge_points)
+            G_current_global.add_edge(edge[0], edge[1], pts=edge_points)
 
         self.graphs.append(G_current_global)
-
-        G_agg_cvpr = self.aggregate_graphs(self.graphs)
-
 
         successor_points = []
         for node in G_current_local.nodes:
@@ -646,53 +703,42 @@ class SatelliteDriver(object):
             pos_end_local = np.array([edge["pts"][edge_end_idx][1],
                                       edge["pts"][edge_end_idx][0]])
 
-            pos_start_local = np.array([128, 256]) - pos_start_local
-            pos_end_local = np.array([128, 256]) - pos_end_local
+            edge_start_global = self.crop_coordintates_to_global(self.pose, pos_start_local)
+            edge_end_global = self.crop_coordintates_to_global(self.pose, pos_end_local)
+
 
             edge_local = pos_end_local - pos_start_local
-            angle_local = np.arctan2(-edge_local[0], edge_local[1])
-
-            # transform pos_start to global coordinates
-            edge_start_global = np.zeros(2)
-            edge_start_global[0] = self.pose[0] - pos_start_local[0] * np.cos(self.pose[2]) + pos_start_local[1] * np.sin(self.pose[2])
-            edge_start_global[1] = self.pose[1] - pos_start_local[0] * np.sin(self.pose[2]) - pos_start_local[1] * np.cos(self.pose[2])
-
-            edge_end_global = np.zeros(2)
-            edge_end_global[0] = self.pose[0] - pos_end_local[0] * np.cos(self.pose[2]) + pos_end_local[1] * np.sin(self.pose[2])
-            edge_end_global[1] = self.pose[1] - pos_end_local[0] * np.sin(self.pose[2]) - pos_end_local[1] * np.cos(self.pose[2])
-
+            angle_local = np.arctan2(edge_local[1], -edge_local[0])
             angle_global = self.pose[2] + angle_local
-
 
             # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
             step_sizes = [40]  # number of pixels to move forward along edge
 
             for step_size in step_sizes:
 
-                diff = step_size * (edge_end_global - edge_start_global) / np.linalg.norm(edge_end_global - edge_start_global)
 
                 # define future pose
                 future_pose_global = np.zeros(3)
+                diff = step_size * (edge_end_global - edge_start_global) / np.linalg.norm(edge_end_global - edge_start_global)
                 future_pose_global[0:2] = edge_start_global + diff
                 future_pose_global[2] = self.yaw_check(angle_global)
 
-                # put in queue if not yet visited
+
+                # put future pose in queue if not yet visited
                 was_visited = similarity_check(future_pose_global, self.pose_history, min_dist=20, min_angle=np.pi/4)
                 is_already_in_queue = similarity_check(future_pose_global, self.future_poses, min_dist=20, min_angle=np.pi/4)
 
                 if not was_visited and not is_already_in_queue:
                     self.future_poses.append(future_pose_global)
                     print("     put pose in queue: {:.0f}, {:.0f}, {:.1f} (step size: {})".format(future_pose_global[0],
-                                                                                  future_pose_global[1],
-                                                                                  future_pose_global[2],
+                                                                                                  future_pose_global[1],
+                                                                                                  future_pose_global[2],
                                                                                                   step_size))
 
                     # add edge to aggregated graph
                     pointlist_local = np.array(edge["pts"][edge_start_idx:edge_end_idx])
-                    pointlist_local = np.array([256, 128]) - pointlist_local
-                    pointlist_global = np.zeros(pointlist_local.shape)
-                    pointlist_global[:, 0] = self.pose[0] - pointlist_local[:, 1] * np.cos(self.pose[2]) + pointlist_local[:, 0] * np.sin(self.pose[2])
-                    pointlist_global[:, 1] = self.pose[1] - pointlist_local[:, 1] * np.sin(self.pose[2]) - pointlist_local[:, 0] * np.cos(self.pose[2])
+
+                    pointlist_global = self.crop_coordintates_to_global(self.pose, pointlist_local)
 
                     node_edge_start = (int(edge_start_global[0]), int(edge_start_global[1]))
                     node_edge_end = (int(edge_end_global[0]), int(edge_end_global[1]))
@@ -702,27 +748,29 @@ class SatelliteDriver(object):
                     self.G_agg_mine.add_node(node_edge_end, pos=edge_end_global)
                     self.G_agg_mine.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
 
-                    # add G_agg-edge from split point to edge start
-                    # node_current_pose = (int(self.pose[0]), int(self.pose[1]))
-                    # self.G_agg.add_node(node_current_pose, pos=self.pose[0:2])
-                    # self.G_agg.add_edge(node_current_pose, node_edge_start)
-
                     break
+
+
 
         if self.step % write_every == 0:
             self.render_poses_in_aerial()
+
+            G_agg_cvpr = self.aggregate_graphs(self.graphs)
+
+
             self.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
             self.visualize_write_G_agg(self.G_agg_mine, "G_agg_mine")
 
-            fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
-            [ax.set_aspect('equal') for ax in axarr]
-            axarr[0].set_title("g single")
-            axarr[1].set_title("G_agg_mine")
-            axarr[2].set_title("G_agg_cvpr")
-            [visualize_graph(g, axarr[0], node_color="g", edge_color="g") for g in self.graphs]
-            visualize_graph(self.G_agg_mine, axarr[1], node_color="b", edge_color="b")
-            visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
-            plt.show()
+            # fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+            # [ax.set_aspect('equal') for ax in axarr]
+            # [ax.invert_yaxis() for ax in axarr]
+            # axarr[0].set_title("g single")
+            # axarr[1].set_title("G_agg_mine")
+            # axarr[2].set_title("G_agg_cvpr")
+            # [visualize_graph(g, axarr[0], node_color="g", edge_color="g") for g in self.graphs]
+            # visualize_graph(self.G_agg_mine, axarr[1], node_color="b", edge_color="b")
+            # visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
+            # plt.show()
 
 
 

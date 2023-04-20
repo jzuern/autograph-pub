@@ -237,137 +237,137 @@ def mean_angle_abs_diff(x, y):
     return np.abs(diff)
 
 
-def naive_aggregate(G_agg, G_new, threshold_px=20, closest_node_dist_thresh=30):
-
-    # Maps from agg nodes to new nodes
-    merging_map = defaultdict(list)
-
-    # Add aggregation weight to new predictions
-    for n in G_new.nodes():
-        G_new.nodes[n]['weight'] = 1.0
-
-    # Add edge angles to new graph
-    for e in G_new.edges():
-        G_new.edges[e]['angle'] = np.arctan2(G_new.nodes[e[1]]['pos'][1] - G_new.nodes[e[0]]['pos'][1],
-                                             G_new.nodes[e[1]]['pos'][0] - G_new.nodes[e[0]]['pos'][0])
-
-    # Get mean of angles of edges connected to each node in G_new
-    for n in G_new.nodes():
-        edge_angles_pred = [nx.get_edge_attributes(G_new, 'angle')[(x, n)] for x in G_new.predecessors(n)]
-        edge_angles_succ = [nx.get_edge_attributes(G_new, 'angle')[(n, x)] for x in G_new.successors(n)]
-        edge_angles = edge_angles_pred + edge_angles_succ
-        edge_angles_sin = [np.sin(angle) for angle in edge_angles]
-        edge_angles_cos = [np.cos(angle) for angle in edge_angles]
-        mean_angle = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
-        if len(edge_angles_pred) == 0 and len(edge_angles_succ) == 0:
-            mean_angle = 0
-        G_new.nodes[n]['mean_angle'] = mean_angle
-
-    # What if G_agg is empty? Then just return G_new, because it's the first graph and will be used as G_agg in next iteration
-    if len(G_agg.nodes) == 0:
-        return G_new.copy(), merging_map
-
-    # Assign angle attribute on edges of G_agg and G_new
-    for e in G_agg.edges():
-        G_agg.edges[e]['angle'] = np.arctan2(G_agg.nodes[e[1]]['pos'][1] - G_agg.nodes[e[0]]['pos'][1],
-                                             G_agg.nodes[e[1]]['pos'][0] - G_agg.nodes[e[0]]['pos'][0])
-
-    # Get mean of angles of edges connected to each node in G_agg
-    for n in G_agg.nodes():
-        edge_angles_pred = [nx.get_edge_attributes(G_agg, 'angle')[(x, n)] for x in G_agg.predecessors(n)]
-        edge_angles_succ = [nx.get_edge_attributes(G_agg, 'angle')[(n, x)] for x in G_agg.successors(n)]
-        edge_angles = edge_angles_pred + edge_angles_succ
-        edge_angles_sin = [np.sin(angle) for angle in edge_angles]
-        edge_angles_cos = [np.cos(angle) for angle in edge_angles]
-        mean_angle = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
-        if len(edge_angles_pred) == 0 and len(edge_angles_succ) == 0:
-            mean_angle = 0
-        G_agg.nodes[n]['mean_angle'] = mean_angle
-
-    # Get node name map
-    node_names_agg = list(G_agg.nodes())
-    node_names_new = list(G_new.nodes())
-
-    # Get pairwise distance between nodes in G_agg and G_new
-    node_pos_agg = np.array([G_agg.nodes[n]['pos'] for n in G_agg.nodes]).reshape(-1, 2)
-    node_pos_new = np.array([G_new.nodes[n]['pos'] for n in G_new.nodes]).reshape(-1, 2)
-    node_distances = cdist(node_pos_agg, node_pos_new, metric='euclidean') # i: agg, j: new
-
-    # Produce a pairwise thresholding that allows the construction of ROIs in terms of Euclidean distance
-    position_criterium = node_distances < threshold_px
-
-    closest_agg_nodes = defaultdict()
-    # Loop through all new nodes (columns indexed with j)
-    for j in range(position_criterium.shape[1]):
-        # Loop through all close agg-nodes and construct the j-specific local agg graph
-        agg_j_multilines = list()
-
-        # Get all agg-nodes that are close to new node j
-        # Use orthogonal linear coordinates system to avoid problems arising from OSMnx distance calculation
-        G_agg_j = nx.MultiDiGraph(crs="EPSG:3857")
-        for i in range(position_criterium.shape[0]):
-            if position_criterium[i, j]: # check if agg node i is close enough to new node j
-                for e in G_agg.edges(node_names_agg[i]):
-                    # Add edge to local agg graph
-
-                    G_agg_j.add_node(str(e[0]), x=G_agg.nodes[e[0]]['pos'][0], y=G_agg.nodes[e[0]]['pos'][1])
-                    G_agg_j.add_node(str(e[1]), x=G_agg.nodes[e[1]]['pos'][0], y=G_agg.nodes[e[1]]['pos'][1])
-                    G_agg_j.add_edge(str(e[0]), str(e[1]))
-                    agg_j_multilines.append(((G_agg.nodes[e[0]]['pos'][0], G_agg.nodes[e[0]]['pos'][1]),
-                                           (G_agg.nodes[e[1]]['pos'][0], G_agg.nodes[e[1]]['pos'][1])))
-        agg_j_shapely = MultiLineString(agg_j_multilines)
-        # Find closest edge and closest_node in agg-graph to new node j
-        if len(list(G_agg_j.edges)) > 0:
-            closest_node = osmnx.distance.nearest_nodes(G_agg_j,
-                                                           float(G_new.nodes[node_names_new[j]]['pos'][0]),
-                                                           float(G_new.nodes[node_names_new[j]]['pos'][1]),
-                                                           return_dist=False)
-            closest_node = eval(closest_node)
-            closest_node_dist = np.linalg.norm(np.array(G_agg.nodes[closest_node]['pos']) - G_new.nodes[node_names_new[j]]['pos'])
-
-            if closest_node_dist < closest_node_dist_thresh:
-                closest_agg_nodes[node_names_new[j]] = closest_node
-                updtd_closest_node_pos = (G_agg.nodes[closest_node]['weight'] * np.array(G_agg.nodes[closest_node]['pos']) \
-                                         + np.array(G_new.nodes[node_names_new[j]]['pos'])) / (G_agg.nodes[closest_node]['weight'] + 1)
-
-                # Check if the updated node is not NaN
-                if not math.isnan(updtd_closest_node_pos[0] * updtd_closest_node_pos[1]):
-                    G_agg.nodes[closest_node]['pos'][0], G_agg.nodes[closest_node]['pos'][1] = updtd_closest_node_pos[0], updtd_closest_node_pos[1]
-
-                # Record merging weights
-                G_agg.nodes[closest_node]['weight'] += 1
-
-                merging_map[closest_node].append(node_names_new[j])
-
-    # What happens to all other nodes in G_new? Add them to G_agg
-    mapped_new_nodes = [*merging_map.values()]
-    mapped_new_nodes = [item for sublist in mapped_new_nodes for item in sublist]
-    for n in G_new.nodes():
-        if n not in mapped_new_nodes:
-            G_agg.add_node(n, pos=G_new.nodes[n]['pos'], weight=G_new.nodes[n]['weight'], score=G_new.nodes[n]['score'])
-
-    for e in G_new.edges():
-        n = e[0]
-        m = e[1]
-        angle = np.arctan2(G_new.nodes[m]['pos'][1] - G_new.nodes[n]['pos'][1],
-                           G_new.nodes[m]['pos'][0] - G_new.nodes[n]['pos'][0])
-
-        # Add completely new edges
-        if n not in mapped_new_nodes and m not in mapped_new_nodes:
-            G_agg.add_edge(n, m, angle=G_new.edges[e]['angle'])
-
-        # Add leading edges
-        if n in mapped_new_nodes and m not in mapped_new_nodes:
-            angle = np.arctan2(G_new.nodes[m]['pos'][1] - G_agg.nodes[closest_agg_nodes[n]]['pos'][1],
-                               G_new.nodes[m]['pos'][0] - G_agg.nodes[closest_agg_nodes[n]]['pos'][0])
-            G_agg.add_edge(closest_agg_nodes[n], m, angle=angle)
-
-        # Add trailing edges
-        if n not in mapped_new_nodes and m in mapped_new_nodes:
-            angle = np.arctan2(G_agg.nodes[closest_agg_nodes[m]]['pos'][1] - G_new.nodes[n]['pos'][1],
-                               G_agg.nodes[closest_agg_nodes[m]]['pos'][0] - G_new.nodes[n]['pos'][0])
-            G_agg.add_edge(n, closest_agg_nodes[m], angle=angle)
-    return G_agg, merging_map
+# def naive_aggregate(G_agg, G_new, threshold_px=20, closest_node_dist_thresh=30):
+#
+#     # Maps from agg nodes to new nodes
+#     merging_map = defaultdict(list)
+#
+#     # Add aggregation weight to new predictions
+#     for n in G_new.nodes():
+#         G_new.nodes[n]['weight'] = 1.0
+#
+#     # Add edge angles to new graph
+#     for e in G_new.edges():
+#         G_new.edges[e]['angle'] = np.arctan2(G_new.nodes[e[1]]['pos'][1] - G_new.nodes[e[0]]['pos'][1],
+#                                              G_new.nodes[e[1]]['pos'][0] - G_new.nodes[e[0]]['pos'][0])
+#
+#     # Get mean of angles of edges connected to each node in G_new
+#     for n in G_new.nodes():
+#         edge_angles_pred = [nx.get_edge_attributes(G_new, 'angle')[(x, n)] for x in G_new.predecessors(n)]
+#         edge_angles_succ = [nx.get_edge_attributes(G_new, 'angle')[(n, x)] for x in G_new.successors(n)]
+#         edge_angles = edge_angles_pred + edge_angles_succ
+#         edge_angles_sin = [np.sin(angle) for angle in edge_angles]
+#         edge_angles_cos = [np.cos(angle) for angle in edge_angles]
+#         mean_angle = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
+#         if len(edge_angles_pred) == 0 and len(edge_angles_succ) == 0:
+#             mean_angle = 0
+#         G_new.nodes[n]['mean_angle'] = mean_angle
+#
+#     # What if G_agg is empty? Then just return G_new, because it's the first graph and will be used as G_agg in next iteration
+#     if len(G_agg.nodes) == 0:
+#         return G_new.copy(), merging_map
+#
+#     # Assign angle attribute on edges of G_agg and G_new
+#     for e in G_agg.edges():
+#         G_agg.edges[e]['angle'] = np.arctan2(G_agg.nodes[e[1]]['pos'][1] - G_agg.nodes[e[0]]['pos'][1],
+#                                              G_agg.nodes[e[1]]['pos'][0] - G_agg.nodes[e[0]]['pos'][0])
+#
+#     # Get mean of angles of edges connected to each node in G_agg
+#     for n in G_agg.nodes():
+#         edge_angles_pred = [nx.get_edge_attributes(G_agg, 'angle')[(x, n)] for x in G_agg.predecessors(n)]
+#         edge_angles_succ = [nx.get_edge_attributes(G_agg, 'angle')[(n, x)] for x in G_agg.successors(n)]
+#         edge_angles = edge_angles_pred + edge_angles_succ
+#         edge_angles_sin = [np.sin(angle) for angle in edge_angles]
+#         edge_angles_cos = [np.cos(angle) for angle in edge_angles]
+#         mean_angle = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
+#         if len(edge_angles_pred) == 0 and len(edge_angles_succ) == 0:
+#             mean_angle = 0
+#         G_agg.nodes[n]['mean_angle'] = mean_angle
+#
+#     # Get node name map
+#     node_names_agg = list(G_agg.nodes())
+#     node_names_new = list(G_new.nodes())
+#
+#     # Get pairwise distance between nodes in G_agg and G_new
+#     node_pos_agg = np.array([G_agg.nodes[n]['pos'] for n in G_agg.nodes]).reshape(-1, 2)
+#     node_pos_new = np.array([G_new.nodes[n]['pos'] for n in G_new.nodes]).reshape(-1, 2)
+#     node_distances = cdist(node_pos_agg, node_pos_new, metric='euclidean') # i: agg, j: new
+#
+#     # Produce a pairwise thresholding that allows the construction of ROIs in terms of Euclidean distance
+#     position_criterium = node_distances < threshold_px
+#
+#     closest_agg_nodes = defaultdict()
+#     # Loop through all new nodes (columns indexed with j)
+#     for j in range(position_criterium.shape[1]):
+#         # Loop through all close agg-nodes and construct the j-specific local agg graph
+#         agg_j_multilines = list()
+#
+#         # Get all agg-nodes that are close to new node j
+#         # Use orthogonal linear coordinates system to avoid problems arising from OSMnx distance calculation
+#         G_agg_j = nx.MultiDiGraph(crs="EPSG:3857")
+#         for i in range(position_criterium.shape[0]):
+#             if position_criterium[i, j]: # check if agg node i is close enough to new node j
+#                 for e in G_agg.edges(node_names_agg[i]):
+#                     # Add edge to local agg graph
+#
+#                     G_agg_j.add_node(str(e[0]), x=G_agg.nodes[e[0]]['pos'][0], y=G_agg.nodes[e[0]]['pos'][1])
+#                     G_agg_j.add_node(str(e[1]), x=G_agg.nodes[e[1]]['pos'][0], y=G_agg.nodes[e[1]]['pos'][1])
+#                     G_agg_j.add_edge(str(e[0]), str(e[1]))
+#                     agg_j_multilines.append(((G_agg.nodes[e[0]]['pos'][0], G_agg.nodes[e[0]]['pos'][1]),
+#                                            (G_agg.nodes[e[1]]['pos'][0], G_agg.nodes[e[1]]['pos'][1])))
+#         agg_j_shapely = MultiLineString(agg_j_multilines)
+#         # Find closest edge and closest_node in agg-graph to new node j
+#         if len(list(G_agg_j.edges)) > 0:
+#             closest_node = osmnx.distance.nearest_nodes(G_agg_j,
+#                                                            float(G_new.nodes[node_names_new[j]]['pos'][0]),
+#                                                            float(G_new.nodes[node_names_new[j]]['pos'][1]),
+#                                                            return_dist=False)
+#             closest_node = eval(closest_node)
+#             closest_node_dist = np.linalg.norm(np.array(G_agg.nodes[closest_node]['pos']) - G_new.nodes[node_names_new[j]]['pos'])
+#
+#             if closest_node_dist < closest_node_dist_thresh:
+#                 closest_agg_nodes[node_names_new[j]] = closest_node
+#                 updtd_closest_node_pos = (G_agg.nodes[closest_node]['weight'] * np.array(G_agg.nodes[closest_node]['pos']) \
+#                                          + np.array(G_new.nodes[node_names_new[j]]['pos'])) / (G_agg.nodes[closest_node]['weight'] + 1)
+#
+#                 # Check if the updated node is not NaN
+#                 if not math.isnan(updtd_closest_node_pos[0] * updtd_closest_node_pos[1]):
+#                     G_agg.nodes[closest_node]['pos'][0], G_agg.nodes[closest_node]['pos'][1] = updtd_closest_node_pos[0], updtd_closest_node_pos[1]
+#
+#                 # Record merging weights
+#                 G_agg.nodes[closest_node]['weight'] += 1
+#
+#                 merging_map[closest_node].append(node_names_new[j])
+#
+#     # What happens to all other nodes in G_new? Add them to G_agg
+#     mapped_new_nodes = [*merging_map.values()]
+#     mapped_new_nodes = [item for sublist in mapped_new_nodes for item in sublist]
+#     for n in G_new.nodes():
+#         if n not in mapped_new_nodes:
+#             G_agg.add_node(n, pos=G_new.nodes[n]['pos'], weight=G_new.nodes[n]['weight'], score=G_new.nodes[n]['score'])
+#
+#     for e in G_new.edges():
+#         n = e[0]
+#         m = e[1]
+#         angle = np.arctan2(G_new.nodes[m]['pos'][1] - G_new.nodes[n]['pos'][1],
+#                            G_new.nodes[m]['pos'][0] - G_new.nodes[n]['pos'][0])
+#
+#         # Add completely new edges
+#         if n not in mapped_new_nodes and m not in mapped_new_nodes:
+#             G_agg.add_edge(n, m, angle=G_new.edges[e]['angle'])
+#
+#         # Add leading edges
+#         if n in mapped_new_nodes and m not in mapped_new_nodes:
+#             angle = np.arctan2(G_new.nodes[m]['pos'][1] - G_agg.nodes[closest_agg_nodes[n]]['pos'][1],
+#                                G_new.nodes[m]['pos'][0] - G_agg.nodes[closest_agg_nodes[n]]['pos'][0])
+#             G_agg.add_edge(closest_agg_nodes[n], m, angle=angle)
+#
+#         # Add trailing edges
+#         if n not in mapped_new_nodes and m in mapped_new_nodes:
+#             angle = np.arctan2(G_agg.nodes[closest_agg_nodes[m]]['pos'][1] - G_new.nodes[n]['pos'][1],
+#                                G_agg.nodes[closest_agg_nodes[m]]['pos'][0] - G_new.nodes[n]['pos'][0])
+#             G_agg.add_edge(n, closest_agg_nodes[m], angle=angle)
+#     return G_agg, merging_map
 
 
 def aggregate(G_agg, G_new, visited_edges, threshold_px=20, threshold_rad=0.1, closest_lat_thresh=30, w_decay=False, remove=False):
@@ -585,205 +585,205 @@ def aggregate(G_agg, G_new, visited_edges, threshold_px=20, threshold_rad=0.1, c
     return G_agg, merging_map
 
 
-def fuse(G_agg, threshold_px=10, threshold_rad=0.2):
-
-    # Maps from agg nodes to new nodes
-    merging_map = defaultdict(list)
-
-    for e in G_agg.edges():
-        G_agg.edges[e]['angle'] = np.arctan2(G_agg.nodes[e[1]]['pos'][1] - G_agg.nodes[e[0]]['pos'][1],
-                                             G_agg.nodes[e[1]]['pos'][0] - G_agg.nodes[e[0]]['pos'][0])
-
-    # Get mean of angles of edges connected to each node in G_agg
-    for n in G_agg.nodes():
-        edge_angles_pred = [nx.get_edge_attributes(G_agg, 'angle')[(x, n)] for x in G_agg.predecessors(n)]
-        edge_angles_succ = [nx.get_edge_attributes(G_agg, 'angle')[(n, x)] for x in G_agg.successors(n)]
-        edge_angles = edge_angles_pred + edge_angles_succ
-        edge_angles_sin = [np.sin(angle) for angle in edge_angles]
-        edge_angles_cos = [np.cos(angle) for angle in edge_angles]
-        mean_angle = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
-        if len(edge_angles_pred) == 0 and len(edge_angles_succ) == 0:
-            mean_angle = 0
-        G_agg.nodes[n]['mean_angle'] = mean_angle
-
-    # Get node name map
-    node_names_agg = list(G_agg.nodes())
-
-    # Get pairwise distance between nodes in G_agg and G_new
-    node_pos_agg = np.array([G_agg.nodes[n]['pos'] for n in G_agg.nodes]).reshape(-1, 2)
-    node_distances = cdist(node_pos_agg, node_pos_agg, metric='euclidean') # i: agg, j: new
-
-    # Get pairwise angle difference between nodes in G_agg and G_new
-    node_mean_ang_agg = np.array([G_agg.nodes[n]['mean_angle'] for n in G_agg.nodes]).reshape(-1, 1)
-    node_mean_ang_distances = cdist(node_mean_ang_agg, node_mean_ang_agg, lambda u, v: mean_angle_abs_diff(u, v))
-
-    # Produce a pairwise thresholding that allows the construction of ROIs in terms of Euclidean distance
-    # and angle difference
-    position_criterium = node_distances < threshold_px
-    angle_criterium = node_mean_ang_distances < threshold_rad
-    criterium = position_criterium & angle_criterium
-
-    closest_agg_nodes = defaultdict()
-
-    assigned = dict()
-    # Loop through all new nodes (columns indexed with j)
-    for j in range(criterium.shape[1]):
-        # Loop through all close agg-nodes and construct the j-specific local agg graph
-        for i in range(criterium.shape[0]):
-            if criterium[i, j]: # check if agg node i is close enough to new node j
-                if j not in assigned.values():
-                    assigned[i] = j
-                    merging_map[node_names_agg[i]].append(node_names_agg[j])
-
-    for i, tobemerged in merging_map.items():
-        for j in tobemerged:
-            if i != j:
-                G_agg = nx.contracted_nodes(G_agg, i, j, self_loops=False)
-
-    for i in G_agg.nodes():
-        if "contraction" in G_agg.nodes[i].keys():
-            pos_0 = np.mean([k['pos'][0] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
-            pos_1 = np.mean([k['pos'][1] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
-
-            G_agg.nodes[i]['pos'] = np.array([pos_0, pos_1])
-            G_agg.nodes[i]['weight'] = np.sum([k['weight'] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
-            G_agg.nodes[i]['score'] = np.mean([k['score'] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
-
-            edge_angles_sin = [np.sin(k['mean_angle']) for k in G_agg.nodes[i]['contraction'].values()]
-            edge_angles_cos = [np.cos(k['mean_angle']) for k in G_agg.nodes[i]['contraction'].values()]
-            G_agg.nodes[i]['mean_angle'] = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
-
-    return G_agg, merging_map
-
-
-def plot_graphs_online(G_pred_list, G_pred_agg_before, G_pred_new, assoc, G_pred_agg_updtd, satellite_image):
-
-    fig, axarr = plt.subplots(1, 4, sharex=True, sharey=True, figsize=(32, 8))
-
-    axarr[0].set_title('All pred graph edges')
-    axarr[1].set_title('Curr Agg graph (red) and new pred graph (blue)')
-    axarr[2].set_title('Updated aggregated graph (red), old agg graph (magenta)')
-    axarr[3].set_title('Found associations')
-    axarr[0].imshow(satellite_image)
-    axarr[1].imshow(satellite_image)
-    axarr[2].imshow(satellite_image)
-    axarr[3].imshow(satellite_image)
-
-    # [0] Plot all pred graph edges
-    #for G in G_pred_list:
-    #    nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, ax=axarr[0], node_size=1, edge_color='r',
-    #            node_color='r')
-
-    # [1] Plot curr agg graph (red) and new pred graph (blue)
-    nx.draw(G_pred_agg_before, pos=nx.get_node_attributes(G_pred_agg_before, 'pos'), with_labels=False, ax=axarr[1], node_size=10,
-            edge_color='r', node_color='r')
-    nx.draw(G_pred_new, pos=nx.get_node_attributes(G_pred_new, 'pos'), with_labels=False, ax=axarr[1], node_size=10,
-            edge_color='b', node_color='b')
-
-    # [2] Updated aggregated graph
-    nx.draw(G_pred_agg_before, pos=nx.get_node_attributes(G_pred_agg_before, 'pos'), with_labels=False, ax=axarr[2],
-            node_size=0, edge_color='m', node_color='m', alpha=0.5)
-
-    node_weight_cmap = plt.cm.get_cmap('Reds', len(nx.get_node_attributes(G_pred_agg_updtd, 'weight').values()))
-
-    weight_array = np.array(list(nx.get_node_attributes(G_pred_agg_updtd, "weight").values()))
-    normalized_node_intensities = weight_array/np.max(weight_array)
-    node_colors = [node_weight_cmap(weight) for weight in normalized_node_intensities.tolist()]
-    nx.draw(G_pred_agg_updtd, pos=nx.get_node_attributes(G_pred_agg_updtd, 'pos'), with_labels=False, ax=axarr[2],
-            node_size=10,
-            edge_color='r', node_color=node_colors)
-    sm = plt.cm.ScalarMappable(cmap=node_weight_cmap, norm=plt.Normalize(vmin=np.min(weight_array), vmax=np.max(weight_array)))
-    sm._A = []
-
-    # Attach colorbar to plot without changing plot size
-    divider = make_axes_locatable(axarr[2])
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-    plt.colorbar(sm, cax=cax)
-    #plt.colorbar(sm, ax=axarr[2], orientation="vertical", fraction=0.046, pad=0.04)
-
-    # [3] Plot found associations
-    # assoc maps from existing nodes to new nodes (pixel-indices, not node idcs)
-    nx.draw(G_pred_agg_before, pos=nx.get_node_attributes(G_pred_agg_before, 'pos'), arrowsize=5, with_labels=False,
-            ax=axarr[3], node_size=0,edge_color='r', node_color='w', alpha=0.5)
-    nx.draw(G_pred_new, pos=nx.get_node_attributes(G_pred_new, 'pos'), arrowsize=5, with_labels=False, ax=axarr[3],
-            node_size=0, edge_color='b', node_color='w', alpha=0.5)
-
-    merge_cmap = plt.cm.get_cmap('tab10', len(assoc.keys()))
-
-    for n_idx, n_assoc in enumerate(assoc.items()):
-        anchor, anchored_list = n_assoc
-        c = list(merge_cmap(n_idx))
-
-        # plot anchor node with x y coords
-        axarr[3].scatter(anchor[0], anchor[1], color=c, s=30, marker='o')
-        anchored = np.array(anchored_list)
-        axarr[3].scatter(anchored[:, 0], anchored[:, 1], color=c, s=30, marker='o')
-
-        axarr[3].text(anchor[0], anchor[1], str(n_idx), color=c, fontsize=10)
-        for anchored in anchored_list:
-            axarr[3].text(anchored[0], anchored[1], str(n_idx), color=c, fontsize=10)
-
-    # Get x y limits of G_pred_agg_updtd
-    xmin = np.array([G_pred_agg_updtd.nodes[n]['pos'][0] for n in G_pred_agg_updtd.nodes()]).min()
-    xmax = np.array([G_pred_agg_updtd.nodes[n]['pos'][0] for n in G_pred_agg_updtd.nodes()]).max()
-    ymin = np.array([G_pred_agg_updtd.nodes[n]['pos'][1] for n in G_pred_agg_updtd.nodes()]).min()
-    ymax = np.array([G_pred_agg_updtd.nodes[n]['pos'][1] for n in G_pred_agg_updtd.nodes()]).max()
-
-    axarr[0].set_xlim(left=xmin - 100, right=xmax + 100)
-    axarr[0].set_ylim(top=ymin - 100, bottom=ymax + 100)
-
-    #xarr[0].axis('off')
-    #axarr[1].axis('off')
-
-    plt.tight_layout()
-    plt.show()
+# def fuse(G_agg, threshold_px=10, threshold_rad=0.2):
+#
+#     # Maps from agg nodes to new nodes
+#     merging_map = defaultdict(list)
+#
+#     for e in G_agg.edges():
+#         G_agg.edges[e]['angle'] = np.arctan2(G_agg.nodes[e[1]]['pos'][1] - G_agg.nodes[e[0]]['pos'][1],
+#                                              G_agg.nodes[e[1]]['pos'][0] - G_agg.nodes[e[0]]['pos'][0])
+#
+#     # Get mean of angles of edges connected to each node in G_agg
+#     for n in G_agg.nodes():
+#         edge_angles_pred = [nx.get_edge_attributes(G_agg, 'angle')[(x, n)] for x in G_agg.predecessors(n)]
+#         edge_angles_succ = [nx.get_edge_attributes(G_agg, 'angle')[(n, x)] for x in G_agg.successors(n)]
+#         edge_angles = edge_angles_pred + edge_angles_succ
+#         edge_angles_sin = [np.sin(angle) for angle in edge_angles]
+#         edge_angles_cos = [np.cos(angle) for angle in edge_angles]
+#         mean_angle = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
+#         if len(edge_angles_pred) == 0 and len(edge_angles_succ) == 0:
+#             mean_angle = 0
+#         G_agg.nodes[n]['mean_angle'] = mean_angle
+#
+#     # Get node name map
+#     node_names_agg = list(G_agg.nodes())
+#
+#     # Get pairwise distance between nodes in G_agg and G_new
+#     node_pos_agg = np.array([G_agg.nodes[n]['pos'] for n in G_agg.nodes]).reshape(-1, 2)
+#     node_distances = cdist(node_pos_agg, node_pos_agg, metric='euclidean') # i: agg, j: new
+#
+#     # Get pairwise angle difference between nodes in G_agg and G_new
+#     node_mean_ang_agg = np.array([G_agg.nodes[n]['mean_angle'] for n in G_agg.nodes]).reshape(-1, 1)
+#     node_mean_ang_distances = cdist(node_mean_ang_agg, node_mean_ang_agg, lambda u, v: mean_angle_abs_diff(u, v))
+#
+#     # Produce a pairwise thresholding that allows the construction of ROIs in terms of Euclidean distance
+#     # and angle difference
+#     position_criterium = node_distances < threshold_px
+#     angle_criterium = node_mean_ang_distances < threshold_rad
+#     criterium = position_criterium & angle_criterium
+#
+#     closest_agg_nodes = defaultdict()
+#
+#     assigned = dict()
+#     # Loop through all new nodes (columns indexed with j)
+#     for j in range(criterium.shape[1]):
+#         # Loop through all close agg-nodes and construct the j-specific local agg graph
+#         for i in range(criterium.shape[0]):
+#             if criterium[i, j]: # check if agg node i is close enough to new node j
+#                 if j not in assigned.values():
+#                     assigned[i] = j
+#                     merging_map[node_names_agg[i]].append(node_names_agg[j])
+#
+#     for i, tobemerged in merging_map.items():
+#         for j in tobemerged:
+#             if i != j:
+#                 G_agg = nx.contracted_nodes(G_agg, i, j, self_loops=False)
+#
+#     for i in G_agg.nodes():
+#         if "contraction" in G_agg.nodes[i].keys():
+#             pos_0 = np.mean([k['pos'][0] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
+#             pos_1 = np.mean([k['pos'][1] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
+#
+#             G_agg.nodes[i]['pos'] = np.array([pos_0, pos_1])
+#             G_agg.nodes[i]['weight'] = np.sum([k['weight'] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
+#             G_agg.nodes[i]['score'] = np.mean([k['score'] for k in G_agg.nodes[i]['contraction'].values()], axis=0)
+#
+#             edge_angles_sin = [np.sin(k['mean_angle']) for k in G_agg.nodes[i]['contraction'].values()]
+#             edge_angles_cos = [np.cos(k['mean_angle']) for k in G_agg.nodes[i]['contraction'].values()]
+#             G_agg.nodes[i]['mean_angle'] = np.arctan2(np.mean(edge_angles_sin), np.mean(edge_angles_cos))
+#
+#     return G_agg, merging_map
 
 
-def plot_graphs(G_pred_list, G_pred_agg, G_gt_list, G_gt_agg, ego_positions, satellite_image):
+# def plot_graphs_online(G_pred_list, G_pred_agg_before, G_pred_new, assoc, G_pred_agg_updtd, satellite_image):
+#
+#     fig, axarr = plt.subplots(1, 4, sharex=True, sharey=True, figsize=(32, 8))
+#
+#     axarr[0].set_title('All pred graph edges')
+#     axarr[1].set_title('Curr Agg graph (red) and new pred graph (blue)')
+#     axarr[2].set_title('Updated aggregated graph (red), old agg graph (magenta)')
+#     axarr[3].set_title('Found associations')
+#     axarr[0].imshow(satellite_image)
+#     axarr[1].imshow(satellite_image)
+#     axarr[2].imshow(satellite_image)
+#     axarr[3].imshow(satellite_image)
+#
+#     # [0] Plot all pred graph edges
+#     #for G in G_pred_list:
+#     #    nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, ax=axarr[0], node_size=1, edge_color='r',
+#     #            node_color='r')
+#
+#     # [1] Plot curr agg graph (red) and new pred graph (blue)
+#     nx.draw(G_pred_agg_before, pos=nx.get_node_attributes(G_pred_agg_before, 'pos'), with_labels=False, ax=axarr[1], node_size=10,
+#             edge_color='r', node_color='r')
+#     nx.draw(G_pred_new, pos=nx.get_node_attributes(G_pred_new, 'pos'), with_labels=False, ax=axarr[1], node_size=10,
+#             edge_color='b', node_color='b')
+#
+#     # [2] Updated aggregated graph
+#     nx.draw(G_pred_agg_before, pos=nx.get_node_attributes(G_pred_agg_before, 'pos'), with_labels=False, ax=axarr[2],
+#             node_size=0, edge_color='m', node_color='m', alpha=0.5)
+#
+#     node_weight_cmap = plt.cm.get_cmap('Reds', len(nx.get_node_attributes(G_pred_agg_updtd, 'weight').values()))
+#
+#     weight_array = np.array(list(nx.get_node_attributes(G_pred_agg_updtd, "weight").values()))
+#     normalized_node_intensities = weight_array/np.max(weight_array)
+#     node_colors = [node_weight_cmap(weight) for weight in normalized_node_intensities.tolist()]
+#     nx.draw(G_pred_agg_updtd, pos=nx.get_node_attributes(G_pred_agg_updtd, 'pos'), with_labels=False, ax=axarr[2],
+#             node_size=10,
+#             edge_color='r', node_color=node_colors)
+#     sm = plt.cm.ScalarMappable(cmap=node_weight_cmap, norm=plt.Normalize(vmin=np.min(weight_array), vmax=np.max(weight_array)))
+#     sm._A = []
+#
+#     # Attach colorbar to plot without changing plot size
+#     divider = make_axes_locatable(axarr[2])
+#     cax = divider.append_axes("right", size="5%", pad=0.05)
+#     plt.colorbar(sm, cax=cax)
+#     #plt.colorbar(sm, ax=axarr[2], orientation="vertical", fraction=0.046, pad=0.04)
+#
+#     # [3] Plot found associations
+#     # assoc maps from existing nodes to new nodes (pixel-indices, not node idcs)
+#     nx.draw(G_pred_agg_before, pos=nx.get_node_attributes(G_pred_agg_before, 'pos'), arrowsize=5, with_labels=False,
+#             ax=axarr[3], node_size=0,edge_color='r', node_color='w', alpha=0.5)
+#     nx.draw(G_pred_new, pos=nx.get_node_attributes(G_pred_new, 'pos'), arrowsize=5, with_labels=False, ax=axarr[3],
+#             node_size=0, edge_color='b', node_color='w', alpha=0.5)
+#
+#     merge_cmap = plt.cm.get_cmap('tab10', len(assoc.keys()))
+#
+#     for n_idx, n_assoc in enumerate(assoc.items()):
+#         anchor, anchored_list = n_assoc
+#         c = list(merge_cmap(n_idx))
+#
+#         # plot anchor node with x y coords
+#         axarr[3].scatter(anchor[0], anchor[1], color=c, s=30, marker='o')
+#         anchored = np.array(anchored_list)
+#         axarr[3].scatter(anchored[:, 0], anchored[:, 1], color=c, s=30, marker='o')
+#
+#         axarr[3].text(anchor[0], anchor[1], str(n_idx), color=c, fontsize=10)
+#         for anchored in anchored_list:
+#             axarr[3].text(anchored[0], anchored[1], str(n_idx), color=c, fontsize=10)
+#
+#     # Get x y limits of G_pred_agg_updtd
+#     xmin = np.array([G_pred_agg_updtd.nodes[n]['pos'][0] for n in G_pred_agg_updtd.nodes()]).min()
+#     xmax = np.array([G_pred_agg_updtd.nodes[n]['pos'][0] for n in G_pred_agg_updtd.nodes()]).max()
+#     ymin = np.array([G_pred_agg_updtd.nodes[n]['pos'][1] for n in G_pred_agg_updtd.nodes()]).min()
+#     ymax = np.array([G_pred_agg_updtd.nodes[n]['pos'][1] for n in G_pred_agg_updtd.nodes()]).max()
+#
+#     axarr[0].set_xlim(left=xmin - 100, right=xmax + 100)
+#     axarr[0].set_ylim(top=ymin - 100, bottom=ymax + 100)
+#
+#     #xarr[0].axis('off')
+#     #axarr[1].axis('off')
+#
+#     plt.tight_layout()
+#     plt.show()
 
-    fig, axarr = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(20, 20))
-    plt.tight_layout()
 
-    axarr[0, 0].set_title('All Pred graphs')
-    axarr[0, 1].set_title('Aggregated Pred graph')
-    axarr[1, 0].set_title('All GT graphs')
-    axarr[1, 1].set_title('Aggregated GT graph')
-    axarr[0, 0].imshow(satellite_image)
-    axarr[0, 1].imshow(satellite_image)
-    axarr[1, 0].imshow(satellite_image)
-    axarr[1, 1].imshow(satellite_image)
-
-    for G in G_pred_list:
-        nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, ax=axarr[0, 0], node_size=1, edge_color='r', node_color='r')
-    for G in G_gt_list:
-        nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, ax=axarr[1, 0], node_size=1, edge_color='g', node_color='g')
-
-    nx.draw(G_pred_agg, pos=nx.get_node_attributes(G_pred_agg, 'pos'), with_labels=False, ax=axarr[0, 1], node_size=10, edge_color='r', node_color='r')
-    nx.draw(G_gt_agg, pos=nx.get_node_attributes(G_gt_agg, 'pos'), with_labels=False, ax=axarr[1, 1], node_size=10, edge_color='g', node_color='g')
-
-    axarr[0, 0].set_xlim(left=200, right=1000)
-    axarr[0, 0].set_ylim(top=150, bottom=1000)
-
-    plt.show()
-
-
-def get_target_data(params, data, split):
-
-    tile_no = int(data.tile_no[0].cpu().detach().numpy())
-    walk_no = int(data.walk_no[0].cpu().detach().numpy())
-    idx = int(data.idx[0].cpu().detach().numpy())
-    city = data.city[0]
-
-
-    json_fname = "{}{}/{}/{}/{:03d}_{:03d}_{:03d}-targets.json".format(params.paths.dataroot, params.paths.rel_dataset, city, split, tile_no, walk_no, idx)
-    with open(json_fname, 'r') as f:
-        targets = json.load(f)
-
-    targets['tile_no'] = tile_no
-    targets['walk_no'] = walk_no
-    targets['idx'] = idx
-
-    return targets
+# def plot_graphs(G_pred_list, G_pred_agg, G_gt_list, G_gt_agg, ego_positions, satellite_image):
+#
+#     fig, axarr = plt.subplots(2, 2, sharex=True, sharey=True, figsize=(20, 20))
+#     plt.tight_layout()
+#
+#     axarr[0, 0].set_title('All Pred graphs')
+#     axarr[0, 1].set_title('Aggregated Pred graph')
+#     axarr[1, 0].set_title('All GT graphs')
+#     axarr[1, 1].set_title('Aggregated GT graph')
+#     axarr[0, 0].imshow(satellite_image)
+#     axarr[0, 1].imshow(satellite_image)
+#     axarr[1, 0].imshow(satellite_image)
+#     axarr[1, 1].imshow(satellite_image)
+#
+#     for G in G_pred_list:
+#         nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, ax=axarr[0, 0], node_size=1, edge_color='r', node_color='r')
+#     for G in G_gt_list:
+#         nx.draw(G, pos=nx.get_node_attributes(G, 'pos'), with_labels=False, ax=axarr[1, 0], node_size=1, edge_color='g', node_color='g')
+#
+#     nx.draw(G_pred_agg, pos=nx.get_node_attributes(G_pred_agg, 'pos'), with_labels=False, ax=axarr[0, 1], node_size=10, edge_color='r', node_color='r')
+#     nx.draw(G_gt_agg, pos=nx.get_node_attributes(G_gt_agg, 'pos'), with_labels=False, ax=axarr[1, 1], node_size=10, edge_color='g', node_color='g')
+#
+#     axarr[0, 0].set_xlim(left=200, right=1000)
+#     axarr[0, 0].set_ylim(top=150, bottom=1000)
+#
+#     plt.show()
+#
+#
+# def get_target_data(params, data, split):
+#
+#     tile_no = int(data.tile_no[0].cpu().detach().numpy())
+#     walk_no = int(data.walk_no[0].cpu().detach().numpy())
+#     idx = int(data.idx[0].cpu().detach().numpy())
+#     city = data.city[0]
+#
+#
+#     json_fname = "{}{}/{}/{}/{:03d}_{:03d}_{:03d}-targets.json".format(params.paths.dataroot, params.paths.rel_dataset, city, split, tile_no, walk_no, idx)
+#     with open(json_fname, 'r') as f:
+#         targets = json.load(f)
+#
+#     targets['tile_no'] = tile_no
+#     targets['walk_no'] = walk_no
+#     targets['idx'] = idx
+#
+#     return targets
 
 
 

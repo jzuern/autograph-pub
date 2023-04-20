@@ -1517,7 +1517,7 @@ if __name__ == "__main__":
 
         memory_after = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
 
-        print("Memory usage reduced from {} to {} MB".format(memory_prior, memory_after))
+        print("Memory usage reduced from {} to {} GB".format(int(memory_prior / 1024.), int(memory_after / 1024.)))
 
 
         trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
