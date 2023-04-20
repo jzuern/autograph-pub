@@ -1,5 +1,6 @@
 from pathlib import Path
 import matplotlib.pyplot as plt
+import psutil
 from tqdm import tqdm
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
@@ -12,12 +13,11 @@ from av2.datasets.motion_forecasting import scenario_serialization
 import pickle
 import time
 import networkx as nx
-import bitarray
 
 from data.av2.settings import *
 from aggregation.utils import get_scenario_centerlines, resample_trajectory, Tracklet, \
     filter_tracklet, merge_successor_trajectories, iou_mask, smooth_trajectory, get_endpoints, \
-    crop_graph, filter_subgraph
+    crop_graph
 
 
 # random shuffle seed
@@ -1510,15 +1510,22 @@ if __name__ == "__main__":
         sat_image = sat_image_[y_min_cut:y_max_cut, :, :].copy()
         drivable_gt = drivable_gt_[y_min_cut:y_max_cut, :].copy()
 
+        memory_prior = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
+
         del sat_image_
         del drivable_gt_
+
+        memory_after = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
+
+        print("Memory usage reduced from {} to {} MB".format(memory_prior, memory_after))
+
 
         trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
         trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
 
         # delete trajectories that are outside of the image
-        trajectories_ = [t for t in trajectories_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
-        trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image_.shape[0])]
+        trajectories_ = [t for t in trajectories_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image.shape[0])]
+        trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image.shape[0])]
 
         for node in G_annot.nodes:
             G_annot.nodes[node]["pos"][1] = G_annot.nodes[node]["pos"][1] - y_min_cut
@@ -1526,12 +1533,12 @@ if __name__ == "__main__":
         # delete nodes outside of image
         nodes_to_delete = []
         for node in G_annot.nodes:
-            if G_annot.nodes[node]["pos"][1] < 0 or G_annot.nodes[node]["pos"][1] >= sat_image_.shape[0]:
+            if G_annot.nodes[node]["pos"][1] < 0 or G_annot.nodes[node]["pos"][1] >= sat_image.shape[0]:
                 nodes_to_delete.append(node)
         G_annot.remove_nodes_from(nodes_to_delete)
 
         print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}, G_annot.number_of_nodes(): {}".
-              format(args.thread_id, sat_image_.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
+              format(args.thread_id, sat_image.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
 
         if len(trajectories_) == 0:
             print("No trajectories in this thread. Exiting...")
