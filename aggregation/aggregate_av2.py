@@ -1,5 +1,6 @@
 from pathlib import Path
 import matplotlib.pyplot as plt
+import numpy as np
 import psutil
 from tqdm import tqdm
 from PIL import Image
@@ -396,8 +397,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     Image.fromarray(mask_angle_colorized).save(
                         "{}/{}/{}-{}-angles.png".format(out_path, sample_type, sample_id, i_query))
 
-
-
     elif "tracklets" in args.source:
         annot_veh_ = trajectories_vehicles_
         centers = [np.mean(t, axis=0) for t in annot_veh_]
@@ -433,10 +432,9 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
             if os.path.exists(os.path.join(out_path, "{}.pth".format(sample_id))):
                 continue
 
-            annot_candidates = []
-            for i in range(len(annot_veh_)):
-                if np.linalg.norm(centers[i] - [crop_center[0], crop_center[1]]) < 512:
-                    annot_candidates.append(annot_veh_[i])
+
+            is_close = np.linalg.norm(np.array(centers) - [crop_center[0], crop_center[1]], axis=1) < np.sqrt(2) * crop_size
+            annot_candidates = np.array(annot_veh_)[is_close]
 
             print_elapsed_time("annot candidates")
 
@@ -456,6 +454,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 is_in_roi = np.logical_and(is_in_roi, annot[:, 1] < sat_image_crop.shape[0])
                 if not np.any(is_in_roi):
                     continue
+
                 annot = annot[is_in_roi]
 
                 # resample trajectory to have equally distant points
@@ -532,10 +531,9 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                                  query_distance_threshold=query_distance_threshold,
                                                  joining_distance_threshold=joining_distance_threshold,
                                                  joining_angle_threshold=joining_angle_threshold)
+                print_elapsed_time("get_endpoints")
 
                 num_clusters, _ = get_endpoints(succ_traj, crop_size)
-
-                print_elapsed_time("get_endpoints")
 
 
                 if num_clusters > 1:

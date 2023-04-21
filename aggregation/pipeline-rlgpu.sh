@@ -15,7 +15,7 @@ run () {
       for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
         echo "Processing $CITY, $tid / $NUM_PARALLEL !"
         /home/buechner/zuern/geometric/bin/python aggregate_av2.py --city_name $CITY\
-                                                               --out_path_root /data/buechner/zuern/autograph/austin-real2/$SOURCE/$CITY \
+                                                               --out_path_root /data/buechner/zuern/autograph/austin-real3/$SOURCE/$CITY \
                                                                --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
                                                                --source $SOURCE \
                                                                --max_num_samples 10000 \
@@ -30,18 +30,14 @@ run () {
   wait
 }
 
-# run
-run
 
+NUM_PARSING=3
 
-
-#NUM_PARSING=1
-
-#for ((i=1; i<=NUM_PARSING; i++)); do
-#  echo "Parsing $i / $NUM_PARSING !"
-#  parsing &
-#  sleep 10 # sleep to give time start generating
-#done
+for ((i=1; i<=NUM_PARSING; i++)); do
+  echo "Parsing $i / $NUM_PARSING !"
+  run &
+  sleep 10 # sleep to give time start generating
+done
 
 
 

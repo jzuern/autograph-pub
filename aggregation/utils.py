@@ -447,9 +447,8 @@ def merge_successor_trajectories(q, trajectories_all,
         for i in range(len(t)-1):
             cv2.line(tracklets_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1, cv2.LINE_AA)
 
-
     # then get all trajectories that are close to any of the trajectories
-    trajectories_2 = []
+    trajectories_second_order = []
     for t0 in trajectories_close_q:
         for t1 in trajectories_all:
 
@@ -476,49 +475,24 @@ def merge_successor_trajectories(q, trajectories_all,
                 # if so, merge the trajectories
                 # find the first point where the criteria is met
                 first_crit = np.where(crit)[0][0]
-
-                trajectories_2.append(t1[first_crit:])
-
-                # fig, axarr = plt.subplots(1, 4, figsize=(10, 5))
-                # axarr[0].imshow(sat_image_viz, alpha=0.5)
-                # axarr[0].plot(t0[:, 0], t0[:, 1], 'rx')
-                # axarr[0].plot(t1[:, 0], t1[:, 1], 'b.')
-                #
-                # axarr[1].plot(angles0, 'r')
-                # axarr[1].plot(angles1, 'b')
-                # axarr[1].title.set_text("angles")
-                #
-                # axarr[2].plot(min_dist, 'k')
-                # axarr[2].title.set_text("min_dist")
-                # axarr[3].plot(min_angle, 'k')
-                # axarr[3].title.set_text("min_angle")
-                #
-                # plt.show()
-
+                trajectories_second_order.append(t1[first_crit:])
                 cv2.circle(tracklets_viz, tuple(t1[first_crit].astype(int)), 2, (0, 255, 0), -1)
 
 
-
-    for t2 in trajectories_2:
+    for t2 in trajectories_second_order:
         for i in range(len(t2)-1):
             cv2.line(tracklets_viz, tuple(t2[i].astype(int)), tuple(t2[i+1].astype(int)), (255, 0, 0), 1, cv2.LINE_AA)
 
-    mask_ped = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
+    # mask_ped = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
     mask_veh = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
-
-    # Paint into vehicle and pedestrian masks
-    for t in trajectories_all:
-        for i in range(len(t)-1):
-            cv2.line(mask_veh, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
-    for t in trajectories_ped:
-        for i in range(len(t)-1):
-            cv2.line(mask_ped, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
-            cv2.line(tracklets_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1, cv2.LINE_AA)
-
-    # paint into angle mask
+    mask_succ = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
     mask_angle = np.zeros(tracklets_viz.shape[0:2], dtype=np.float32)
+
+    # Paint into vehicle and pedestrian masks, paint into angle mask
     for t in trajectories_all:
         for i in range(len(t) - 1):
+            cv2.line(mask_veh, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
+
             start = tuple(t[i].astype(int))
             end = tuple(t[i + 1].astype(int))
             angle = np.arctan2(end[1] - start[1], end[0] - start[0]) + np.pi
@@ -528,11 +502,9 @@ def merge_successor_trajectories(q, trajectories_all,
     mask_angle_colorized = AngleColorizer().angle_to_color(mask_angle)
     mask_angle_colorized[mask_angle == 0] = 0
 
-    succ_traj = trajectories_2 + trajectories_close_q
+    succ_traj = trajectories_second_order + trajectories_close_q
 
     # visualize succ traj in sat image viz and in mask_total
-    mask_succ = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
-
     for t in succ_traj:
         for i in range(len(t)-1):
             cv2.line(mask_succ, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
@@ -540,8 +512,8 @@ def merge_successor_trajectories(q, trajectories_all,
 
     mask_total = np.zeros(tracklets_viz.shape, dtype=np.uint8)
     mask_total[:, :, 0] = mask_succ
-    mask_total[:, :, 2] = mask_ped
     mask_total[:, :, 1] = mask_veh
+    # mask_total[:, :, 2] = mask_ped
 
     return succ_traj,  mask_total, mask_angle_colorized, tracklets_viz
 
