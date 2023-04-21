@@ -379,10 +379,10 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
                     sample_num += 1
 
-                    print("---- TID: {}/{}: Sample {}/{}/{}/{} ({}/{})".format(args.thread_id, args.num_parallel,
+                    print("---- TID: {}/{}: Sample {}/{}/{}/{} ({}/{}) - Samples / s = {:.2f}".format(args.thread_id, args.num_parallel,
                                                                                out_path, sample_type, sample_id,
-                                                                               i_query, sample_num, max_num_samples))
-                    print("    Samples / s = {:.2f}".format(sample_num / (time.time() - start_time)))
+                                                                               i_query, sample_num, max_num_samples,
+                                                                               sample_num / (time.time() - start_time)))
 
                     Image.fromarray(pos_encoding).save(
                         "{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
@@ -401,20 +401,14 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
         annot_veh_ = trajectories_vehicles_
         centers = [np.mean(t, axis=0) for t in annot_veh_]
 
-        def print_elapsed_time(mark):
-            print("{}, Elapsed time: {:.2f} s".format(mark, time.time() - start_time))
-
         start_time = time.time()
 
         sample_num = 0
         while sample_num < max_num_samples:
 
-
             # this is not guaranteed to give valid crops
             sat_image_crop, tracklet_image_crop, drivable_gt_crop, crop_center = \
                 random_cropping(sat_image_, tracklets_image, drivable_gt, annot_veh_, crop_size=crop_size)
-
-            print_elapsed_time("Random cropping")
 
             angle = crop_center[2]
             R = np.array([[np.cos(angle), -np.sin(angle)],
@@ -435,9 +429,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
             is_close = np.linalg.norm(np.array(centers) - [crop_center[0], crop_center[1]], axis=1) < np.sqrt(2) * crop_size
             annot_candidates = np.array(annot_veh_)[is_close]
-
-            print_elapsed_time("annot candidates")
-
 
             annots = []
             for annot in annot_candidates:
@@ -461,9 +452,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 annot = resample_trajectory(annot, dist=5)
 
                 annots.append(annot)
-
-            print_elapsed_time("filtering")
-
 
             # filter out too short annots
             annots = [a for a in annots if len(a) > 5]
@@ -531,7 +519,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                                  query_distance_threshold=query_distance_threshold,
                                                  joining_distance_threshold=joining_distance_threshold,
                                                  joining_angle_threshold=joining_angle_threshold)
-                print_elapsed_time("get_endpoints")
 
                 num_clusters, _ = get_endpoints(succ_traj, crop_size)
 
@@ -572,16 +559,9 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
                 sample_num += 1
 
-
-                print_elapsed_time("final")
-
-
-                print("    Samples / s = {:.2f}".format(sample_num / (time.time() - start_time)))
-
-
-                print("---- TID: {}/{}: Sample {}/{}/{}/{} ({}/{})".format(args.thread_id, args.num_parallel, out_path,
+                print("---- TID: {}/{}: Sample {}/{}/{}/{} ({}/{}) - Samples / s = {:.2f}".format(args.thread_id, args.num_parallel, out_path,
                                                                            sample_type, sample_id, i_query, sample_num,
-                                                                           max_num_samples))
+                                                                           max_num_samples, sample_num / (time.time() - start_time)))
 
                 Image.fromarray(pos_encoding).save("{}/{}/{}-{}-pos-encoding.png".format(out_path, sample_type, sample_id, i_query))
                 Image.fromarray(sat_image_crop).save("{}/{}/{}-{}-rgb.png".format(out_path, sample_type, sample_id, i_query))
