@@ -11,6 +11,7 @@ import os
 from sklearn.cluster import DBSCAN
 from collections import defaultdict
 from shapely.geometry import LineString
+import time
 
 from av2.geometry.interpolate import compute_midpoint_line
 from av2.map.map_api import ArgoverseStaticMap
@@ -238,17 +239,25 @@ def get_supernodes(G, max_distance=0.1):
     return close_indices_sets
 
 
-def crop_graph(g, x_min, x_max, y_min, y_max):
+def crop_graph(g, edge_pos, x_min, x_max, y_min, y_max):
 
-    g_ = g.copy(as_view=False)
-    for node in g.nodes():
-        if g.nodes[node]['pos'][0] < x_min or g.nodes[node]['pos'][0] > x_max or g.nodes[node]['pos'][1] < y_min or g.nodes[node]['pos'][1] > y_max:
-            g_.remove_node(node)
+    t0 = time.time()
+
+    edge_mask = np.vstack((edge_pos[0, :, 0] > x_min, edge_pos[0, :, 0] < x_max, edge_pos[0, :, 1] > y_min, edge_pos[0, :, 1] < y_max,
+                           edge_pos[1, :, 0] > x_min, edge_pos[1, :, 0] < x_max, edge_pos[1, :, 1] > y_min, edge_pos[1, :, 1] < y_max))
+    edge_mask = np.all(edge_mask, axis=0)
+
+    edges_to_keep = np.array(g.edges())[edge_mask]
 
 
-    # print("Cropping graph with {} nodes... done! New graph has {} nodes.".format(g.number_of_nodes(), g_.number_of_nodes()))
+    # # build new graph
+    g_copy = nx.DiGraph()
+    for edge in edges_to_keep:
+        g_copy.add_edge(edge[0], edge[1])
 
-    return g_
+    print("     Cropping graph with {} nodes to {} nodes... done! Took {:.2f}s".format(g.number_of_nodes(), g_copy.number_of_nodes(), time.time()-t0))
+
+    return g_copy
 
 
 def remove_redundant_nodes(obj_boxes, obj_relation_triplets, redundant_distance_threshold_px=10.0):
@@ -414,7 +423,7 @@ def find_successor_annotations(annot):
     return annot_successor
 
 
-def merge_successor_trajectories(q, trajectories_all, sat_image,
+def merge_successor_trajectories(q, trajectories_all,
                                  trajectories_ped=[],
                                  query_distance_threshold=4,  # in px
                                  joining_distance_threshold=4,  # in px
@@ -423,7 +432,7 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
 
     # Get all trajectories that go through query point
 
-    sat_image_viz = sat_image.copy()
+    tracklets_viz = np.zeros([256, 256, 3], dtype=np.uint8)
 
     trajectories_close_q = []
     for t in trajectories_all:
@@ -436,7 +445,7 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
 
     for t in trajectories_all:
         for i in range(len(t)-1):
-            cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1, cv2.LINE_AA)
+            cv2.line(tracklets_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 0, 255), 1, cv2.LINE_AA)
 
 
     # then get all trajectories that are close to any of the trajectories
@@ -486,16 +495,16 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
                 #
                 # plt.show()
 
-                cv2.circle(sat_image_viz, tuple(t1[first_crit].astype(int)), 2, (0, 255, 0), -1)
+                cv2.circle(tracklets_viz, tuple(t1[first_crit].astype(int)), 2, (0, 255, 0), -1)
 
 
 
     for t2 in trajectories_2:
         for i in range(len(t2)-1):
-            cv2.line(sat_image_viz, tuple(t2[i].astype(int)), tuple(t2[i+1].astype(int)), (255, 0, 0), 1, cv2.LINE_AA)
+            cv2.line(tracklets_viz, tuple(t2[i].astype(int)), tuple(t2[i+1].astype(int)), (255, 0, 0), 1, cv2.LINE_AA)
 
-    mask_ped = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
-    mask_veh = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
+    mask_ped = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
+    mask_veh = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
 
     # Paint into vehicle and pedestrian masks
     for t in trajectories_all:
@@ -504,10 +513,10 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
     for t in trajectories_ped:
         for i in range(len(t)-1):
             cv2.line(mask_ped, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
-            cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1, cv2.LINE_AA)
+            cv2.line(tracklets_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (0, 255, 0), 1, cv2.LINE_AA)
 
     # paint into angle mask
-    mask_angle = np.zeros(sat_image.shape[0:2], dtype=np.float32)
+    mask_angle = np.zeros(tracklets_viz.shape[0:2], dtype=np.float32)
     for t in trajectories_all:
         for i in range(len(t) - 1):
             start = tuple(t[i].astype(int))
@@ -522,19 +531,19 @@ def merge_successor_trajectories(q, trajectories_all, sat_image,
     succ_traj = trajectories_2 + trajectories_close_q
 
     # visualize succ traj in sat image viz and in mask_total
-    mask_succ = np.zeros(sat_image.shape[0:2], dtype=np.uint8)
+    mask_succ = np.zeros(tracklets_viz.shape[0:2], dtype=np.uint8)
 
     for t in succ_traj:
         for i in range(len(t)-1):
             cv2.line(mask_succ, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255), 7)
-            cv2.line(sat_image_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255, 0, 0), 1, cv2.LINE_AA)
+            cv2.line(tracklets_viz, tuple(t[i].astype(int)), tuple(t[i+1].astype(int)), (255, 0, 0), 1, cv2.LINE_AA)
 
-    mask_total = np.zeros(sat_image.shape, dtype=np.uint8)
+    mask_total = np.zeros(tracklets_viz.shape, dtype=np.uint8)
     mask_total[:, :, 0] = mask_succ
     mask_total[:, :, 2] = mask_ped
     mask_total[:, :, 1] = mask_veh
 
-    return succ_traj,  mask_total, mask_angle_colorized, sat_image_viz
+    return succ_traj,  mask_total, mask_angle_colorized, tracklets_viz
 
 
 
