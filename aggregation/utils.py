@@ -1056,6 +1056,6 @@ def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color
     nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
                      edge_color=node_color,
                      node_color=edge_color,
-                     with_labels=True,
+                     with_labels=False,
                      node_size=2,
                      arrowsize=10.0,)

@@ -21,7 +21,7 @@ run () {
                                                                --max_num_samples 10000 \
                                                                --num_parallel $NUM_PARALLEL \
                                                                --thread_id $tid &
-        sleep 60 # sleep to give time start generating
+        sleep 1 # sleep to give time start generating
       done
       wait
     done
@@ -36,7 +36,7 @@ NUM_PARSING=3
 for ((i=1; i<=NUM_PARSING; i++)); do
   echo "Parsing $i / $NUM_PARSING !"
   run &
-  sleep 10 # sleep to give time start generating
+  sleep 300 # sleep to give time start generating
 done
 
 

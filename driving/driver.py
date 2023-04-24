@@ -1,5 +1,3 @@
-import glob
-import os.path
 import cv2
 import torch
 from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
@@ -15,8 +13,11 @@ from aggregation.utils import AngleColorizer
 import sknw
 import networkx as nx
 import matplotlib
-from aggregation.utils import smooth_trajectory, similarity_check, out_of_bounds_check, visualize_graph
+from tqdm import tqdm
 import time
+import pickle
+
+from aggregation.utils import smooth_trajectory, similarity_check, out_of_bounds_check, visualize_graph
 from utils import aggregate, colorize
 
 
@@ -34,9 +35,9 @@ write_every = 10            # write to disk every n steps
 
 
 # CVPR graph aggregation
-threshold_px = 50
+threshold_px = 20
 threshold_rad = 0.2
-closest_lat_thresh = 20
+closest_lat_thresh = 30
 
 
 # viz = False
@@ -74,7 +75,9 @@ class SatelliteDriver(object):
         self.step = 0
         self.graph_skeleton = None
 
-        self.G_agg_mine = nx.DiGraph()
+        self.G_agg_naive = nx.DiGraph()
+
+        self.done = False # flag to indicate end of episode
 
 
     def load_model(self, model_path, type=None):
@@ -283,16 +286,11 @@ class SatelliteDriver(object):
         edge_order = nx.dfs_edges(graph, source=start_node, depth_limit=None)
         edge_order = list(edge_order)
 
-        # print("start_node", start_node)
-        # print("edge_order", edge_order)
-        # print("graph.edges()", graph.edges())
-
         for i, (s, e) in enumerate(edge_order):
             if graph.has_edge(s, e):
                 if graph.has_edge(e, s):
                     graph[s][e]['pts'] = np.flip(graph[e][s]['pts'], axis=0)
                     graph.remove_edge(e, s)
-
 
         return graph
 
@@ -440,13 +438,13 @@ class SatelliteDriver(object):
         for (s, e) in self.graph_skeleton.edges():
             ps = self.graph_skeleton[s][e]['pts']
             for i in range(len(ps) - 1):
-                cv2.arrowedLine(pred_succ_viz, (int(ps[i][1]), int(ps[i][0])), (int(ps[i + 1][1]), int(ps[i + 1][0])), (255, 0, 255), 1, cv2.LINE_AA)
-            cv2.arrowedLine(pred_succ_viz, (int(ps[0][1]), int(ps[0][0])), (int(ps[-1][1]), int(ps[-1][0])), (255, 0, 255), 1, cv2.LINE_AA)
+                cv2.arrowedLine(pred_succ_viz, (int(ps[i][0]), int(ps[i][1])), (int(ps[i + 1][0]), int(ps[i + 1][1])), (255, 0, 255), 1, cv2.LINE_AA)
+            cv2.arrowedLine(pred_succ_viz, (int(ps[0][0]), int(ps[0][1])), (int(ps[-1][0]), int(ps[-1][1])), (255, 0, 255), 1, cv2.LINE_AA)
 
         # draw nodes
         nodes = self.graph_skeleton.nodes()
         node_positions = np.array([nodes[i]['o'] for i in nodes])
-        [cv2.circle(pred_succ_viz, (int(p[1]), int(p[0])), 4, (0, 255, 0), -1) for p in node_positions]
+        [cv2.circle(pred_succ_viz, (int(p[0]), int(p[1])), 4, (0, 255, 0), -1) for p in node_positions]
 
         cv2.imshow("pred_succ_viz", pred_succ_viz)
         cv2.imshow("pred_drivable", pred_drivable)
@@ -488,17 +486,15 @@ class SatelliteDriver(object):
 
         graphs = graphs_relabel
 
-
-        print("Aggregating {} graphs".format(len(graphs)))
-
-        fig, ax = plt.subplots(1, 2, figsize=(20, 10), sharex=True, sharey=True)
-
-        [visualize_graph(G, ax=ax[0]) for G in graphs]
-        ax[0].set_title("Graphs to aggregate")
+        #
+        # fig, ax = plt.subplots(1, 2, figsize=(20, 10), sharex=True, sharey=True)
+        #
+        # [visualize_graph(G, ax=ax[0]) for G in graphs]
+        # ax[0].set_title("Graphs to aggregate")
 
         # Aggregate all graphs
         G_pred_agg = nx.DiGraph()
-        for pred_agg_idx, G in enumerate(graphs):
+        for pred_agg_idx, G in tqdm(enumerate(graphs), total=len(graphs)):
             G_pred_agg, merging_map = aggregate(G_pred_agg, G,
                                                 visited_edges=[],
                                                 threshold_px=threshold_px,
@@ -508,9 +504,9 @@ class SatelliteDriver(object):
                                                 remove=False)
 
 
-        visualize_graph(G_pred_agg, ax=ax[1])
-        ax[1].set_title("Aggregated Graph")
-        plt.show()
+        # visualize_graph(G_pred_agg, ax=ax[1])
+        # ax[1].set_title("Aggregated Graph")
+        # plt.show()
 
         return G_pred_agg
 
@@ -575,7 +571,7 @@ class SatelliteDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        # nx.write_gpickle(self.G_agg_mine, "/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}.gpickle".format(self.step, name))
+        nx.write_gpickle(self.G_agg_naive, "/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}.gpickle".format(self.step, name))
 
 
 
@@ -648,6 +644,10 @@ class SatelliteDriver(object):
 
     def drive_freely(self):
 
+        if self.step > 10:
+            self.done = True
+            return
+
         fps = 1 / (time.time() - self.time)
         self.time = time.time()
 
@@ -657,26 +657,42 @@ class SatelliteDriver(object):
             self.make_step()
             return
 
-        G_current_local = self.graph_skeleton
-        G_current_global = nx.DiGraph()
+        G_current_local = self.graph_skeleton.copy()
+        G_current_local_pruned = self.graph_skeleton.copy()
 
-        # add nodes and edges from self.graph_skeleton and transform to global coordinates (for cvpr aggregation)
-        for node in G_current_local.nodes:
+
+        # shorten all edges to 50 pixels
+        for edge in G_current_local_pruned.edges:
+            if len(list(G_current_local_pruned.successors(edge[1]))) > 0:
+                continue
+            pts = G_current_local_pruned.edges[edge]['pts']
+            pts = pts[0:10, :]
+            G_current_local_pruned.edges[edge]['pts'] = pts
+
+            # also adjust node position
+            G_current_local_pruned.nodes[edge[1]]['pos'] = pts[-1, :]
+
+
+        G_current_global_pruned = nx.DiGraph()
+
+        # add nodes and edges from self.graph_skeleton and transform to global coordinates (for aggregation)
+        for node in G_current_local_pruned.nodes:
             # transform pos_start to global coordinates
-            pos_local = nx.get_node_attributes(G_current_local, "pts")[node][0].astype(np.float32)
+            pos_local = nx.get_node_attributes(G_current_local_pruned, "pts")[node][0].astype(np.float32)
             pos_global = self.crop_coordintates_to_global(self.pose, pos_local)
 
-            G_current_global.add_node(node,
+            G_current_global_pruned.add_node(node,
                                       pos=pos_global,
                                       weight=1.0,
                                       score=1.0,)
 
-        for edge in G_current_local.edges:
-            edge_points = G_current_local.edges[edge]["pts"]
+        for edge in G_current_local_pruned.edges:
+            edge_points = G_current_local_pruned.edges[edge]["pts"]
             edge_points = self.crop_coordintates_to_global(self.pose, edge_points)
-            G_current_global.add_edge(edge[0], edge[1], pts=edge_points)
+            G_current_global_pruned.add_edge(edge[0], edge[1], pts=edge_points)
 
-        self.graphs.append(G_current_global)
+        self.graphs.append(G_current_global_pruned)
+
 
         successor_points = []
         for node in G_current_local.nodes:
@@ -744,9 +760,9 @@ class SatelliteDriver(object):
                     node_edge_end = (int(edge_end_global[0]), int(edge_end_global[1]))
 
                     # add G_agg-edge from edge start to edge end
-                    self.G_agg_mine.add_node(node_edge_start, pos=edge_start_global)
-                    self.G_agg_mine.add_node(node_edge_end, pos=edge_end_global)
-                    self.G_agg_mine.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
+                    self.G_agg_naive.add_node(node_edge_start, pos=edge_start_global)
+                    self.G_agg_naive.add_node(node_edge_end, pos=edge_end_global)
+                    self.G_agg_naive.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
 
                     break
 
@@ -754,21 +770,16 @@ class SatelliteDriver(object):
 
         if self.step % write_every == 0:
             self.render_poses_in_aerial()
-
-            G_agg_cvpr = self.aggregate_graphs(self.graphs)
-
-
-            self.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
-            self.visualize_write_G_agg(self.G_agg_mine, "G_agg_mine")
+            self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
 
             # fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
             # [ax.set_aspect('equal') for ax in axarr]
             # [ax.invert_yaxis() for ax in axarr]
             # axarr[0].set_title("g single")
-            # axarr[1].set_title("G_agg_mine")
+            # axarr[1].set_title("G_agg_naive")
             # axarr[2].set_title("G_agg_cvpr")
             # [visualize_graph(g, axarr[0], node_color="g", edge_color="g") for g in self.graphs]
-            # visualize_graph(self.G_agg_mine, axarr[1], node_color="b", edge_color="b")
+            # visualize_graph(self.G_agg_naive, axarr[1], node_color="b", edge_color="b")
             # visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
             # plt.show()
 
@@ -778,7 +789,8 @@ class SatelliteDriver(object):
 
         if len(self.future_poses) == 0:
             print("future_poses empty. Exiting.")
-            exit()
+            self.done = True
+            return
         else:
 
             # reorder queue based on distance to current pose
@@ -789,7 +801,8 @@ class SatelliteDriver(object):
                 print("     pose out of bounds. removing from queue")
                 if len(self.future_poses) == 0:
                     print("future_poses empty. Exiting.")
-                    exit()
+                    self.done = True
+                    break
 
                 self.pose = self.future_poses.pop(0)
             print("     get pose from queue: {:.0f}, {:.0f}, {:.1f}".format(self.pose[0], self.pose[1], self.pose[2]))
@@ -798,6 +811,16 @@ class SatelliteDriver(object):
 
         self.make_step()
         cv2.waitKey(1)
+
+    def cleanup(self):
+        cv2.destroyAllWindows()
+
+        # write self.graphs to disk
+        with open("/home/zuern/Desktop/autograph/tmp/G_agg/graphs_all.pickle", "wb") as f:
+            pickle.dump(self.graphs, f)
+
+        with open("/home/zuern/Desktop/autograph/tmp/G_agg/G_agg_naive_all.pickle", "wb") as f:
+            pickle.dump(self.G_agg_naive, f)
 
 
 if __name__ == "__main__":
@@ -811,6 +834,35 @@ if __name__ == "__main__":
 
     while True:
         driver.drive_freely()
+        if driver.done:
+            driver.cleanup()
+            break
+
+
+
+    # load from disk
+    with open("/home/zuern/Desktop/autograph/tmp/G_agg/graphs_all.pickle", "rb") as f:
+        graphs = pickle.load(f)
+    with open("/home/zuern/Desktop/autograph/tmp/G_agg/G_agg_naive_all.pickle", "rb") as f:
+        G_agg_naive = pickle.load(f)
+
+    G_agg_cvpr = driver.aggregate_graphs(graphs)
+    driver.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
+    driver.visualize_write_G_agg(G_agg_naive, "G_agg_naive")
+
+
+    fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+    img = cv2.cvtColor(driver.aerial_image, cv2.COLOR_BGR2RGB)
+    [ax.imshow(img) for ax in axarr]
+    axarr[0].set_title("g single")
+    axarr[1].set_title("G_agg_naive")
+    axarr[2].set_title("G_agg_cvpr")
+    [visualize_graph(g, axarr[0], node_color="w", edge_color="w") for g in driver.graphs]
+    visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
+    visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
+    plt.show()
+
+    exit()
 
     print("Press arrow keys to drive")
 

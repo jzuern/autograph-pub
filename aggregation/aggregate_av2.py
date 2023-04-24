@@ -428,7 +428,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
 
             is_close = np.linalg.norm(np.array(centers) - [crop_center[0], crop_center[1]], axis=1) < np.sqrt(2) * crop_size
-            annot_candidates = np.array(annot_veh_)[is_close]
+            annot_candidates = np.array(annot_veh_, dtype=object)[is_close]
 
             annots = []
             for annot in annot_candidates:
