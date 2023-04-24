@@ -193,7 +193,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 y_true = ego_x_y_yaw[1]
                 yaw_true = ego_x_y_yaw[2]
 
-
                 x_noise = int(np.random.default_rng().normal(loc=x_true, scale=5, size=1)[0])
                 y_noise = int(np.random.default_rng().normal(loc=y_true, scale=5, size=1)[0])
                 yaw_noise = np.random.default_rng().normal(loc=yaw_true, scale=0.3, size=1)[0]
@@ -201,6 +200,13 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 dataset_split = get_dataset_split(city_name, x_noise, y_noise)
                 if dataset_split == None:
                     continue
+
+
+                print(args.eval_test)
+
+                if args.eval_test is not None:
+                    if dataset_split == "train":
+                        continue
 
                 out_path = os.path.join(out_path_root, dataset_split)
                 sample_id = "{}-{}-{}".format(city_name, x_noise, y_noise)
@@ -419,6 +425,13 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
             if dataset_split == None:
                 continue
 
+            print(args.eval_test)
+
+            if args.eval_test is not None:
+                if dataset_split == "train":
+                    continue
+
+
             out_path = os.path.join(out_path_root, dataset_split)
 
             sample_id = "{}-{}-{}".format(city_name, crop_center[0], crop_center[1])
@@ -589,8 +602,8 @@ if __name__ == "__main__":
     parser.add_argument("--query_points", type=str, default="ego", choices=[None, "ego", "random"])
     parser.add_argument("--thread_id", type=int, default=0, help="ID of thread from 1 to num_parallel")
     parser.add_argument("--num_parallel", type=int, default=1, help="Number of parallel parsing processes")
-
     parser.add_argument("--source", type=str, default="tracklets_joint", choices=["tracklets_joint", "tracklets_raw", "lanegraph"])
+    parser.add_argument("--eval_test", action="store_true", help="Generate eval and test samples only")
 
     args = parser.parse_args()
 

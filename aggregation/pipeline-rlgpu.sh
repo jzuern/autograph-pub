@@ -8,8 +8,7 @@ CITIES=(austin)
 SOURCES=(tracklets_joint tracklets_raw lanegraph)
 NUM_PARALLEL=4
 
-run () {
-
+run_train () {
   for CITY in "${CITIES[@]}"; do
     for SOURCE in "${SOURCES[@]}"; do
       for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
@@ -31,11 +30,33 @@ run () {
 }
 
 
+run_single_eval_test () {
+  for CITY in "${CITIES[@]}"; do
+    for SOURCE in "${SOURCES[@]}"; do
+      for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
+        echo "Processing $CITY, $tid / $NUM_PARALLEL !"
+        /home/buechner/zuern/geometric/bin/python aggregate_av2.py --city_name $CITY\
+                                                               --out_path_root /data/buechner/zuern/autograph/austin-real3/$SOURCE/$CITY \
+                                                               --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
+                                                               --source $SOURCE \
+                                                               --max_num_samples 1000 \
+                                                               --eval_test &
+        sleep 1 # sleep to give time start generating
+      done
+      wait
+    done
+    wait
+  done
+  wait
+}
+
+
 NUM_PARSING=3
 
 for ((i=1; i<=NUM_PARSING; i++)); do
   echo "Parsing $i / $NUM_PARSING !"
-  run &
+#  run_train &
+  run_single_eval_test &
   sleep 300 # sleep to give time start generating
 done
 

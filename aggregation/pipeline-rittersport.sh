@@ -17,7 +17,7 @@ for CITY in "${CITIES[@]}"; do
                                                              --max_num_samples 10000\
                                                              --num_parallel $NUM_PARALLEL\
                                                              --thread_id $tid &
-      sleep 120 # sleep to give time start generating
+      sleep 300 # sleep to give time start generating
     done
     wait
   done
