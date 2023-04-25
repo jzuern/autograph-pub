@@ -255,7 +255,7 @@ def crop_graph(g, edge_pos, x_min, x_max, y_min, y_max):
     for edge in edges_to_keep:
         g_copy.add_edge(edge[0], edge[1])
 
-    print("     Cropping graph with {} nodes to {} nodes... done! Took {:.2f}s".format(g.number_of_nodes(), g_copy.number_of_nodes(), time.time()-t0))
+    #print("     Cropping graph with {} nodes to {} nodes... done! Took {:.2f}s".format(g.number_of_nodes(), g_copy.number_of_nodes(), time.time()-t0))
 
     return g_copy
 

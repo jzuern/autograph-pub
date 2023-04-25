@@ -27,7 +27,7 @@ model:
     lr: 1e-3
     beta_lo: 0.9
     beta_hi: 0.999
-    num_epochs: 200
+    num_epochs: 500
     gnn_depth: 1
     # lane_mpnn
     map_feat_dim: 64

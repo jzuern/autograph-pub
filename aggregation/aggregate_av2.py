@@ -201,9 +201,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 if dataset_split == None:
                     continue
 
-
-                print(args.eval_test)
-
                 if args.eval_test is not None:
                     if dataset_split == "train":
                         continue
@@ -425,12 +422,9 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
             if dataset_split == None:
                 continue
 
-            print(args.eval_test)
-
             if args.eval_test is not None:
                 if dataset_split == "train":
                     continue
-
 
             out_path = os.path.join(out_path_root, dataset_split)
 
@@ -781,87 +775,8 @@ if __name__ == "__main__":
     for G_tile in G_tiles:
         G_annot_ = nx.union(G_annot_, G_tile, rename=("G", "H"))
 
-    #G_annot_ = crop_graph(G_annot, x_min=0, x_max=sat_image_.shape[1], y_min=0, y_max=sat_image_.shape[0])
-
-    # crop graph
-    G_annot = G_annot_.copy(as_view=False)
-    for node in G_annot_.nodes():
-        if G_annot_.nodes[node]['pos'][0] < 0 or G_annot_.nodes[node]['pos'][0] > sat_image_.shape[1] or \
-                G_annot_.nodes[node]['pos'][1] < 0 or G_annot_.nodes[node]['pos'][1] > sat_image_.shape[0]:
-            G_annot.remove_node(node)
-
-    # use predicted trajectories
-    trajectories_ = trajectories_pred_
-    trajectories_ped_ = trajectories_ped_pred_
-
-    trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
-    trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
-
-    y_min_cut = 0
-
-    if args.thread_id > 0:  # if we are parallel
-        num_y_pixels = sat_image_.shape[0]
-        y_min_cut = int(num_y_pixels * float(args.thread_id - 1) / args.num_parallel)
-        y_max_cut = int(num_y_pixels * float(args.thread_id) / args.num_parallel)
-
-        sat_image = sat_image_[y_min_cut:y_max_cut, :, :].copy()
-        drivable_gt = drivable_gt_[y_min_cut:y_max_cut, :].copy()
-
-        memory_prior = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
-
-        del sat_image_
-        del drivable_gt_
-
-        memory_after = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
-
-        print("Memory usage reduced from {} to {} GB".format(int(memory_prior / 1024.), int(memory_after / 1024.)))
 
 
-        trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
-        trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
-
-        # delete trajectories that are outside of the image
-        trajectories_ = [t for t in trajectories_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image.shape[0])]
-        trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image.shape[0])]
-
-        for node in G_annot.nodes:
-            G_annot.nodes[node]["pos"][1] = G_annot.nodes[node]["pos"][1] - y_min_cut
-
-        # delete nodes outside of image
-        nodes_to_delete = []
-        for node in G_annot.nodes:
-            if G_annot.nodes[node]["pos"][1] < 0 or G_annot.nodes[node]["pos"][1] >= sat_image.shape[0]:
-                nodes_to_delete.append(node)
-        G_annot.remove_nodes_from(nodes_to_delete)
-
-        print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}, G_annot.number_of_nodes(): {}".
-              format(args.thread_id, sat_image.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
-
-        if len(trajectories_) == 0:
-            print("No trajectories in this thread. Exiting...")
-            exit(0)
-
-    else:
-        sat_image = sat_image_.copy()
-        drivable_gt = drivable_gt_.copy()
-        del sat_image_
-        del drivable_gt_
-
-    # print("     Number of vehicle trajectories: ",  len(trajectories_))
-    # print("     Number of pedestrian trajectories: ",  len(trajectories_ped_))
-    #
-    # # get summed length of trajectories
-    # traj_length = 0
-    # for t in trajectories_:
-    #     for i in range(len(t)-1):
-    #         traj_length += np.linalg.norm(t[i+1] - t[i])
-    # print("     Summed length of vehicle trajectories: ", traj_length)
-    #
-    # traj_length = 0
-    # for t in trajectories_ped_:
-    #     for i in range(len(t)-1):
-    #         traj_length += np.linalg.norm(t[i+1] - t[i])
-    # print("     Summed length of pedestrian trajectories: ", traj_length)
 
     viz_file = os.path.join(args.urbanlanegraph_root, "{}/{}-viz-tracklets.png".format(city_name, city_name))
     tracklet_file = os.path.join(args.urbanlanegraph_root, "{}/{}-tracklets.png".format(city_name, city_name))
@@ -890,8 +805,75 @@ if __name__ == "__main__":
     # print("Saved tracklet visualization to {}".format(tracklet_file))
     # del sat_image_viz
 
-    tracklets_image = np.asarray(Image.open(tracklet_file)).astype(np.uint8)
-    tracklets_image = cv2.cvtColor(tracklets_image, cv2.COLOR_BGR2RGB)
+    tracklets_image_ = np.asarray(Image.open(tracklet_file)).astype(np.uint8)
+    tracklets_image_ = cv2.cvtColor(tracklets_image_, cv2.COLOR_BGR2RGB)
+
+    # crop graph
+    G_annot = G_annot_.copy(as_view=False)
+    for node in G_annot_.nodes():
+        if G_annot_.nodes[node]['pos'][0] < 0 or G_annot_.nodes[node]['pos'][0] > sat_image_.shape[1] or \
+                G_annot_.nodes[node]['pos'][1] < 0 or G_annot_.nodes[node]['pos'][1] > sat_image_.shape[0]:
+            G_annot.remove_node(node)
+
+    # use predicted trajectories
+    trajectories_ = trajectories_pred_
+    trajectories_ped_ = trajectories_ped_pred_
+
+    trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
+    trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
+
+    y_min_cut = 0
+
+    if args.thread_id > 0:  # if we are parallel
+        num_y_pixels = sat_image_.shape[0]
+        y_min_cut = int(num_y_pixels * float(args.thread_id - 1) / args.num_parallel)
+        y_max_cut = int(num_y_pixels * float(args.thread_id) / args.num_parallel)
+
+        sat_image = sat_image_[y_min_cut:y_max_cut, :, :].copy()
+        drivable_gt = drivable_gt_[y_min_cut:y_max_cut, :].copy()
+        tracklets_image = tracklets_image_[y_min_cut:y_max_cut, :].copy()
+
+        memory_prior = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
+
+        del sat_image_
+        del drivable_gt_
+        del tracklets_image_
+
+        memory_after = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 2
+
+        print("Memory usage reduced from {} to {} GB".format(int(memory_prior / 1024.), int(memory_after / 1024.)))
+
+        trajectories_ = [t - np.array([0, y_min_cut]) for t in trajectories_]
+        trajectories_ped_ = [t - np.array([0, y_min_cut]) for t in trajectories_ped_]
+
+        # delete trajectories that are outside of the image
+        trajectories_ = [t for t in trajectories_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image.shape[0])]
+        trajectories_ped_ = [t for t in trajectories_ped_ if np.all(t[:, 1] >= 0) and np.all(t[:, 1] < sat_image.shape[0])]
+
+        for node in G_annot.nodes:
+            G_annot.nodes[node]["pos"][1] = G_annot.nodes[node]["pos"][1] - y_min_cut
+
+        # delete nodes outside of image
+        nodes_to_delete = []
+        for node in G_annot.nodes:
+            if G_annot.nodes[node]["pos"][1] < 0 or G_annot.nodes[node]["pos"][1] >= sat_image.shape[0]:
+                nodes_to_delete.append(node)
+        G_annot.remove_nodes_from(nodes_to_delete)
+
+        print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}, G_annot.number_of_nodes(): {}".
+              format(args.thread_id, sat_image.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
+
+        if len(trajectories_) == 0:
+            print("No trajectories in this thread. Exiting...")
+            exit(0)
+
+    else:
+        sat_image = sat_image_.copy()
+        drivable_gt = drivable_gt_.copy()
+        tracklets_image = tracklets_image_.copy()
+        del sat_image_
+        del drivable_gt_
+        del tracklets_image_
 
     # single core
     if num_cpus <= 1:
