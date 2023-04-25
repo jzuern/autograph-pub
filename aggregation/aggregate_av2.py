@@ -100,10 +100,6 @@ def crop_img_at_pose(img, pose, crop_size):
 
     # directly warp the rotated rectangle to get the straightened rectangle
     try:
-        print("------------------")
-        print(img_crop_.shape)
-        print(img_crop_.dtype)
-        print(M)
         img_crop = cv2.warpPerspective(img_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
         return img_crop
     except:
@@ -209,7 +205,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 if dataset_split == None:
                     continue
 
-                if args.eval_test is not None:
+                if args.eval_test == True:
                     if dataset_split == "train":
                         continue
 
@@ -430,7 +426,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
             if dataset_split == None:
                 continue
 
-            if args.eval_test is not None:
+            if args.eval_test == True:
                 if dataset_split == "train":
                     continue
 
