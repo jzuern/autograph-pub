@@ -26,8 +26,10 @@ np.random.seed(seed=int(time.time()))
 # np.random.seed(seed=0)
 
 
-def get_dataset_split(city_name, x, y):
+def get_dataset_split(city_name, x, y, y_min_cut):
     coordinates = city_split_coordinates_dict[city_name]
+
+    y = y + y_min_cut
 
     # check if in train:
     for train_coord in coordinates["train"]:
@@ -98,6 +100,10 @@ def crop_img_at_pose(img, pose, crop_size):
 
     # directly warp the rotated rectangle to get the straightened rectangle
     try:
+        print("------------------")
+        print(img_crop_.shape)
+        print(img_crop_.dtype)
+        print(M)
         img_crop = cv2.warpPerspective(img_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
         return img_crop
     except:
@@ -141,6 +147,8 @@ def random_cropping(sat_image, tracklet_image, drivable_gt, trajectories_, crop_
 
 def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, G_annot,
                         sat_image_, tracklets_image, drivable_gt, out_path_root, max_num_samples=100, crop_size=256, y_min_cut=0):
+
+    print("In process_samples for city: {}".format(city_name))
 
     if args.source == "lanegraph":
 
@@ -197,7 +205,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 y_noise = int(np.random.default_rng().normal(loc=y_true, scale=5, size=1)[0])
                 yaw_noise = np.random.default_rng().normal(loc=yaw_true, scale=0.3, size=1)[0]
 
-                dataset_split = get_dataset_split(city_name, x_noise, y_noise)
+                dataset_split = get_dataset_split(city_name, x_noise, y_noise, y_min_cut)
                 if dataset_split == None:
                     continue
 
@@ -417,7 +425,7 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
             R = np.array([[np.cos(angle), -np.sin(angle)],
                           [np.sin(angle), np.cos(angle)]])
 
-            dataset_split = get_dataset_split(city_name, crop_center[0], crop_center[1])
+            dataset_split = get_dataset_split(city_name, crop_center[0], crop_center[1], y_min_cut)
 
             if dataset_split == None:
                 continue
@@ -863,8 +871,8 @@ if __name__ == "__main__":
         print("Thread: {}, img shape: {}, len(traj): {}, len(traj_ped): {}, G_annot.number_of_nodes(): {}".
               format(args.thread_id, sat_image.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
 
-        if len(trajectories_) == 0:
-            print("No trajectories in this thread. Exiting...")
+        if len(trajectories_) < 10000:
+            print("Too few trajectories in this thread. Exiting...")
             exit(0)
 
     else:

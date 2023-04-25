@@ -16,7 +16,7 @@ run_train () {
         /home/buechner/zuern/geometric/bin/python aggregate_av2.py \
           --city_name $CITY\
           --out_path_root /data/buechner/zuern/autograph/austin-real3/$SOURCE/$CITY \
-          --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
+          --urbanlanegraph_root /data/buechner/zuern/urbanlanegraph-dataset-dev/ \
           --source $SOURCE \
           --max_num_samples 1000000 \
           --num_parallel $NUM_PARALLEL \
@@ -36,12 +36,13 @@ run_single_eval_test () {
     for SOURCE in "${SOURCES[@]}"; do
       for ((tid=1; tid<=NUM_PARALLEL; tid++)); do
         echo "Processing $CITY, $tid / $NUM_PARALLEL !"
-        /home/buechner/zuern/geometric/bin/python aggregate_av2.py --city_name $CITY\
-                                                               --out_path_root /data/buechner/zuern/autograph/austin-real3/$SOURCE/$CITY \
-                                                               --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
-                                                               --source $SOURCE \
-                                                               --max_num_samples 1000 \
-                                                               --eval_test &
+        /home/buechner/zuern/geometric/bin/python aggregate_av2.py \
+         --city_name $CITY\
+         --out_path_root /data/buechner/zuern/autograph/austin-real3/$SOURCE/$CITY \
+         --urbanlanegraph_root /home/buechner/zuern/urbanlanegraph-dataset-dev/ \
+         --source $SOURCE \
+         --max_num_samples 1000 \
+         --eval_test &
         sleep 1 # sleep to give time start generating
       done
       wait
