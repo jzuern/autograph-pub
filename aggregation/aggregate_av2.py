@@ -366,12 +366,12 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     tracklets_im_list.append(mask_succ_sparse)
 
                     sat_image_crop_ = sat_image_[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
-                                      int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                                                 int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
                     sat_image_crop = cv2.warpPerspective(sat_image_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
+
                     drivable_gt_crop_ = drivable_gt[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
-                                        int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
-                    drivable_gt_crop = cv2.warpPerspective(drivable_gt_crop_, M, (crop_size, crop_size),
-                                                           cv2.INTER_NEAREST)
+                                                    int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                    drivable_gt_crop = cv2.warpPerspective(drivable_gt_crop_, M, (crop_size, crop_size), cv2.INTER_NEAREST)
 
                     [cv2.circle(tracklets_viz, (qq[0], qq[1]), 2, (0, 150, 255), -1) for qq in query_points]
 
@@ -532,7 +532,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                                                  joining_angle_threshold=joining_angle_threshold)
 
                 num_clusters, _ = get_endpoints(succ_traj, crop_size)
-
 
                 if num_clusters > 1:
                     sample_type = "branching"
@@ -778,9 +777,6 @@ if __name__ == "__main__":
     G_annot_ = nx.DiGraph()
     for G_tile in G_tiles:
         G_annot_ = nx.union(G_annot_, G_tile, rename=("G", "H"))
-
-
-
 
     viz_file = os.path.join(args.urbanlanegraph_root, "{}/{}-viz-tracklets.png".format(city_name, city_name))
     tracklet_file = os.path.join(args.urbanlanegraph_root, "{}/{}-tracklets.png".format(city_name, city_name))
