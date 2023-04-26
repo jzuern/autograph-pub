@@ -3,7 +3,6 @@ import wandb
 import argparse
 from tqdm import tqdm
 import numpy as np
-import time
 import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
@@ -19,7 +18,6 @@ from aggregation.utils import AngleColorizer
 from data.datasets import SuccessorRegressorDataset
 from lanegnn.utils import ParamLib, make_image_grid
 import glob
-import GPUtil
 
 
 def weighted_mse_loss(input, target, weight):
@@ -646,12 +644,18 @@ def main():
 
     train_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
     val_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "eval", "*")
-    test_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "test", "*")
+    #test_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "test", "*")
 
-    dataset_train = SuccessorRegressorDataset(params=params, path=train_path, split='train', frac_branch=0.5,
-                                              frac_straight=0.5)
-    dataset_val = SuccessorRegressorDataset(params=params, path=val_path, split='val', frac_branch=0.5,
-                                            frac_straight=0.5, max_num_samples=1000)
+    dataset_train = SuccessorRegressorDataset(params=params,
+                                              path=train_path,
+                                              split='train',
+                                              frac_branch=1,
+                                              frac_straight=0.2)
+    dataset_val = SuccessorRegressorDataset(params=params, path=val_path,
+                                            split='val',
+                                            frac_branch=1,
+                                            frac_straight=0.2,
+                                            max_num_samples=1000)
 
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,

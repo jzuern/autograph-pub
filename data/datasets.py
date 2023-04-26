@@ -10,8 +10,12 @@ import networkx as nx
 import random
 from aggregation.utils import AngleColorizer
 from pathlib import Path
+from torchvision import transforms
+import torchvision.transforms.functional as F
+from PIL import Image
 
 get_id = lambda filename: "-".join(os.path.basename(filename).split('-')[1:4])
+
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
     def __init__(self, params, path, split, frac_branch=0.5, frac_straight=0.5, max_num_samples=None):
@@ -83,18 +87,18 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         drivable_gt_straight = [i for i in self.drivable_gt_files if "straight" in i]
         angles_straight = [i for i in self.angles_files if "straight" in i]
 
-        if frac_branch * len(rgb_branch) < frac_straight * len(rgb_straight):
-            frac_straight_eff = 2 * frac_branch * len(rgb_branch) / len(rgb_straight)
-            frac_branch_eff = 2 * frac_branch
-        else:
-            frac_branch_eff = 2 * frac_straight * len(rgb_straight) / len(rgb_branch)
-            frac_straight_eff = 2 * frac_straight
+        print("Total Branch: {} files".format(len(rgb_branch)))
+        print("Total Straight: {} files".format(len(rgb_straight)))
+
+        # build a dataset with a certain fraction of branch and straight
 
         print("frac_branch = {}, frac_straight = {}".format(frac_branch, frac_straight))
-        print("Using {}% branch and {}% straight effectively".format(frac_branch_eff * 100, frac_straight_eff * 100))
 
-        lb = int(frac_branch_eff * len(rgb_branch))
-        ls = int(frac_straight_eff * len(rgb_straight))
+        lb = int(frac_branch * len(rgb_branch))
+        ls = int(frac_straight * len(rgb_straight))
+
+        print("Effective Branch: {} files".format(lb))
+        print("Effective Straight: {} files".format(ls))
 
         self.rgb_files = rgb_branch[:lb] + rgb_straight[:ls]
         self.sdf_files = sdf_branch[:lb] + sdf_straight[:ls]
@@ -119,39 +123,81 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.sdf_files)
 
-    # def random_rotate(self, return_dict):
-    #     k = np.random.randint(0, 4)
-    #     return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
-    #     return_dict['mask_full'] = torch.rot90(return_dict['mask_full'], k, [0, 1])
-    #     return_dict['mask_successor'] = torch.rot90(return_dict['mask_successor'], k, [0, 1])
-    #     return_dict['mask_pedestrian'] = torch.rot90(return_dict['mask_pedestrian'], k, [0, 1])
-    #
-    #     imshape = return_dict['rgb'].shape
-    #
-    #     old_pos_encoding = return_dict['pos_enc']
-    #     pos_center = torch.where(old_pos_encoding == 1.0)[1:3]
-    #     q = pos_center[0].item(), pos_center[1].item()
-    #
-    #     # change position of q according to rotation
-    #     if k == 1:
-    #         q = old_pos_encoding.shape[2] - q[1] - 1, q[0]
-    #     elif k == 2:
-    #         q = old_pos_encoding.shape[1] - q[0] - 1, old_pos_encoding.shape[2] - q[1] - 1
-    #     elif k == 3:
-    #         q = q[1], old_pos_encoding.shape[1] - q[0] - 1
-    #
-    #     pos_encoding = np.zeros(imshape, dtype=np.float32)
-    #     x, y = np.meshgrid(np.arange(imshape[2]), np.arange(imshape[1]))
-    #     pos_encoding[2, q[1], q[0]] = 1
-    #     pos_encoding[0, :, :] = np.abs((x - q[0])) / imshape[2]
-    #     pos_encoding[1, :, :] = np.abs((y - q[1])) / imshape[1]
-    #     pos_encoding = (pos_encoding * 255).astype(np.uint8)
-    #
-    #     pos_encoding = torch.from_numpy(pos_encoding).float() / 255.0
-    #
-    #     return_dict['pos_enc'] = pos_encoding
-    #
-    #     return return_dict
+    def augment(self, mask, angles_xy, rgb, pos_enc, drivable_gt):
+
+        angles_x = angles_xy[0]
+        angles_y = angles_xy[1]
+
+        # import matplotlib.pyplot as plt
+        # fig, axarr  = plt.subplots(2, 6)
+        # axarr[0, 0].imshow(mask)
+        # axarr[0, 1].imshow(angles_x)
+        # axarr[0, 2].imshow(angles_y)
+        # axarr[0, 3].imshow(rgb)
+        # axarr[0, 4].imshow(pos_enc)
+        # axarr[0, 5].imshow(drivable_gt)
+        # axarr[1, 0].set_title("mask")
+        # axarr[1, 1].set_title("angles x")
+        # axarr[1, 2].set_title("angles y")
+        # axarr[1, 3].set_title("rgb")
+        # axarr[1, 4].set_title("pos_enc")
+        # axarr[1, 5].set_title("drivable_gt")
+
+        # convert to PIL image
+        mask = Image.fromarray(mask)
+        angles_x = Image.fromarray(angles_x)
+        angles_y = Image.fromarray(angles_y)
+        rgb = Image.fromarray(rgb)
+        pos_enc = Image.fromarray(pos_enc)
+        drivable_gt = Image.fromarray(drivable_gt)
+
+        # random crop
+        if np.random.rand() < 0.6:
+            i, j, h, w = transforms.RandomCrop.get_params(rgb, (200, 200))
+
+            rgb = transforms.functional.crop(rgb, i, j, h, w)
+            mask = transforms.functional.crop(mask, i, j, h, w)
+            angles_x = transforms.functional.crop(angles_x, i, j, h, w)
+            angles_y = transforms.functional.crop(angles_y, i, j, h, w)
+            pos_enc = transforms.functional.crop(pos_enc, i, j, h, w)
+            drivable_gt = transforms.functional.crop(drivable_gt, i, j, h, w)
+
+            rgb = transforms.functional.resize(rgb, (256, 256))
+            mask = transforms.functional.resize(mask, (256, 256))
+            angles_x = transforms.functional.resize(angles_x, (256, 256))
+            angles_y = transforms.functional.resize(angles_y, (256, 256))
+            pos_enc = transforms.functional.resize(pos_enc, (256, 256))
+            drivable_gt = transforms.functional.resize(drivable_gt, (256, 256))
+
+
+        # random color jitter
+        if np.random.rand() < 0.5:
+            jitter_factor = 1 + 0.2 * (np.random.rand() - 0.5)
+            rgb = transforms.functional.adjust_brightness(rgb, jitter_factor)
+            rgb = transforms.functional.adjust_contrast(rgb, jitter_factor)
+            rgb = transforms.functional.adjust_saturation(rgb, jitter_factor)
+
+        # convert to numpy array
+        rgb = np.array(rgb)
+        mask = np.array(mask)
+        angles_x = np.array(angles_x)
+        angles_y = np.array(angles_y)
+        angles_xy = np.array([angles_x, angles_y])
+        pos_enc = np.array(pos_enc)
+        drivable_gt = np.array(drivable_gt)
+
+
+        # axarr[1, 0].imshow(mask)
+        # axarr[1, 1].imshow(angles_x)
+        # axarr[1, 2].imshow(angles_y)
+        # axarr[1, 3].imshow(rgb)
+        # axarr[1, 4].imshow(pos_enc)
+        # axarr[1, 5].imshow(drivable_gt)
+        # plt.show()
+
+
+        return mask, angles_xy, rgb, pos_enc, drivable_gt
+
 
 
     def __getitem__(self, idx):
@@ -168,13 +214,16 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
 
         angles = self.ac.color_to_angle(angles)
         angles_xy = self.ac.angle_to_xy(angles)
-        angles_xy = torch.from_numpy(angles_xy).float()
+
+        if self.split == 'train':
+            mask, angles_xy, rgb, pos_enc, drivable_gt = self.augment(mask, angles_xy, rgb, pos_enc, drivable_gt)
 
         mask_full = mask[:, :, 1]
         mask_successor = mask[:, :, 2]
         mask_pedestrian = mask[:, :, 0]
 
         # to tensor
+        angles_xy = torch.from_numpy(angles_xy).float()
         mask_full = torch.from_numpy(mask_full).float() / 255.0
         drivable_gt = torch.from_numpy(drivable_gt).float() / 255.0
 
@@ -192,10 +241,6 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
             'angles_xy': angles_xy,
             'rgb': rgb
         }
-
-        if self.split == 'train':
-            pass
-            #return_dict = self.random_rotate(return_dict)
 
         return return_dict
 
@@ -230,36 +275,6 @@ class RegressorDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.sdf_files)
 
-    def random_rotate(self, return_dict):
-
-        # TODO: DEBUG THIS
-
-
-
-        # random rotation
-        k = np.random.choice([0, 1, 2, 3])
-        #k = np.random.choice([0])
-
-
-        return_dict['rgb_unrotated'] = return_dict['rgb']
-
-        return_dict['rgb'] = torch.rot90(return_dict['rgb'], k, [1, 2])
-        return_dict['sdf'] = torch.rot90(return_dict['sdf'], k, [0, 1])
-
-        return_dict['angles_x'] = torch.rot90(return_dict['angles_x'], k, [0, 1])
-        return_dict['angles_y'] = torch.rot90(return_dict['angles_y'], k, [0, 1])
-
-
-        # return_dict['angles_x'] += torch.cos(torch.tensor(k * np.pi / 2))
-        # return_dict['angles_y'] += torch.sin(torch.tensor(k * np.pi / 2))
-        #
-        # return_dict['angles_x'][return_dict['angles_x'] > np.pi] -= 2*np.pi
-        # return_dict['angles_x'][return_dict['angles_x'] < -np.pi] += 2*np.pi
-        #
-        # return_dict['angles_y'][return_dict['angles_y'] > np.pi] -= 2*np.pi
-        # return_dict['angles_y'][return_dict['angles_y'] < -np.pi] += 2*np.pi
-
-        return return_dict
 
     def __getitem__(self, idx):
         sdf = cv2.imread(self.sdf_files[idx], cv2.IMREAD_UNCHANGED)
