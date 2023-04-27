@@ -9,8 +9,126 @@ import json
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = pow(2, 35).__int__()
 from scipy.spatial.distance import cdist
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import cv2
+import sknw
+from aggregation.utils import smooth_trajectory, resample_trajectory
+from skimage.morphology import skeletonize
+
+
+def roundify_skeleton_graph(skeleton_graph: nx.DiGraph):
+
+    '''
+    The skeleton graph has edges defined with a point list. We add the new points and edges to the graph to roundify it
+    :param skeleton_graph:
+    :return:
+    '''
+
+    skeleton_graph_ = skeleton_graph.copy()
+
+    for edge in skeleton_graph.edges:
+        pointlist = skeleton_graph.edges[edge]['pts']
+        pointlist = resample_trajectory(pointlist, dist=10)
+
+
+        # check whether beginning or end of pointlist is closer to edge[0]
+        edge_0_pos = skeleton_graph.nodes[edge[0]]['pos']
+        if cdist(np.array([edge_0_pos]), np.array([pointlist[0]]))[0][0] > cdist(np.array([edge_0_pos]), np.array([pointlist[-1]]))[0][0]:
+            pointlist = pointlist[::-1]
+
+        if len(pointlist) < 3:
+            continue
+
+
+        # add new points and edges to the graph
+        for i in range(0, len(pointlist) - 1):
+            if i == 0:
+                point = (int(pointlist[i][0]), int(pointlist[i][1]))
+                skeleton_graph_.add_node(point, pos=pointlist[i])
+                skeleton_graph_.add_edge(edge[0], point)
+            if i == len(pointlist) - 2:
+                point = (int(pointlist[i][0]), int(pointlist[i][1]))
+                skeleton_graph_.add_node(point, pos=pointlist[i])
+                skeleton_graph_.add_edge(point, edge[1])
+            else:
+                point0 = (int(pointlist[i][0]), int(pointlist[i][1]))
+                skeleton_graph_.add_node(point0, pos=pointlist[i])
+                point1 = (int(pointlist[i + 1][0]), int(pointlist[i + 1][1]))
+                skeleton_graph_.add_node(point1, pos=pointlist[i + 1])
+
+                skeleton_graph_.add_edge(point0, point1)
+
+        skeleton_graph_.remove_edge(edge[0], edge[1])
+
+
+    return skeleton_graph_
+
+
+
+
+
+
+def skeletonize_prediction(pred_succ, threshold=0.5):
+    # first, convert to binary
+    pred_succ_thrshld = (pred_succ > threshold).astype(np.uint8)
+
+    cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
+
+    # then, skeletonize
+    skeleton = skeletonize(pred_succ_thrshld)
+
+    # cut away top and sides by N pixels
+    N = 30
+    skeleton[:N, :] = 0
+    skeleton[:, :N] = 0
+    skeleton[:, -N:] = 0
+
+    return skeleton
+
+
+
+def skeleton_to_graph(skeleton):
+    """Convert skeleton to graph"""
+
+    # build graph from skeleton
+    graph = sknw.build_sknw(skeleton)
+
+    # smooth edges
+    for (s, e) in graph.edges():
+        graph[s][e]['pts'] = smooth_trajectory(graph[s][e]['pts'])
+
+    # add node positions
+    node_positions = np.array([graph.nodes[n]['o'] for n in graph.nodes()])
+
+    if len(node_positions) == 0:
+        return graph
+
+    # start_node = np.argmin(np.linalg.norm(node_positions - np.array([128, 255]), axis=1))
+    start_node = np.argmin(np.linalg.norm(node_positions - np.array([255, 128]), axis=1))
+
+    # remove all edges that are not connected to closest node
+    connected = nx.node_connected_component(graph, start_node)  # nodes of component that contains node 0
+    graph.remove_nodes_from([n for n in graph if n not in connected])
+
+    graph = graph.to_directed()
+
+    # adjust coordinates order
+    # add node positions to graph
+    for node in graph.nodes():
+        graph.nodes[node]['pos'] = graph.nodes[node]['o'][::-1]
+    for edge in graph.edges():
+        graph.edges[edge]['pts'] = graph.edges[edge]['pts'][:, ::-1]
+
+    # now let every edge face away from the closest node
+    edge_order = nx.dfs_edges(graph, source=start_node, depth_limit=None)
+    edge_order = list(edge_order)
+
+    for i, (s, e) in enumerate(edge_order):
+        if graph.has_edge(s, e):
+            if graph.has_edge(e, s):
+                graph[s][e]['pts'] = np.flip(graph[e][s]['pts'], axis=0)
+                graph.remove_edge(e, s)
+
+    return graph
 
 
 

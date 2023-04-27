@@ -137,7 +137,7 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-            if "pos_enc" not in data:
+            if "drivable" not in data:
                 continue
 
             # mask_pedestrian = data["mask_pedestrian"].cuda()
@@ -176,11 +176,14 @@ class Trainer():
                     in_tensor = rgb
 
                 if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
-                    in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                    # in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                    in_tensor = rgb
                 elif self.params.input_layers == "rgb+drivable":
-                    in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
+                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
+                    in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1)], dim=1)
                 elif self.params.input_layers == "rgb+drivable+angles":
-                    in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+                    in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1), pred_angles], dim=1)
 
                 target_succ = data["mask_successor"].cuda()
 
@@ -272,7 +275,7 @@ class Trainer():
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
 
-            if "pos_enc" not in data:
+            if "drivable" not in data:
                 continue
 
             rgb = data["rgb"].cuda()
@@ -398,11 +401,14 @@ class Trainer():
                 pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
             if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
-                in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                # in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                in_tensor = rgb
             elif self.params.input_layers == "rgb+drivable":
-                in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
+                # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
+                in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1)], dim=1)
             elif self.params.input_layers == "rgb+drivable+angles":
-                in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+                # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+                in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1), pred_angles], dim=1)
 
             target_succ = data["mask_successor"].cuda()
 
@@ -591,28 +597,32 @@ def main():
     elif opt.target == "successor":
         if opt.full_checkpoint is not None:
             if opt.input_layers == "rgb":   # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
-                num_in_channels = 6
+                # num_in_channels = 6
+                num_in_channels = 3
             elif opt.input_layers == "rgb+drivable":
-                num_in_channels = 7
+                # num_in_channels = 7
+                num_in_channels = 4
             elif opt.input_layers == "rgb+drivable+angles":
-                num_in_channels = 9
+                # num_in_channels = 9
+                num_in_channels = 6
             else:
                 raise ValueError("Unknown input layers: ", opt.input_layers)
         else:
-            num_in_channels = 6  # rgb, pos_encoding
+            # num_in_channels = 6  # rgb, pos_encoding
+            num_in_channels = 3  # rgb
         num_out_channels = 1  # drivable
     else:
         raise ValueError("Unknown target")
 
     model = DeepLabv3Plus(models.resnet101(pretrained=True),
-                          num_in_channels=num_in_channels,
-                          num_classes=num_out_channels).to(params.model.device)
+                                           num_in_channels=num_in_channels,
+                                           num_classes=num_out_channels).to(params.model.device)
 
     model_full = None
     if opt.full_checkpoint is not None:
         model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
-                                   num_in_channels=3,
-                                   num_classes=3).to(params.model.device)
+                                                    num_in_channels=3,
+                                                    num_classes=3).to(params.model.device)
 
         state_dict = torch.load(opt.full_checkpoint)
         try:

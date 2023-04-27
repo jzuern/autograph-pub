@@ -365,13 +365,16 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
                     tracklets_im_list.append(mask_succ_sparse)
 
-                    sat_image_crop_ = sat_image_[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
-                                                 int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
-                    sat_image_crop = cv2.warpPerspective(sat_image_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
+                    try:
+                        sat_image_crop_ = sat_image_[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
+                                                     int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                        sat_image_crop = cv2.warpPerspective(sat_image_crop_, M, (crop_size, crop_size), cv2.INTER_LINEAR)
 
-                    drivable_gt_crop_ = drivable_gt[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
-                                                    int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
-                    drivable_gt_crop = cv2.warpPerspective(drivable_gt_crop_, M, (crop_size, crop_size), cv2.INTER_NEAREST)
+                        drivable_gt_crop_ = drivable_gt[int(y_noise - crop_size_large):int(y_noise + crop_size_large),
+                                                        int(x_noise - crop_size_large):int(x_noise + crop_size_large)].copy()
+                        drivable_gt_crop = cv2.warpPerspective(drivable_gt_crop_, M, (crop_size, crop_size), cv2.INTER_NEAREST)
+                    except:
+                        continue
 
                     [cv2.circle(tracklets_viz, (qq[0], qq[1]), 2, (0, 150, 255), -1) for qq in query_points]
 
@@ -864,7 +867,7 @@ if __name__ == "__main__":
               format(args.thread_id, sat_image.shape, len(trajectories_), len(trajectories_ped_), G_annot.number_of_nodes()))
 
         if len(trajectories_) < 10000:
-            print("Too few trajectories in this thread. Exiting...")
+            print("Too few trajectories in this thread ({}). Exiting thread...".format(len(trajectories_)))
             exit(0)
 
     else:

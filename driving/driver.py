@@ -8,8 +8,6 @@ from pynput.keyboard import Key, Listener, Controller
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 2334477275000
 import matplotlib.pyplot as plt
-from skimage.morphology import skeletonize
-from aggregation.utils import AngleColorizer
 import sknw
 import networkx as nx
 import matplotlib
@@ -17,8 +15,9 @@ from tqdm import tqdm
 import time
 import pickle
 
-from aggregation.utils import smooth_trajectory, similarity_check, out_of_bounds_check, visualize_graph
-from utils import aggregate, colorize
+from aggregation.utils import similarity_check, out_of_bounds_check, visualize_graph
+from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction
+from aggregation.utils import AngleColorizer
 
 
 keyboard = Controller()
@@ -146,24 +145,6 @@ class SatelliteDriver(object):
 
         return pos_encoding
 
-    def skeletonize_prediction(self, pred_succ, threshold=0.5):
-
-        # first, convert to binary
-        pred_succ_thrshld = (pred_succ > threshold).astype(np.uint8)
-
-        cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
-
-        # then, skeletonize
-        skeleton = skeletonize(pred_succ_thrshld)
-
-        # cut away top and sides by N pixels
-        N = 30
-        skeleton[:N,  :] = 0
-        skeleton[: , :N] = 0
-        skeleton[:, -N:] = 0
-
-        return skeleton
-
     def pose_to_transform(self):
 
         x, y, yaw = self.pose
@@ -247,52 +228,6 @@ class SatelliteDriver(object):
 
         return rgb
 
-    def skeleton_to_graph(self, skeleton):
-        """Convert skeleton to graph"""
-
-        # build graph from skeleton
-        graph = sknw.build_sknw(skeleton)
-
-        # smooth edges
-        for (s, e) in graph.edges():
-            graph[s][e]['pts'] = smooth_trajectory(graph[s][e]['pts'])
-
-        # add node positions
-        node_positions = np.array([graph.nodes[n]['o'] for n in graph.nodes()])
-
-        if len(node_positions) == 0:
-            return graph
-
-        # start_node = np.argmin(np.linalg.norm(node_positions - np.array([128, 255]), axis=1))
-        start_node = np.argmin(np.linalg.norm(node_positions - np.array([255, 128]), axis=1))
-
-        # remove all edges that are not connected to closest node
-        connected = nx.node_connected_component(graph, start_node)  # nodes of component that contains node 0
-        graph.remove_nodes_from([n for n in graph if n not in connected])
-
-        graph = graph.to_directed()
-
-
-
-        # adjust coordinates order
-        # add node positions to graph
-        for node in graph.nodes():
-            graph.nodes[node]['pos'] = graph.nodes[node]['o'][::-1]
-        for edge in graph.edges():
-            graph.edges[edge]['pts'] = graph.edges[edge]['pts'][:, ::-1]
-
-
-        # now let every edge face away from the closest node
-        edge_order = nx.dfs_edges(graph, source=start_node, depth_limit=None)
-        edge_order = list(edge_order)
-
-        for i, (s, e) in enumerate(edge_order):
-            if graph.has_edge(s, e):
-                if graph.has_edge(e, s):
-                    graph[s][e]['pts'] = np.flip(graph[e][s]['pts'], axis=0)
-                    graph.remove_edge(e, s)
-
-        return graph
 
     def add_graph_to_angle_canvas(self):
 
@@ -413,8 +348,8 @@ class SatelliteDriver(object):
 
         cv2.imshow("pred_succ", pred_succ)
 
-        skeleton = self.skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
-        self.graph_skeleton = self.skeleton_to_graph(skeleton)
+        skeleton = skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
+        self.graph_skeleton = skeleton_to_graph(skeleton)
 
         # make skeleton fatter
         skeleton = skeleton.astype(np.uint8) * 255
