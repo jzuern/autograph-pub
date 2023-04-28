@@ -146,6 +146,14 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
 
     print("In process_samples for city: {}".format(city_name))
 
+    num_train_samples = 0
+    num_eval_samples = 0
+    num_test_samples = 0
+
+    num_branching = 0
+    num_straight = 0
+
+
     if args.source == "lanegraph":
 
         edge_0_pos = np.array([G_annot.nodes[edge[0]]['pos'] for edge in G_annot.edges()])
@@ -169,13 +177,11 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 curr_node = successors[np.random.randint(0, len(successors))]
                 agent_trajectory.append(curr_node)
 
-
             # leave out the last nodes cause otherwise future trajectory is ending in image
             agent_trajectory = agent_trajectory[0:-50]
             agent_trajectory = agent_trajectory[::10]
             if len(agent_trajectory) == 0:
                 continue
-
 
             # Iterate over agent trajectory:
             for t in range(0, len(agent_trajectory)-1, 2):
@@ -208,6 +214,11 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 if args.eval_test == True:
                     if dataset_split == "train":
                         continue
+
+                if num_eval_samples > 2000 and dataset_split == "eval":
+                    continue
+                if num_test_samples > 2000 and dataset_split == "test":
+                    continue
 
                 out_path = os.path.join(out_path_root, dataset_split)
                 sample_id = "{}-{}-{}".format(city_name, x_noise, y_noise)
@@ -317,6 +328,14 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     else:
                         sample_type = "straight"
 
+                    # Skip too many straight samples
+                    if sample_type == "straight":
+                        if num_straight >= 2 * num_branching:
+                            continue
+
+
+
+
                     do_debugging = False
                     if do_debugging:
                         sat_image_crop_viz = cv2.cvtColor(sat_image_crop, cv2.COLOR_BGR2RGB)
@@ -387,8 +406,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     pos_encoding[..., 2] = np.abs((y - q[1])) / sat_image_crop.shape[0]
                     pos_encoding = (pos_encoding * 255).astype(np.uint8)
 
-                    sample_num += 1
-
                     print("---- TID: {}/{}: Sample {}/{}/{}/{} ({}/{}) - Samples / s = {:.2f}".format(args.thread_id, args.num_parallel,
                                                                                out_path, sample_type, sample_id,
                                                                                i_query, sample_num, max_num_samples,
@@ -406,6 +423,25 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                         "{}/{}/{}-{}-drivable-gt.png".format(out_path, sample_type, sample_id, i_query))
                     Image.fromarray(mask_angle_colorized).save(
                         "{}/{}/{}-{}-angles.png".format(out_path, sample_type, sample_id, i_query))
+
+                    sample_num += 1
+
+                    if dataset_split == "train":
+                        num_train_samples += 1
+                    elif dataset_split == "eval":
+                        num_eval_samples += 1
+                    elif dataset_split == "test":
+                        num_test_samples += 1
+                    else:
+                        continue
+
+                    if sample_type == "branching":
+                        num_branching += 1
+                    elif sample_type == "straight":
+                        num_straight += 1
+                    else:
+                        continue
+
 
     elif "tracklets" in args.source:
         annot_veh_ = trajectories_vehicles_
@@ -432,6 +468,12 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
             if args.eval_test == True:
                 if dataset_split == "train":
                     continue
+
+            if num_eval_samples > 2000 and dataset_split == "eval":
+                continue
+            if num_test_samples > 2000 and dataset_split == "test":
+                continue
+
 
             out_path = os.path.join(out_path_root, dataset_split)
 
@@ -540,6 +582,15 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                     sample_type = "branching"
                 else:
                     sample_type = "straight"
+
+
+                # Skip too many straight samples
+                if sample_type == "straight":
+                    if num_straight >= 2 * num_branching:
+                        continue
+
+
+
                 # Filter out all samples that do not fit in quality criteria
                 if len(succ_traj) < N_MIN_SUCC_TRAJECTORIES:
                     logging.debug("Too few successor trajectories")
@@ -583,6 +634,23 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                 Image.fromarray(drivable_gt_crop.astype(np.uint8)).save("{}/{}/{}-{}-drivable-gt.png".format(out_path, sample_type, sample_id, i_query))
                 Image.fromarray(mask_angle_colorized).save("{}/{}/{}-{}-angles.png".format(out_path, sample_type, sample_id, i_query))
 
+                sample_num += 1
+
+                if dataset_split == "train":
+                    num_train_samples += 1
+                elif dataset_split == "eval":
+                    num_eval_samples += 1
+                elif dataset_split == "test":
+                    num_test_samples += 1
+                else:
+                    continue
+
+                if sample_type == "branching":
+                    num_branching += 1
+                elif sample_type == "straight":
+                    num_straight += 1
+                else:
+                    continue
 
     else:
         raise ValueError("Invalid source")
