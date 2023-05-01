@@ -687,7 +687,7 @@ def main():
         # Evaluate
         trainer.train(epoch)
 
-        if epoch % 5 == 0:
+        if epoch % 10 == 0:
             with torch.no_grad():
                 if opt.target == "successor":
                     trainer.evaluate_succ(epoch)

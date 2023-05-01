@@ -71,7 +71,7 @@ def skeletonize_prediction(pred_succ, threshold=0.5):
     # first, convert to binary
     pred_succ_thrshld = (pred_succ > threshold).astype(np.uint8)
 
-    cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
+    #cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
 
     # then, skeletonize
     skeleton = skeletonize(pred_succ_thrshld)
