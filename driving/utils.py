@@ -27,33 +27,31 @@ def roundify_skeleton_graph(skeleton_graph: nx.DiGraph):
 
     for edge in skeleton_graph.edges:
         pointlist = skeleton_graph.edges[edge]['pts']
-        pointlist = resample_trajectory(pointlist, dist=10)
-
+        pointlist = resample_trajectory(pointlist, dist=20)
 
         # check whether beginning or end of pointlist is closer to edge[0]
         edge_0_pos = skeleton_graph.nodes[edge[0]]['pos']
         if cdist(np.array([edge_0_pos]), np.array([pointlist[0]]))[0][0] > cdist(np.array([edge_0_pos]), np.array([pointlist[-1]]))[0][0]:
             pointlist = pointlist[::-1]
 
-        if len(pointlist) < 3:
+        if len(pointlist) < 2:
             continue
-
 
         # add new points and edges to the graph
         for i in range(0, len(pointlist) - 1):
             if i == 0:
                 point = (int(pointlist[i][0]), int(pointlist[i][1]))
-                skeleton_graph_.add_node(point, pos=pointlist[i])
+                skeleton_graph_.add_node(point, pos=pointlist[i], weight=1.0, score=1.0)
                 skeleton_graph_.add_edge(edge[0], point)
             if i == len(pointlist) - 2:
                 point = (int(pointlist[i][0]), int(pointlist[i][1]))
-                skeleton_graph_.add_node(point, pos=pointlist[i])
+                skeleton_graph_.add_node(point, pos=pointlist[i], weight=1.0, score=1.0)
                 skeleton_graph_.add_edge(point, edge[1])
             else:
                 point0 = (int(pointlist[i][0]), int(pointlist[i][1]))
-                skeleton_graph_.add_node(point0, pos=pointlist[i])
+                skeleton_graph_.add_node(point0, pos=pointlist[i], weight=1.0, score=1.0)
                 point1 = (int(pointlist[i + 1][0]), int(pointlist[i + 1][1]))
-                skeleton_graph_.add_node(point1, pos=pointlist[i + 1])
+                skeleton_graph_.add_node(point1, pos=pointlist[i + 1], weight=1.0, score=1.0)
 
                 skeleton_graph_.add_edge(point0, point1)
 

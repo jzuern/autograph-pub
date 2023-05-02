@@ -120,7 +120,6 @@ def run_successor_lgp(picklefile):
         sample_id = os.path.basename(test_image).replace("-rgb.png", "")
 
         city_name = test_image.split("/")[-4]
-        city_name = city_name.lower()
 
         if city_name not in results_dict:
             results_dict[city_name] = {}
@@ -162,6 +161,11 @@ def run_successor_lgp(picklefile):
         skeleton = skeletonize_prediction(pred_succ, threshold=0.05)
         succ_graph = skeleton_to_graph(skeleton)
         succ_graph = roundify_skeleton_graph(succ_graph)
+
+
+        # relabel nodes
+        mapping = {n: i for i, n in enumerate(succ_graph.nodes)}
+        succ_graph = nx.relabel_nodes(succ_graph, mapping)
 
 
         results_dict[city_name][split][sample_id] = succ_graph

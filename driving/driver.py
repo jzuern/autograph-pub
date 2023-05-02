@@ -6,22 +6,19 @@ import torchvision.models as models
 import numpy as np
 from pynput.keyboard import Key, Listener, Controller
 from PIL import Image
-Image.MAX_IMAGE_PIXELS = 2334477275000
+Image.MAX_IMAGE_PIXELS = None
 import matplotlib.pyplot as plt
-import sknw
 import networkx as nx
 import matplotlib
 from tqdm import tqdm
 import time
 import pickle
 
-from aggregation.utils import similarity_check, out_of_bounds_check, visualize_graph
-from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction
-from aggregation.utils import AngleColorizer
+from aggregation.utils import similarity_check, out_of_bounds_check, visualize_graph, AngleColorizer
+from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
 
 
 keyboard = Controller()
-
 
 
 # SETTINGS
@@ -34,24 +31,13 @@ write_every = 10            # write to disk every n steps
 
 
 # CVPR graph aggregation
-threshold_px = 20
+threshold_px = 30
 threshold_rad = 0.2
 closest_lat_thresh = 30
 
 
-# viz = False
-# if viz:
-#     print("Visualizing graph from previous run...")
-#     fig, ax = plt.subplots(1, 1, figsize=(10, 10))
-#     ax.imshow(np.asarray(Image.open("aerial_image.png")))
-#     fname = sorted(glob.glob("/home/zuern/Desktop/tmp/G_agg/*.gpickle"))[-1]
-#     G_agg = pickle.load(open(fname, "rb"))
-#     visualize_graph(G_agg, ax)
-#     plt.show()
 
-
-
-class SatelliteDriver(object):
+class AerialDriver(object):
     def __init__(self, debug=False):
         self.aerial_image = None
         self.init_pose = np.array([1163, 2982, -2.69])
@@ -108,10 +94,13 @@ class SatelliteDriver(object):
 
     def load_satellite(self, impath):
         # if not os.path.exists("aerial_image.png"):
-        print("Loading aerial image {}...".format(impath))
+        print("Loading aerial image {}".format(impath))
         self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
-        print("Satellite loaded")
-        #
+        self.tile_id = impath.split("/")[-1].split(".")[0]
+        self.city_name = self.tile_id.split("_")[0]
+        print("Tile ID: {}".format(self.tile_id))
+        print("City: {}".format(self.city_name))
+
         #     # Crop (horizontal, vertical)
         #
         #     # PaloAlto - 1
@@ -351,6 +340,10 @@ class SatelliteDriver(object):
         skeleton = skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
         self.graph_skeleton = skeleton_to_graph(skeleton)
 
+        for edge in self.graph_skeleton.edges():
+            self.graph_skeleton.edges[edge]['pts'] = self.graph_skeleton.edges[edge]['pts'][:, ::-1]
+
+
         # make skeleton fatter
         skeleton = skeleton.astype(np.uint8) * 255
         skeleton = cv2.dilate(skeleton, np.ones((3, 3), np.uint8), iterations=1)
@@ -361,8 +354,8 @@ class SatelliteDriver(object):
         pred_angles_color = self.ac.angle_to_color(pred_angles, mask=pred_drivable > 0.3)
 
         # pred_angles_color
-        cv2.imshow("pred_angles_color", pred_angles_color)
-        cv2.imshow("rgb", rgb)
+        # cv2.imshow("pred_angles_color", pred_angles_color)
+        # cv2.imshow("rgb", rgb)
 
         self.add_pred_to_canvas(skeleton)
 
@@ -381,9 +374,9 @@ class SatelliteDriver(object):
         node_positions = np.array([nodes[i]['o'] for i in nodes])
         [cv2.circle(pred_succ_viz, (int(p[0]), int(p[1])), 4, (0, 255, 0), -1) for p in node_positions]
 
-        cv2.imshow("pred_succ_viz", pred_succ_viz)
-        cv2.imshow("pred_drivable", pred_drivable)
-        cv2.imshow("pred_angles_succ_color", pred_angles_succ_color)
+        # cv2.imshow("pred_succ_viz", pred_succ_viz)
+        # cv2.imshow("pred_drivable", pred_drivable)
+        # cv2.imshow("pred_angles_succ_color", pred_angles_succ_color)
 
         if self.debug:
             fig, axarr = plt.subplots(1, 6, figsize=(20, 20), sharex=True, sharey=True)
@@ -506,8 +499,7 @@ class SatelliteDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        nx.write_gpickle(self.G_agg_naive, "/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}.gpickle".format(self.step, name))
-
+        pickle.dump(self.G_agg_naive, open("/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}.pickle".format(self.step, name), "wb"))
 
 
     def drive_keyboard(self, key):
@@ -592,56 +584,162 @@ class SatelliteDriver(object):
             self.make_step()
             return
 
+        # OLD DRIVING CODE
+
+        # G_current_local = self.graph_skeleton.copy()
+        #
+        # G_current_local_pruned = self.graph_skeleton.copy()
+        #
+        #
+        # # shorten all edges to 50 pixels
+        # for edge in G_current_local_pruned.edges:
+        #     if len(list(G_current_local_pruned.successors(edge[1]))) > 0:
+        #         continue
+        #     pts = G_current_local_pruned.edges[edge]['pts']
+        #     pts = pts[0:10, :]
+        #     G_current_local_pruned.edges[edge]['pts'] = pts
+        #
+        #     # also adjust node position
+        #     G_current_local_pruned.nodes[edge[1]]['pos'] = pts[-1, :]
+        #
+        #
+        # G_current_global_pruned = nx.DiGraph()
+        #
+        # # add nodes and edges from self.graph_skeleton and transform to global coordinates (for aggregation)
+        # for node in G_current_local_pruned.nodes:
+        #     # transform pos_start to global coordinates
+        #     pos_local = nx.get_node_attributes(G_current_local_pruned, "pts")[node][0].astype(np.float32)
+        #     pos_global = self.crop_coordintates_to_global(self.pose, pos_local)
+        #
+        #     G_current_global_pruned.add_node(node,
+        #                               pos=pos_global,
+        #                               weight=1.0,
+        #                               score=1.0,)
+        #
+        # for edge in G_current_local_pruned.edges:
+        #     edge_points = G_current_local_pruned.edges[edge]["pts"]
+        #     edge_points = self.crop_coordintates_to_global(self.pose, edge_points)
+        #     G_current_global_pruned.add_edge(edge[0], edge[1], pts=edge_points)
+        #
+        # self.graphs.append(G_current_global_pruned)
+        #
+        #
+        # successor_points = []
+        # for node in G_current_local.nodes:
+        #     if len(list(G_current_local.successors(node))) >= 1:
+        #         successor_points.append(node)
+        #
+        # succ_edges = []
+        # for successor_point in successor_points:
+        #     succ = list(G_current_local.successors(successor_point))
+        #     for successor in succ:
+        #         succ_edges.append(G_current_local.edges[successor_point, successor])
+        #
+        # if len(succ_edges) == 0:
+        #     print("     No successor edges found.")
+        #
+        # for edge in succ_edges:
+        #
+        #     num_points_in_edge = len(edge["pts"])
+        #     if num_points_in_edge < edge_end_idx+1:
+        #         continue
+        #
+        #     pos_start_local = np.array([edge["pts"][edge_start_idx][1],
+        #                                 edge["pts"][edge_start_idx][0]])
+        #     pos_end_local = np.array([edge["pts"][edge_end_idx][1],
+        #                               edge["pts"][edge_end_idx][0]])
+        #
+        #     edge_start_global = self.crop_coordintates_to_global(self.pose, pos_start_local)
+        #     edge_end_global = self.crop_coordintates_to_global(self.pose, pos_end_local)
+        #
+        #
+        #     edge_local = pos_end_local - pos_start_local
+        #     angle_local = np.arctan2(edge_local[1], -edge_local[0])
+        #     angle_global = self.pose[2] + angle_local
+        #
+        #     # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
+        #     step_sizes = [40]  # number of pixels to move forward along edge
+        #
+        #     for step_size in step_sizes:
+        #
+        #
+        #         # define future pose
+        #         future_pose_global = np.zeros(3)
+        #         diff = step_size * (edge_end_global - edge_start_global) / np.linalg.norm(edge_end_global - edge_start_global)
+        #         future_pose_global[0:2] = edge_start_global + diff
+        #         future_pose_global[2] = self.yaw_check(angle_global)
+        #
+        #
+        #         # put future pose in queue if not yet visited
+        #         was_visited = similarity_check(future_pose_global, self.pose_history, min_dist=20, min_angle=np.pi/4)
+        #         is_already_in_queue = similarity_check(future_pose_global, self.future_poses, min_dist=20, min_angle=np.pi/4)
+        #
+        #         if not was_visited and not is_already_in_queue:
+        #             self.future_poses.append(future_pose_global)
+        #             print("     put pose in queue: {:.0f}, {:.0f}, {:.1f} (step size: {})".format(future_pose_global[0],
+        #                                                                                           future_pose_global[1],
+        #                                                                                           future_pose_global[2],
+        #                                                                                           step_size))
+        #
+        #             # add edge to aggregated graph
+        #             pointlist_local = np.array(edge["pts"][edge_start_idx:edge_end_idx])
+        #
+        #             pointlist_global = self.crop_coordintates_to_global(self.pose, pointlist_local)
+        #
+        #             node_edge_start = (int(edge_start_global[0]), int(edge_start_global[1]))
+        #             node_edge_end = (int(edge_end_global[0]), int(edge_end_global[1]))
+        #
+        #             # add G_agg-edge from edge start to edge end
+        #             self.G_agg_naive.add_node(node_edge_start, pos=edge_start_global)
+        #             self.G_agg_naive.add_node(node_edge_end, pos=edge_end_global)
+        #             self.G_agg_naive.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
+        #
+        #             break
+
+
+        # NEW DRIVING CODE
+
+
+
         G_current_local = self.graph_skeleton.copy()
-        G_current_local_pruned = self.graph_skeleton.copy()
+        G_current_global = nx.DiGraph()
 
-
-        # shorten all edges to 50 pixels
-        for edge in G_current_local_pruned.edges:
-            if len(list(G_current_local_pruned.successors(edge[1]))) > 0:
-                continue
-            pts = G_current_local_pruned.edges[edge]['pts']
-            pts = pts[0:10, :]
-            G_current_local_pruned.edges[edge]['pts'] = pts
-
-            # also adjust node position
-            G_current_local_pruned.nodes[edge[1]]['pos'] = pts[-1, :]
-
-
-        G_current_global_pruned = nx.DiGraph()
 
         # add nodes and edges from self.graph_skeleton and transform to global coordinates (for aggregation)
-        for node in G_current_local_pruned.nodes:
+        for node in G_current_local.nodes:
             # transform pos_start to global coordinates
-            pos_local = nx.get_node_attributes(G_current_local_pruned, "pts")[node][0].astype(np.float32)
+            pos_local = nx.get_node_attributes(G_current_local, "pts")[node][0].astype(np.float32)
             pos_global = self.crop_coordintates_to_global(self.pose, pos_local)
 
-            G_current_global_pruned.add_node(node,
+            G_current_global.add_node(node,
                                       pos=pos_global,
                                       weight=1.0,
                                       score=1.0,)
 
-        for edge in G_current_local_pruned.edges:
-            edge_points = G_current_local_pruned.edges[edge]["pts"]
+        for edge in G_current_local.edges:
+            edge_points = G_current_local.edges[edge]["pts"]
             edge_points = self.crop_coordintates_to_global(self.pose, edge_points)
-            G_current_global_pruned.add_edge(edge[0], edge[1], pts=edge_points)
+            G_current_global.add_edge(edge[0], edge[1], pts=edge_points)
 
-        self.graphs.append(G_current_global_pruned)
+        # convert to smooth graph
+        G_current_global_dense = roundify_skeleton_graph(G_current_global)
+        self.graphs.append(G_current_global_dense)
 
 
         successor_points = []
-        for node in G_current_local.nodes:
-            if len(list(G_current_local.successors(node))) >= 1:
+        for node in G_current_global.nodes:
+            if len(list(G_current_global.successors(node))) >= 1:
                 successor_points.append(node)
 
         succ_edges = []
         for successor_point in successor_points:
-            succ = list(G_current_local.successors(successor_point))
+            succ = list(G_current_global.successors(successor_point))
             for successor in succ:
-                succ_edges.append(G_current_local.edges[successor_point, successor])
+                succ_edges.append(G_current_global.edges[successor_point, successor])
 
         if len(succ_edges) == 0:
             print("     No successor edges found.")
+
 
         for edge in succ_edges:
 
@@ -649,37 +747,38 @@ class SatelliteDriver(object):
             if num_points_in_edge < edge_end_idx+1:
                 continue
 
-            pos_start_local = np.array([edge["pts"][edge_start_idx][1],
-                                        edge["pts"][edge_start_idx][0]])
-            pos_end_local = np.array([edge["pts"][edge_end_idx][1],
-                                      edge["pts"][edge_end_idx][0]])
+            pos_start = np.array([edge["pts"][edge_start_idx][0],
+                                  edge["pts"][edge_start_idx][1]])
+            pos_end = np.array([edge["pts"][edge_end_idx][0],
+                                edge["pts"][edge_end_idx][1]])
 
-            edge_start_global = self.crop_coordintates_to_global(self.pose, pos_start_local)
-            edge_end_global = self.crop_coordintates_to_global(self.pose, pos_end_local)
+            edge_delta = pos_end - pos_start
+            angle_global = np.arctan2(edge_delta[0], -edge_delta[1])
 
-
-            edge_local = pos_end_local - pos_start_local
-            angle_local = np.arctan2(edge_local[1], -edge_local[0])
-            angle_global = self.pose[2] + angle_local
 
             # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
             step_sizes = [40]  # number of pixels to move forward along edge
 
             for step_size in step_sizes:
 
-
                 # define future pose
                 future_pose_global = np.zeros(3)
-                diff = step_size * (edge_end_global - edge_start_global) / np.linalg.norm(edge_end_global - edge_start_global)
-                future_pose_global[0:2] = edge_start_global + diff
+                diff = step_size * (pos_end - pos_start) / np.linalg.norm(pos_end - pos_start)
+                future_pose_global[0:2] = pos_start + diff
                 future_pose_global[2] = self.yaw_check(angle_global)
 
-
                 # put future pose in queue if not yet visited
-                was_visited = similarity_check(future_pose_global, self.pose_history, min_dist=20, min_angle=np.pi/4)
-                is_already_in_queue = similarity_check(future_pose_global, self.future_poses, min_dist=20, min_angle=np.pi/4)
+                was_visited = similarity_check(future_pose_global,
+                                               self.pose_history,
+                                               min_dist=20,
+                                               min_angle=np.pi/4)
+                is_already_in_queue = similarity_check(future_pose_global,
+                                                       self.future_poses,
+                                                       min_dist=20,
+                                                       min_angle=np.pi/4)
 
                 if not was_visited and not is_already_in_queue:
+
                     self.future_poses.append(future_pose_global)
                     print("     put pose in queue: {:.0f}, {:.0f}, {:.1f} (step size: {})".format(future_pose_global[0],
                                                                                                   future_pose_global[1],
@@ -687,25 +786,46 @@ class SatelliteDriver(object):
                                                                                                   step_size))
 
                     # add edge to aggregated graph
-                    pointlist_local = np.array(edge["pts"][edge_start_idx:edge_end_idx])
+                    pointlist = np.array(edge["pts"][edge_start_idx:edge_end_idx])
 
-                    pointlist_global = self.crop_coordintates_to_global(self.pose, pointlist_local)
-
-                    node_edge_start = (int(edge_start_global[0]), int(edge_start_global[1]))
-                    node_edge_end = (int(edge_end_global[0]), int(edge_end_global[1]))
+                    node_edge_start = (int(pos_start[0]), int(pos_start[1]))
+                    node_edge_end = (int(pos_end[0]), int(pos_end[1]))
 
                     # add G_agg-edge from edge start to edge end
-                    self.G_agg_naive.add_node(node_edge_start, pos=edge_start_global)
-                    self.G_agg_naive.add_node(node_edge_end, pos=edge_end_global)
-                    self.G_agg_naive.add_edge(node_edge_start, node_edge_end, pts=pointlist_global)
+                    self.G_agg_naive.add_node(node_edge_start, pos=pos_start)
+                    self.G_agg_naive.add_node(node_edge_end, pos=pos_end)
+                    self.G_agg_naive.add_edge(node_edge_start, node_edge_end, pts=pointlist)
 
                     break
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
         if self.step % write_every == 0:
             self.render_poses_in_aerial()
             self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
+
+            # G_agg_cvpr = driver.aggregate_graphs(self.graphs)
 
             # fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
             # [ax.set_aspect('equal') for ax in axarr]
@@ -759,7 +879,7 @@ class SatelliteDriver(object):
 
 
 if __name__ == "__main__":
-    driver = SatelliteDriver(debug=False)
+    driver = AerialDriver(debug=False)
 
     driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # (Austin only, BIG)
                       type="full")
@@ -775,7 +895,7 @@ if __name__ == "__main__":
 
 
 
-    # load from disk
+    # load files from disk
     with open("/home/zuern/Desktop/autograph/tmp/G_agg/graphs_all.pickle", "rb") as f:
         graphs = pickle.load(f)
     with open("/home/zuern/Desktop/autograph/tmp/G_agg/G_agg_naive_all.pickle", "rb") as f:
