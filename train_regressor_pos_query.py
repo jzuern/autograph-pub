@@ -137,7 +137,8 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-            if torch.all(data["rgb"] == torch.zeros([256, 256])):
+            if torch.all(data["rgb"][0, 0] == torch.zeros([256, 256])):
+                print("skip in train loop")
                 continue
 
             # mask_pedestrian = data["mask_pedestrian"].cuda()
@@ -275,7 +276,8 @@ class Trainer():
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
 
-            if torch.all(data["rgb"] == torch.zeros([256, 256])):
+            if torch.all(data["rgb"][0, 0] == torch.zeros([256, 256])):
+                print("skip in train loop")
                 continue
 
             rgb = data["rgb"].cuda()

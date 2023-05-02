@@ -209,8 +209,17 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         drivable_gt = cv2.imread(self.drivable_gt_files[idx], cv2.IMREAD_UNCHANGED)
 
         if mask is None or pos_enc is None or angles is None or rgb is None or drivable_gt is None:
-            print("Error loading file: {}. Skipping".format(self.sdf_files[idx]))
-            return_dict = {'rgb': torch.zeros([256, 256])}
+            print("Error loading file: {}".format(self.sdf_files[idx]))
+
+            return_dict = {
+                'drivable': torch.zeros([256, 256]),
+                'drivable_gt': torch.zeros([256, 256]),
+                'mask_successor': torch.zeros([256, 256]),
+                'mask_pedestrian': torch.zeros([256, 256]),
+                'pos_enc': torch.zeros([3, 256, 256]),
+                'angles_xy': torch.zeros([2, 256, 256]),
+                'rgb': torch.zeros([3, 256, 256]),
+            }
             return return_dict
 
         angles = self.ac.color_to_angle(angles)
