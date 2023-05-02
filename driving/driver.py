@@ -422,7 +422,7 @@ class AerialDriver(object):
 
         # Aggregate all graphs
         G_pred_agg = nx.DiGraph()
-        for pred_agg_idx, G in tqdm(enumerate(graphs), total=len(graphs)):
+        for pred_agg_idx, G in tqdm(enumerate(graphs), total=len(graphs), desc="Aggregating graphs"):
             G_pred_agg, merging_map = aggregate(G_pred_agg, G,
                                                 visited_edges=[],
                                                 threshold_px=threshold_px,
@@ -725,7 +725,6 @@ class AerialDriver(object):
         G_current_global_dense = roundify_skeleton_graph(G_current_global)
         self.graphs.append(G_current_global_dense)
 
-
         successor_points = []
         for node in G_current_global.nodes:
             if len(list(G_current_global.successors(node))) >= 1:
@@ -740,6 +739,11 @@ class AerialDriver(object):
         if len(succ_edges) == 0:
             print("     No successor edges found.")
 
+
+        # loop over all successor edges to add them to the aggregated graph
+
+
+        # loop over all successor edges to find future poses
 
         for edge in succ_edges:
 
@@ -757,7 +761,7 @@ class AerialDriver(object):
 
 
             # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
-            step_sizes = [40]  # number of pixels to move forward along edge
+            step_sizes = [40]
 
             for step_size in step_sizes:
 
@@ -795,6 +799,37 @@ class AerialDriver(object):
                     self.G_agg_naive.add_node(node_edge_start, pos=pos_start)
                     self.G_agg_naive.add_node(node_edge_end, pos=pos_end)
                     self.G_agg_naive.add_edge(node_edge_start, node_edge_end, pts=pointlist)
+
+                    # add G_agg-edge from current pose to edge start
+                    if np.linalg.norm(pos_start - self.pose[0:2]) < 50:
+                        node_current_pose = (int(self.pose[0]), int(self.pose[1]))
+                        self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
+                        self.G_agg_naive.add_edge(node_current_pose, node_edge_start)
+
+
+                    # add G_agg-edge from edge end to future pose start
+
+                    for inner_edge in succ_edges:
+                        if edge == inner_edge:
+                            continue
+
+                        print(edge["pts"][0] - inner_edge["pts"][-1])
+
+                        # if edge["pts"][0] == inner_edge["pts"][-1]:
+                        #
+                        #     print("     adding edge from edge end to future pose start")
+                        #
+                        #     pos_start = nx.get_node_attributes(G_current_global, "pos")[inner_edge[1]]
+                        #     pos_end = nx.get_node_attributes(G_current_global, "pos")[edge[0]]
+                        #
+                        #     # if np.linalg.norm(pos_end - pos_start) < 50:
+                        #
+                        #     node_start = (int(pos_start[0]), int(pos_start[1]))
+                        #     node_end = (int(pos_end[0]), int(pos_end[1]))
+                        #     self.G_agg_naive.add_node(node_start, pos=pos_start)
+                        #     self.G_agg_naive.add_node(node_end, pos=pos_end)
+                        #     self.G_agg_naive.add_edge(node_start, node_end)
+
 
                     break
 
@@ -912,7 +947,7 @@ if __name__ == "__main__":
     axarr[0].set_title("g single")
     axarr[1].set_title("G_agg_naive")
     axarr[2].set_title("G_agg_cvpr")
-    [visualize_graph(g, axarr[0], node_color="w", edge_color="w") for g in driver.graphs]
+    [visualize_graph(g, axarr[0], node_color=np.random.rand(3), edge_color=np.random.rand(3)) for g in graphs]
     visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
     visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
     plt.show()

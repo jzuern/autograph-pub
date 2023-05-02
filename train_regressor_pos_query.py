@@ -137,12 +137,12 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-            if "drivable" not in data:
+            if data["rgb"] == torch.tensor(0):
                 continue
 
             # mask_pedestrian = data["mask_pedestrian"].cuda()
             # drivable_gt = data["drivable_gt"].cuda()
-            pos_enc = data["pos_enc"].cuda()
+            # pos_enc = data["pos_enc"].cuda()
             rgb = data["rgb"].cuda()
 
             if self.params.target == "full":
@@ -275,7 +275,7 @@ class Trainer():
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
 
-            if "drivable" not in data:
+            if data["rgb"] == torch.tensor(0):
                 continue
 
             rgb = data["rgb"].cuda()
@@ -660,11 +660,11 @@ def main():
                                               path=train_path,
                                               split='train',
                                               frac_branch=1,
-                                              frac_straight=0.2)
+                                              frac_straight=1)
     dataset_val = SuccessorRegressorDataset(params=params, path=val_path,
                                             split='val',
                                             frac_branch=1,
-                                            frac_straight=0.2,
+                                            frac_straight=1,
                                             max_num_samples=1000)
 
     dataloader_train = DataLoader(dataset_train,

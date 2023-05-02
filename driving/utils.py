@@ -27,7 +27,7 @@ def roundify_skeleton_graph(skeleton_graph: nx.DiGraph):
 
     for edge in skeleton_graph.edges:
         pointlist = skeleton_graph.edges[edge]['pts']
-        pointlist = resample_trajectory(pointlist, dist=20)
+        pointlist = resample_trajectory(pointlist, dist=30)
 
         # check whether beginning or end of pointlist is closer to edge[0]
         edge_0_pos = skeleton_graph.nodes[edge[0]]['pos']
