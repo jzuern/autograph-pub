@@ -13,7 +13,7 @@ from torchvision import transforms
 import torchvision.transforms.functional as F
 from PIL import Image
 
-get_id = lambda filename: "-".join(os.path.basename(filename).split('-')[1:4])
+get_id = lambda filename: "-".join(os.path.basename(filename).split('-')[0:4])
 
 
 class SuccessorRegressorDataset(torch.utils.data.Dataset):
@@ -28,10 +28,15 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         # get all files
         p = Path(self.path).parents[2]
 
-        filelist = [str(f) for f in p.glob('**/*') if f.is_file()]
+        if params.city == "all":
+            params.city = "*"  # redefine for simpler city handling
+
+        search_pattern = "{}/{}/*/*".format(params.city, self.split)
+
+        filelist = [str(f) for f in p.glob(search_pattern) if f.is_file()]
         filelist = sorted(filelist)
 
-        print("     Found {} files in total (all cities)".format(len(filelist)))
+        print("     Found {} files in total".format(len(filelist)))
 
         # filter files
         self.rgb_files = []
@@ -40,37 +45,30 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.pos_enc_files = []
         self.drivable_gt_files = []
 
+
         for f in filelist:
-            if "-rgb.png" in f and split in f and params.city in f:
+            if f.endswith("-rgb.png"):
                 self.rgb_files.append(f)
-            elif "-masks.png" in f and split in f and params.city in f:
+            elif f.endswith("-masks.png"):
                 self.sdf_files.append(f)
-            elif "-angles.png" in f and split in f and params.city in f:
+            elif f.endswith("-angles.png"):
                 self.angles_files.append(f)
-            elif "-pos-encoding.png" in f and split in f and params.city in f:
+            elif f.endswith("-pos-encoding.png"):
                 self.pos_enc_files.append(f)
-            elif "-drivable-gt.png" in f and split in f and params.city in f:
+            elif f.endswith("-drivable-gt.png"):
                 self.drivable_gt_files.append(f)
 
-        self.rgb_files = sorted(self.rgb_files)
-        self.sdf_files = sorted(self.sdf_files)
-        self.angles_files = sorted(self.angles_files)
-        self.pos_enc_files = sorted(self.pos_enc_files)
-        self.drivable_gt_files = sorted(self.drivable_gt_files)
-
-
-        # self.rgb_files = [f for f in filelist if "-rgb.png" in f and split in f]
-        # self.sdf_files = [f for f in filelist if "-masks.png" in f and split in f]
-        # self.angles_files = [f for f in filelist if "-angles.png" in f and split in f]
-        # self.pos_enc_files = [f for f in filelist if "-pos-encoding.png" in f and split in f]
-        # self.drivable_gt_files = [f for f in filelist if "-drivable-gt.png" in f and split in f]
+        self.rgb_files = sorted(list(set(self.rgb_files)))
+        self.sdf_files = sorted(list(set(self.sdf_files)))
+        self.angles_files = sorted(list(set(self.angles_files)))
+        self.pos_enc_files = sorted(list(set(self.pos_enc_files)))
+        self.drivable_gt_files = sorted(list(set(self.drivable_gt_files)))
 
         print("     Number of files before filtering:")
         print("     ", len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
         if len(self.sdf_files) == 0:
             raise ValueError("No files found in {}".format(path))
-
 
         # only use files for which we have all modalities
         file_ids_sdf = [get_id(f) for f in self.sdf_files]
@@ -79,59 +77,61 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         file_ids_pos_enc = [get_id(f) for f in self.pos_enc_files]
         file_ids_drivable_gt = [get_id(f) for f in self.drivable_gt_files]
 
-        # find ids that are not in all lists
-        ids_in_all = set(file_ids_sdf).intersection(set(file_ids_angles)).intersection(set(file_ids_rgb)).intersection(set(file_ids_pos_enc)).intersection(set(file_ids_drivable_gt))
+        file_dict = {}
+        for f, p in zip(file_ids_sdf, self.sdf_files):
+            if f not in file_dict:
+                file_dict[f] = {}
+            file_dict[f]["sdf"] = p
+        for f, p in zip(file_ids_angles, self.angles_files):
+            if f not in file_dict:
+                file_dict[f] = {}
+            file_dict[f]["angles"] = p
+        for f, p in zip(file_ids_rgb, self.rgb_files):
+            if f not in file_dict:
+                file_dict[f] = {}
+            file_dict[f]["rgb"] = p
+        for f, p in zip(file_ids_pos_enc, self.pos_enc_files):
+            if f not in file_dict:
+                file_dict[f] = {}
+            file_dict[f]["pos_enc"] = p
+        for f, p in zip(file_ids_drivable_gt, self.drivable_gt_files):
+            if f not in file_dict:
+                file_dict[f] = {}
+            file_dict[f]["drivable_gt"] = p
 
 
-        # remove all files that are not in all lists
-        self.sdf_files = [f for f in self.sdf_files if get_id(f) in ids_in_all]
-        self.angles_files = [f for f in self.angles_files if get_id(f) in ids_in_all]
-        self.rgb_files = [f for f in self.rgb_files if get_id(f) in ids_in_all]
-        self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in ids_in_all]
-        self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in ids_in_all]
+        sdf_files = []
+        angles_files = []
+        rgb_files = []
+        pos_enc_files = []
+        drivable_gt_files = []
+
+        for k, v in file_dict.items():
+            if len(v) == 5:
+                sdf_files.append(v["sdf"])
+                angles_files.append(v["angles"])
+                rgb_files.append(v["rgb"])
+                pos_enc_files.append(v["pos_enc"])
+                drivable_gt_files.append(v["drivable_gt"])
 
         print("     Number of files after all-available filtering:")
-        print("     ", len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
+        print("     ", len(sdf_files), len(angles_files), len(rgb_files), len(pos_enc_files), len(drivable_gt_files))
 
-        # # jointly shuffle them
-        c = list(zip(self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
+        # jointly shuffle them
+        c = list(zip(sdf_files, angles_files, rgb_files, pos_enc_files, drivable_gt_files))
         random.shuffle(c)
+
         self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
 
         # check if all files are present
-        assert len(self.sdf_files) == len(self.rgb_files)
+        assert len(self.sdf_files) == len(self.angles_files) == len(self.rgb_files) == len(self.pos_enc_files) == len(self.drivable_gt_files)
 
         # Now we can share the files between type branch and straight
         rgb_branch = [i for i in self.rgb_files if "branching" in i]
-        sdf_branch = [i for i in self.sdf_files if "branching" in i]
-        pos_enc_branch = [i for i in self.pos_enc_files if "branching" in i]
-        drivable_gt_branch = [i for i in self.drivable_gt_files if "branching" in i]
-        angles_branch = [i for i in self.angles_files if "branching" in i]
-
         rgb_straight = [i for i in self.rgb_files if "straight" in i]
-        sdf_straight = [i for i in self.sdf_files if "straight" in i]
-        pos_enc_straight = [i for i in self.pos_enc_files if "straight" in i]
-        drivable_gt_straight = [i for i in self.drivable_gt_files if "straight" in i]
-        angles_straight = [i for i in self.angles_files if "straight" in i]
 
         print("     Total Branch: {} files".format(len(rgb_branch)))
         print("     Total Straight: {} files".format(len(rgb_straight)))
-
-        # # build a dataset with a certain fraction of branch and straight
-        #
-        # print("frac_branch = {}, frac_straight = {}".format(frac_branch, frac_straight))
-        #
-        # lb = int(frac_branch * len(rgb_branch))
-        # ls = int(frac_straight * len(rgb_straight))
-        #
-        # print("Effective Branch: {} files".format(lb))
-        # print("Effective Straight: {} files".format(ls))
-        #
-        # self.rgb_files = rgb_branch[:lb] + rgb_straight[:ls]
-        # self.sdf_files = sdf_branch[:lb] + sdf_straight[:ls]
-        # self.pos_enc_files = pos_enc_branch[:lb] + pos_enc_straight[:ls]
-        # self.drivable_gt_files = drivable_gt_branch[:lb] + drivable_gt_straight[:ls]
-        # self.angles_files = angles_branch[:lb] + angles_straight[:ls]
 
         # jointly shuffle them
         c = list(zip(self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))

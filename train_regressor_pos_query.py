@@ -549,7 +549,7 @@ def main():
                         choices=["rgb", "rgb+drivable", "rgb+drivable+angles"])
     parser.add_argument('--inference', action='store_true', help="perform inference instead of training")
     parser.add_argument('--full-checkpoint', type=str, default=None, help="path to full checkpoint for inference")
-    parser.add_argument('--city', type=str, default="*", help="city to use for training")
+    parser.add_argument('--city', type=str, default="all", help="city to use for training")
 
     opt = parser.parse_args()
 
