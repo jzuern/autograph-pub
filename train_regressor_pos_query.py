@@ -549,26 +549,9 @@ def main():
                         choices=["rgb", "rgb+drivable", "rgb+drivable+angles"])
     parser.add_argument('--inference', action='store_true', help="perform inference instead of training")
     parser.add_argument('--full-checkpoint', type=str, default=None, help="path to full checkpoint for inference")
-    parser.add_argument('--num_gpus', type=int, default=1, help="number of gpus to use")
-    parser.add_argument('--city', type=str, default=None, help="city to use for training")
+    parser.add_argument('--city', type=str, default="*", help="city to use for training")
 
     opt = parser.parse_args()
-
-    # available_gpus = []
-    # while len(available_gpus) < opt.num_gpus:
-    #     print("Waiting for {} GPUs to become available...".format(opt.num_gpus))
-    #     available_gpus = GPUtil.getAvailable(order='first', limit=10, maxLoad=0.3, maxMemory=0.3, includeNan=False, excludeID=[], excludeUUID=[])
-    #     if len(available_gpus) >= opt.num_gpus:
-    #         break
-    #     time.sleep(10)
-    # print("Available GPUs: ", available_gpus)
-    #
-    # available_gpus = available_gpus[:opt.num_gpus]
-    #
-    # # set torch available gpus
-    # os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(gpu) for gpu in available_gpus])
-
-
 
     params = ParamLib(opt.config)
     params.main.overwrite(opt)

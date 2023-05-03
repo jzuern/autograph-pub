@@ -10,11 +10,12 @@ export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 
 # iterate over all cities
 #CITIES=(pittsburgh austin detroit paloalto washington miami)
-CITIES=(miami washington)
-SOURCES=(lanegraph tracklets_joint tracklets_raw)
+CITIES=(austin)
+#SOURCES=(lanegraph tracklets_joint tracklets_raw)
+SOURCES=(tracklets_joint tracklets_raw)
 
 NUM_PARALLEL=4
-NUM_PARSING=1
+NUM_PARSING=2
 
 run_train () {
   for CITY in "${CITIES[@]}"; do
@@ -29,7 +30,7 @@ run_train () {
           --max_num_samples 10000 \
           --num_parallel $NUM_PARALLEL \
           --thread_id $tid &
-        sleep 200 # sleep to give time start generating
+        sleep 120 # sleep to give time start generating
       done
       wait
     done

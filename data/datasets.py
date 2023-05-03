@@ -31,7 +31,7 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         filelist = [str(f) for f in p.glob('**/*') if f.is_file()]
         filelist = sorted(filelist)
 
-        print("     Found {} files in total".format(len(filelist)))
+        print("     Found {} files in total (all cities)".format(len(filelist)))
 
         # filter files
         self.rgb_files = []
@@ -65,7 +65,8 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         # self.pos_enc_files = [f for f in filelist if "-pos-encoding.png" in f and split in f]
         # self.drivable_gt_files = [f for f in filelist if "-drivable-gt.png" in f and split in f]
 
-        print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
+        print("     Number of files before filtering:")
+        print("     ", len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
         if len(self.sdf_files) == 0:
             raise ValueError("No files found in {}".format(path))
@@ -89,7 +90,8 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.pos_enc_files = [f for f in self.pos_enc_files if get_id(f) in ids_in_all]
         self.drivable_gt_files = [f for f in self.drivable_gt_files if get_id(f) in ids_in_all]
 
-        print(len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
+        print("     Number of files after all-available filtering:")
+        print("     ", len(self.sdf_files), len(self.angles_files), len(self.rgb_files), len(self.pos_enc_files), len(self.drivable_gt_files))
 
         # # jointly shuffle them
         c = list(zip(self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files))
@@ -233,13 +235,6 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         angles = cv2.cvtColor(angles, cv2.COLOR_BGR2RGB)
         rgb = cv2.imread(self.rgb_files[idx], cv2.IMREAD_UNCHANGED)
         drivable_gt = cv2.imread(self.drivable_gt_files[idx], cv2.IMREAD_UNCHANGED)
-
-        print(os.path.basename(self.sdf_files[idx]),
-              os.path.basename(self.pos_enc_files[idx]),
-              os.path.basename(self.angles_files[idx]),
-              os.path.basename(self.rgb_files[idx]),
-              os.path.basename(self.drivable_gt_files[idx]))
-
 
         if mask is None or pos_enc is None or angles is None or rgb is None or drivable_gt is None:
             print("Error loading file: {}".format(self.sdf_files[idx]))
