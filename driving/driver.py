@@ -759,7 +759,6 @@ class AerialDriver(object):
             edge_delta = pos_end - pos_start
             angle_global = np.arctan2(edge_delta[0], -edge_delta[1])
 
-
             # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
             step_sizes = [40]
 

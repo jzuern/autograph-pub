@@ -120,8 +120,6 @@ class Trainer():
 
         self.figure, self.axarr = plt.subplots(1, 2)
 
-        print(len(self.dataloader_train))
-
         it = iter(self.dataloader_train)
         i = 0
         while i < 1:
@@ -134,8 +132,13 @@ class Trainer():
 
         self.model.train()
 
+
+
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
+
+            if step > 100:
+                break
 
             if torch.all(data["rgb"][0, 0] == torch.zeros([256, 256])):
                 print("skip in train loop")
@@ -576,6 +579,7 @@ def main():
     params.target = opt.target
     params.input_layers = opt.input_layers
     params.dataset_name = opt.dataset_name
+    params.city = opt.city
 
     print("Batch size summed over all GPUs: ", params.model.batch_size_reg)
 
@@ -617,14 +621,14 @@ def main():
         raise ValueError("Unknown target")
 
     model = DeepLabv3Plus(models.resnet101(pretrained=True),
-                                           num_in_channels=num_in_channels,
-                                           num_classes=num_out_channels).to(params.model.device)
+                          num_in_channels=num_in_channels,
+                          num_classes=num_out_channels).to(params.model.device)
 
     model_full = None
     if opt.full_checkpoint is not None:
         model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
-                                                    num_in_channels=3,
-                                                    num_classes=3).to(params.model.device)
+                                   num_in_channels=3,
+                                   num_classes=3).to(params.model.device)
 
         state_dict = torch.load(opt.full_checkpoint)
         try:
@@ -654,22 +658,18 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, opt.dataset_name, opt.city, "train", "*")  # .../exp-name/city/split/branch-straight/*
-    val_path = os.path.join(params.paths.dataroot, opt.dataset_name, opt.city, "eval", "*")
-    #test_path = os.path.join(params.paths.dataroot, opt.dataset_name, opt.city, "test", "*")
+    train_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
+    val_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "eval", "*")
+    #test_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "test", "*")
 
     dataset_train = SuccessorRegressorDataset(params=params,
                                               path=train_path,
-                                              max_num_samples=100000,
                                               split='train',
-                                              frac_branch=1,
-                                              frac_straight=1)
-    dataset_val = SuccessorRegressorDataset(params=params, path=val_path,
+                                              max_num_samples=100000)
+    dataset_val = SuccessorRegressorDataset(params=params,
+                                            path=val_path,
                                             split='val',
-                                            frac_branch=1,
-                                            frac_straight=1,
                                             max_num_samples=1000)
-
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,
                                   num_workers=params.model.loader_workers,

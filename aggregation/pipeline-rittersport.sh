@@ -10,7 +10,7 @@ export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 
 # iterate over all cities
 #CITIES=(pittsburgh austin detroit paloalto washington miami)
-CITIES=(washington miami)
+CITIES=(miami washington)
 SOURCES=(lanegraph tracklets_joint tracklets_raw)
 
 NUM_PARALLEL=4

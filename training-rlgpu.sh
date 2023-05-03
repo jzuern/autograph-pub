@@ -11,6 +11,8 @@ CUDA_VISIBLE_DEVICES=0,1 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/pyth
   --city Austin \
   --dataset_name $DATASET_NAME/lanegraph &
 
+sleep 1
+
 # TrackletNet tracklet-supervised
 CUDA_VISIBLE_DEVICES=2,3 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
