@@ -23,15 +23,17 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.split = split
         self.ac = AngleColorizer()
 
-        print("Dataloader: Looking for files in {}, with city = {}".format(path, params.city))
-
         # get all files
         p = Path(self.path).parents[2]
 
         if params.city == "all":
             params.city = "*"  # redefine for simpler city handling
+        params.city = params.city.lower()
+
 
         search_pattern = "{}/{}/*/*".format(params.city, self.split)
+
+        print("Dataloader: Looking for files in {} with search pattern {}".format(str(p), search_pattern))
 
         filelist = [str(f) for f in p.glob(search_pattern) if f.is_file()]
         filelist = sorted(filelist)

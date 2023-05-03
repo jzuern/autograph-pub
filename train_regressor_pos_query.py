@@ -651,7 +651,7 @@ def main():
                                               max_num_samples=100000)
     dataset_val = SuccessorRegressorDataset(params=params,
                                             path=val_path,
-                                            split='val',
+                                            split='eval',
                                             max_num_samples=1000)
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,
