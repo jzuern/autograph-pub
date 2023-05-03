@@ -1,21 +1,23 @@
 export WANDB_API_KEY=8eca0f0d4e3d49c3728c9aa0e00b316c2d80012f
 export NUM_GPUS=2
-export DATASET_NAME=pittsburgh-2604
+export DATASET_NAME=all-3004
 
 
 # TrackletNet gt-supervised
-WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
+CUDA_VISIBLE_DEVICES=0,1 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target full \
   --num_gpus $NUM_GPUS \
-  --dataset_name $DATASET_NAME/lanegraph -d
+  --city Austin \
+  --dataset_name $DATASET_NAME/lanegraph &
 
 # TrackletNet tracklet-supervised
-WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
+CUDA_VISIBLE_DEVICES=2,3 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target full \
   --num_gpus $NUM_GPUS \
-  --dataset_name $DATASET_NAME/tracklets_joint -d
+  --city Austin \
+  --dataset_name $DATASET_NAME/tracklets_joint &
 
 
 

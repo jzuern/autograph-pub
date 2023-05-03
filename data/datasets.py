@@ -112,6 +112,7 @@ class SuccessorRegressorDataset(torch.utils.data.Dataset):
         self.sdf_files, self.angles_files, self.rgb_files, self.pos_enc_files, self.drivable_gt_files = zip(*c)
 
         if max_num_samples is not None:
+            print("Limiting number of samples to {}".format(max_num_samples))
             self.sdf_files = self.sdf_files[0:max_num_samples]
             self.angles_files = self.angles_files[0:max_num_samples]
             self.rgb_files = self.rgb_files[0:max_num_samples]

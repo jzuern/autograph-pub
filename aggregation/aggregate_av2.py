@@ -842,11 +842,14 @@ if __name__ == "__main__":
     graph_files = glob(os.path.join(args.urbanlanegraph_root, "{}/tiles/*/*.gpickle".format(city_name)))
     G_tiles = []
     for graph_file in graph_files:
-        G_tiles.append(nx.read_gpickle(graph_file))
+        with open(graph_file, 'rb') as f:
+            G_tile = pickle.load(f)
+        G_tiles.append(G_tile)
 
     # join all tiles
     G_annot_ = nx.DiGraph()
     for G_tile in G_tiles:
+
         G_annot_ = nx.union(G_annot_, G_tile, rename=("G", "H"))
 
     viz_file = os.path.join(args.urbanlanegraph_root, "{}/{}-viz-tracklets.png".format(city_name, city_name))

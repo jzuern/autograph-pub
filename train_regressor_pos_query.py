@@ -547,7 +547,7 @@ def main():
     parser.add_argument('--inference', action='store_true', help="perform inference instead of training")
     parser.add_argument('--full-checkpoint', type=str, default=None, help="path to full checkpoint for inference")
     parser.add_argument('--num_gpus', type=int, default=1, help="number of gpus to use")
-
+    parser.add_argument('--city', type=str, default=None, help="city to use for training")
 
     opt = parser.parse_args()
 
@@ -654,12 +654,13 @@ def main():
                                  weight_decay=float(params.model.weight_decay),
                                  betas=(params.model.beta_lo, params.model.beta_hi))
 
-    train_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
-    val_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "eval", "*")
-    #test_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "test", "*")
+    train_path = os.path.join(params.paths.dataroot, opt.dataset_name, opt.city, "train", "*")  # .../exp-name/city/split/branch-straight/*
+    val_path = os.path.join(params.paths.dataroot, opt.dataset_name, opt.city, "eval", "*")
+    #test_path = os.path.join(params.paths.dataroot, opt.dataset_name, opt.city, "test", "*")
 
     dataset_train = SuccessorRegressorDataset(params=params,
                                               path=train_path,
+                                              max_num_samples=100000,
                                               split='train',
                                               frac_branch=1,
                                               frac_straight=1)
