@@ -648,7 +648,7 @@ def main():
     dataset_train = SuccessorRegressorDataset(params=params,
                                               path=train_path,
                                               split='train',
-                                              max_num_samples=100000)
+                                              max_num_samples=10000000)
     dataset_val = SuccessorRegressorDataset(params=params,
                                             path=val_path,
                                             split='eval',

@@ -32,7 +32,7 @@ class TrajectoryDatasetAV2(torch_geometric.data.Dataset):
 
         self.city_name = "austin"
 
-        self.sat_image = np.asarray(Image.open("/data/lane-segmentation/woven-data/original/Austin_extended.png"))
+        self.sat_image = np.asarray(Image.open("/data/lane-segmentation/woven-data/original/austin_extended.png"))
 
         if os.path.exists("scenario_files.txt"):
             print("Loading scenario files from file scenario_files.txt")

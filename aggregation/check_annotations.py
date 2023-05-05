@@ -2,7 +2,7 @@ from glob import glob
 import cv2
 import matplotlib.pyplot as plt
 
-annotation_files = glob('/data/autograph/2402/austin/train/Austin-*-masks.png')
+annotation_files = glob('/data/autograph/2402/austin/train/austin-*-masks.png')
 
 frac_values = []
 

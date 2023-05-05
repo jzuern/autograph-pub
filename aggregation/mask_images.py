@@ -5,12 +5,12 @@ import cv2
 
 
 city_names = [
-    # "PaloAlto",
-    # "Austin",
-    # "Detroit",
-    # "Washington",
-    # "Pittsburgh",
-    "Miami",
+    # "paloalto",
+    # "austin",
+    # "detroit",
+    # "washington",
+    # "pittsburgh",
+    "miami",
 ]
 
 

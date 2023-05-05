@@ -14,7 +14,7 @@ if __name__ == "__main__":
 
     city_name = "austin"
 
-    #sat_image = np.asarray(Image.open("/data/lanegraph/woven-data/Austin.png"))
+    #sat_image = np.asarray(Image.open("/data/lanegraph/woven-data/austin.png"))
     roi_xxyy = np.array([16800, 17300, 35200, 35600])
     #roi_xxyy = np.array([0, 40000, 0, 40000])
     #sat_image = sat_image[roi_xxyy[2]:roi_xxyy[3], roi_xxyy[0]:roi_xxyy[1], :]

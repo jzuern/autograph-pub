@@ -334,8 +334,6 @@ def process_samples(args, city_name, trajectories_vehicles_, trajectories_ped_, 
                             continue
 
 
-
-
                     do_debugging = False
                     if do_debugging:
                         sat_image_crop_viz = cv2.cvtColor(sat_image_crop, cv2.COLOR_BGR2RGB)
@@ -680,17 +678,15 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG, filename='aggregate_av2.log', filemode='w')
 
     out_path_root = args.out_path_root
-    city_name = args.city_name.capitalize()
-    if city_name == "Paloalto":
-        city_name = "PaloAlto"
+    city_name = args.city_name
 
     city_name_dict = {
-        "PIT": "Pittsburgh",
-        "MIA": "Miami",
-        "ATX": "Austin",
-        "WDC": "Washington",
-        "PAO": "PaloAlto",
-        "DTW": "Detroit",
+        "PIT": "pittsburgh",
+        "MIA": "miami",
+        "ATX": "austin",
+        "WDC": "washington",
+        "PAO": "paloalto",
+        "DTW": "detroit",
     }
 
     export_final = args.export_final
@@ -729,11 +725,11 @@ if __name__ == "__main__":
                 print("Error loading scenario: {}".format(scenario_path))
                 continue
 
-            if city_name == "PaloAlto":
+            if city_name == "paloalto":
                 city_name_log = "palo-alto"
-            elif city_name == "Washington":
+            elif city_name == "washington":
                 city_name_log = "washington-dc"
-            elif city_name == "Detroit":
+            elif city_name == "detroit":
                 city_name_log = "dearborn"
             else:
                 city_name_log = city_name

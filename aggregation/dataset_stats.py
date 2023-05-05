@@ -2,6 +2,9 @@ import os
 
 # Get stats of dataset (e.g. number of images, number of classes, etc.)
 
+cities = ['austin', 'detroit', 'miami', 'paloalto', 'pittsburgh', 'washington']
+sources = ['tracklets_raw', 'tracklets_joint', 'lanegraph']
+
 
 root_dir = '/data/autograph/all-3004/'
 
@@ -32,18 +35,8 @@ branching_list = [f for f in filelist if 'branching' in f]
 straight_list = [f for f in filelist if 'straight' in f]
 
 
-# get each city:
-austin_list = [f for f in filelist if 'austin' in f]
-detroit_list = [f for f in filelist if 'detroit' in f]
-miami_list = [f for f in filelist if 'miami' in f]
-paloalto_list = [f for f in filelist if 'paloalto' in f]
-pittsburgh_list = [f for f in filelist if 'pittsburgh' in f]
-washington_list = [f for f in filelist if 'washington' in f]
-
-
-# print stats
-
 print("Stats for directory: {}\n".format(root_dir))
+
 print('Number of train images: {} ({:.2f} %)'.format(len(train_list), len(train_list) / len(filelist) * 100))
 print('Number of eval images: {} ({:.2f} %)'.format(len(eval_list), len(eval_list) / len(filelist) * 100))
 print('Number of test images: {} ({:.2f} %)\n'.format(len(test_list), len(test_list) / len(filelist) * 100))
@@ -53,14 +46,21 @@ print('Number of tracklets_joint: {} ({:.2f} %)'.format(len(tracklets_joint_list
 print('Number of lanegraph: {} ({:.2f} %)\n'.format(len(lanegraph_list), len(lanegraph_list) / len(filelist) * 100))
 
 print('Number of branching: {} ({:.2f} %)'.format(len(branching_list), len(branching_list) / len(filelist) * 100))
-print('Number of straight: {} ({:.2f} %)\n'.format(len(straight_list), len(straight_list) / len(filelist) * 100))
+print('Number of straight: {} ({:.2f} %)\n\n'.format(len(straight_list), len(straight_list) / len(filelist) * 100))
 
-print('Number of austin: {} ({:.2f} %)'.format(len(austin_list), len(austin_list) / len(filelist) * 100))
-print('Number of detroit: {} ({:.2f} %)'.format(len(detroit_list), len(detroit_list) / len(filelist) * 100))
-print('Number of miami: {} ({:.2f} %)'.format(len(miami_list), len(miami_list) / len(filelist) * 100))
-print('Number of paloalto: {} ({:.2f} %)'.format(len(paloalto_list), len(paloalto_list) / len(filelist) * 100))
-print('Number of pittsburgh: {} ({:.2f} %)'.format(len(pittsburgh_list), len(pittsburgh_list) / len(filelist) * 100))
-print('Number of washington: {} ({:.2f} %)'.format(len(washington_list), len(washington_list) / len(filelist) * 100))
+
+# get each city:
+
+for city in cities:
+    city_list = [f for f in filelist if city in f]
+    print('Number of {}: {} ({:.2f} %)'.format(city, len(city_list), len(city_list) / len(filelist) * 100))
+
+
+    for source in sources:
+        source_list = [f for f in city_list if source in f]
+        print('     Number of {} {}: {} ({:.2f} %)'.format(city, source, len(source_list), len(source_list) / len(filelist) * 100))
+
+
 
 
 

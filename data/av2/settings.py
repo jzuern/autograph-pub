@@ -54,27 +54,27 @@ def kabsch_umeyama(A, B):
 
 def get_transform_params(city_name):
     if "pittsburgh" in city_name:
-        print("Using Pittsburgh transform params")
+        print("Using pittsburgh transform params")
         points_shapefile = coordinates_dict["PIT"]["points_shapefile"]
         points_image = coordinates_dict["PIT"]["points_image"]
     elif "miami" in city_name:
-        print("Using Miami transform params")
+        print("Using miami transform params")
         points_shapefile = coordinates_dict["MIA"]["points_shapefile"]
         points_image = coordinates_dict["MIA"]["points_image"]
     elif "detroit" in city_name:
-        print("Using Detroit transform params")
+        print("Using detroit transform params")
         points_shapefile = coordinates_dict["DTW"]["points_shapefile"]
         points_image = coordinates_dict["DTW"]["points_image"]
     elif "palo" in city_name:
-        print("Using PaloAlto transform params")
+        print("Using paloalto transform params")
         points_shapefile = coordinates_dict["PAO"]["points_shapefile"]
         points_image = coordinates_dict["PAO"]["points_image"]
     elif "washington" in city_name:
-        print("Using Washington transform params")
+        print("Using washington transform params")
         points_shapefile = coordinates_dict["WDC"]["points_shapefile"]
         points_image = coordinates_dict["WDC"]["points_image"]
     elif "austin" in city_name:
-        print("Using Austin transform params")
+        print("Using austin transform params")
         points_shapefile = coordinates_dict["ATX"]["points_shapefile"]
         points_image = coordinates_dict["ATX"]["points_image"]
     else:
@@ -211,7 +211,7 @@ coordinates_dict = {
 
 
 city_split_coordinates_dict = \
-{'Austin': {'eval': [[14021, 51605, 19021, 56605],
+{'austin': {'eval': [[14021, 51605, 19021, 56605],
                      [34021, 46605, 39021, 51605]],
             'test': [[29021, 46605, 34021, 51605],
                      [14021, 56605, 19021, 61605]],
@@ -271,7 +271,7 @@ city_split_coordinates_dict = \
                       [-978, 41605, 4022, 46605],
                       [14021, 36605, 19021, 41605],
                       [24021, 36605, 29021, 41605]]},
- 'Detroit': {'eval': [[10700, 35709, 15700, 40709],
+ 'detroit': {'eval': [[10700, 35709, 15700, 40709],
                       [25700, 30709, 30700, 35709]],
              'test': [[45700, 25709, 50700, 30709],
                       [10700, 30709, 15700, 35709]],
@@ -315,7 +315,7 @@ city_split_coordinates_dict = \
                        [30700, 30709, 35700, 35709],
                        [20700, 35709, 25700, 40709],
                        [700, 25709, 5700, 30709]]},
- 'Miami': {'eval': [[46863, 3400, 51863, 8400], [41863, 18400, 46863, 23400]],
+ 'miami': {'eval': [[46863, 3400, 51863, 8400], [41863, 18400, 46863, 23400]],
            'test': [[1863, 43400, 6863, 48400], [21863, 48400, 26863, 53400]],
            'train': [[66863, 8400, 71863, 13400],
                      [36863, 23400, 41863, 28400],
@@ -396,7 +396,7 @@ city_split_coordinates_dict = \
                      [81863, 3400, 86863, 8400],
                      [6863, 38400, 11863, 43400],
                      [41863, 8400, 46863, 13400]]},
- 'PaloAlto': {'eval': [[35359, 38592, 40359, 43592],
+ 'paloalto': {'eval': [[35359, 38592, 40359, 43592],
                        [25359, 23592, 30359, 28592]],
               'test': [[30359, 13592, 35359, 18592],
                        [15359, 8592, 20359, 13592]],
@@ -441,7 +441,7 @@ city_split_coordinates_dict = \
                         [35359, 43592, 40359, 48592],
                         [35359, 28592, 40359, 33592],
                         [25359, 38592, 30359, 43592]]},
- 'Pittsburgh': {'eval': [[2706, 31407, 7706, 36407],
+ 'pittsburgh': {'eval': [[2706, 31407, 7706, 36407],
                          [27706, 11407, 32706, 16407]],
                 'test': [[12706, 31407, 17706, 36407],
                          [47706, 26407, 52706, 31407]],
@@ -498,7 +498,7 @@ city_split_coordinates_dict = \
                           [12706, 16407, 17706, 21407],
                           [42706, 11407, 47706, 16407],
                           [22706, 21407, 27706, 26407]]},
- 'Washington': {'eval': [[36634, 59625, 41634, 64625],
+ 'washington': {'eval': [[36634, 59625, 41634, 64625],
                          [41634, 69625, 46634, 74625]],
                 'test': [[36634, 69625, 41634, 74625]],
                 'train': [[16634, 49625, 21634, 54625],

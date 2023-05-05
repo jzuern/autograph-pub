@@ -5,7 +5,7 @@ export DATASET_NAME=all-3004
 CUDA_VISIBLE_DEVICES=0,1 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target full \
-  --dataset_name $DATASET_NAME/lanegraph --city Austin&
+  --dataset_name $DATASET_NAME/lanegraph --city austin&
 
 sleep 1
 
@@ -13,7 +13,7 @@ sleep 1
 CUDA_VISIBLE_DEVICES=2,3 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target full \
-  --dataset_name $DATASET_NAME/tracklets_raw --city Austin&
+  --dataset_name $DATASET_NAME/tracklets_raw --city austin&
 
 
 

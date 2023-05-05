@@ -103,10 +103,10 @@ class AerialDriver(object):
 
         #     # Crop (horizontal, vertical)
         #
-        #     # PaloAlto - 1
+        #     # paloalto - 1
         #     # center = [18082, 29236]
         #     # delta = [4000, 4000]
-        #     # Austin - 1
+        #     # austin - 1
         #     center = [43200, 21872]  # horizontal, vertical
         #     delta = [4000, 4000]
         #     self.aerial_image = self.aerial_image[center[1] - delta[1]//2:center[1] + delta[1]//2,
@@ -571,9 +571,9 @@ class AerialDriver(object):
 
     def drive_freely(self):
 
-        if self.step > 10:
-            self.done = True
-            return
+        # if self.step > 10:
+        #     self.done = True
+        #     return
 
         fps = 1 / (time.time() - self.time)
         self.time = time.time()
@@ -744,7 +744,6 @@ class AerialDriver(object):
 
 
         # loop over all successor edges to find future poses
-
         for edge in succ_edges:
 
             num_points_in_edge = len(edge["pts"])
@@ -805,31 +804,24 @@ class AerialDriver(object):
                         self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
                         self.G_agg_naive.add_edge(node_current_pose, node_edge_start)
 
-
                     # add G_agg-edge from edge end to future pose start
-
+                    closest_distance = 100000
+                    closest_edge = None
                     for inner_edge in succ_edges:
-                        if edge == inner_edge:
+                        distance = np.linalg.norm(edge["pts"][0] - inner_edge["pts"][-1])
+                        if distance < 1e-3: # same edge
                             continue
+                        if distance < closest_distance and distance < 100:
+                            closest_distance = distance
+                            closest_edge = inner_edge
 
-                        print(edge["pts"][0] - inner_edge["pts"][-1])
-
-                        # if edge["pts"][0] == inner_edge["pts"][-1]:
-                        #
-                        #     print("     adding edge from edge end to future pose start")
-                        #
-                        #     pos_start = nx.get_node_attributes(G_current_global, "pos")[inner_edge[1]]
-                        #     pos_end = nx.get_node_attributes(G_current_global, "pos")[edge[0]]
-                        #
-                        #     # if np.linalg.norm(pos_end - pos_start) < 50:
-                        #
-                        #     node_start = (int(pos_start[0]), int(pos_start[1]))
-                        #     node_end = (int(pos_end[0]), int(pos_end[1]))
-                        #     self.G_agg_naive.add_node(node_start, pos=pos_start)
-                        #     self.G_agg_naive.add_node(node_end, pos=pos_end)
-                        #     self.G_agg_naive.add_edge(node_start, node_end)
-
-
+                    if closest_edge is not None:
+                        if len(closest_edge["pts"]) > edge_end_idx:
+                            print("     adding edge from edge end to future pose start")
+                            pos_start = closest_edge["pts"][edge_end_idx]
+                            node_start = (int(pos_start[0]), int(pos_start[1]))
+                            self.G_agg_naive.add_node(node_start, pos=pos_start)
+                            self.G_agg_naive.add_edge(node_start, node_edge_start)
                     break
 
 
@@ -915,11 +907,11 @@ class AerialDriver(object):
 if __name__ == "__main__":
     driver = AerialDriver(debug=False)
 
-    driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # (Austin only, BIG)
+    driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # (austin only, BIG)
                       type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # (Austin only, BIG)
+    driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # (austin only, BIG)
                       type="successor")
-    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-dataset-dev/Austin/tiles/eval/Austin_83_34021_46605.png")
+    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-dataset-dev/austin/tiles/eval/austin_83_34021_46605.png")
 
     while True:
         driver.drive_freely()

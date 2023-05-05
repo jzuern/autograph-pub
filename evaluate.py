@@ -6,12 +6,12 @@ from urbanlanegraph_evaluator.utils import adjust_node_positions
 
 
 city_names = [
-    "Austin",
-    "Detroit",
-    "Miami",
-    "PaloAlto",
-    "Pittsburgh",
-    "Washington"
+    "austin",
+    "detroit",
+    "miami",
+    "paloalto",
+    "pittsburgh",
+    "washington"
 ]
 
 
