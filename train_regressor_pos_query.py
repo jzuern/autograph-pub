@@ -132,13 +132,8 @@ class Trainer():
 
         self.model.train()
 
-
-
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
-
-            if step > 100:
-                break
 
             if torch.all(data["rgb"][0, 0] == torch.zeros([256, 256])):
                 print("skip in train loop")
@@ -396,7 +391,11 @@ class Trainer():
 
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
-            pos_enc = data["pos_enc"].cuda()
+
+            if torch.all(data["rgb"][0, 0] == torch.zeros([256, 256])):
+                print("skip in eval loop")
+                continue
+
             rgb = data["rgb"].cuda()
 
             with torch.no_grad():
