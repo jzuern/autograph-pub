@@ -398,21 +398,24 @@ class Trainer():
 
             rgb = data["rgb"].cuda()
 
-            with torch.no_grad():
-                (pred, _) = self.model_full(rgb)  # get from model
-                pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
-                pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
-                pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
+            if self.model_full is not None:
+                with torch.no_grad():
+                    (pred, _) = self.model_full(rgb)  # get from model
+                    pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+                    pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
+                    pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
-            if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
-                # in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+                    # in_tensor = torch.cat([rgb, pos_enc], dim=1)
+                    in_tensor = rgb
+                elif self.params.input_layers == "rgb+drivable":
+                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
+                    in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1)], dim=1)
+                elif self.params.input_layers == "rgb+drivable+angles":
+                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+                    in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+            else:
                 in_tensor = rgb
-            elif self.params.input_layers == "rgb+drivable":
-                # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
-                in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1)], dim=1)
-            elif self.params.input_layers == "rgb+drivable+angles":
-                # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
-                in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1), pred_angles], dim=1)
 
             target_succ = data["mask_successor"].cuda()
 

@@ -13,6 +13,7 @@ import matplotlib
 from tqdm import tqdm
 import time
 import pickle
+import glob
 
 from aggregation.utils import similarity_check, out_of_bounds_check, visualize_graph, AngleColorizer
 from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
@@ -23,7 +24,7 @@ keyboard = Controller()
 
 # SETTINGS
 
-skeleton_threshold = 0.05  # threshold for skeletonization
+skeleton_threshold = 0.1  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
 write_every = 10            # write to disk every n steps
@@ -35,18 +36,23 @@ threshold_px = 30
 threshold_rad = 0.2
 closest_lat_thresh = 30
 
+init_poses = {
+    "austin_83_34021_46605": np.array([1163, 2982, -2.69]),
+    "pittsburgh_36_27706_11407": np.array([600, 3120, np.pi])
+}
 
 
 class AerialDriver(object):
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, input_layers=None, tile_id=None):
         self.aerial_image = None
-        self.init_pose = np.array([1163, 2982, -2.69])
+        self.init_pose = init_poses[tile_id]
         self.pose = self.init_pose.copy()
         self.current_crop = None
         self.model = None
         self.time = time.time()
         self.debug = debug
 
+        self.input_layers = input_layers
         self.crop_shape = (256, 256)
         self.graphs = []  # list of graphs from each step
 
@@ -65,7 +71,7 @@ class AerialDriver(object):
         self.done = False # flag to indicate end of episode
 
 
-    def load_model(self, model_path, type=None):
+    def load_model(self, model_path, type=None, input_layers="rgb"):
 
         state_dict = torch.load(model_path)
         new_state_dict = OrderedDict()
@@ -84,8 +90,17 @@ class AerialDriver(object):
             self.model_full.eval()
 
         elif type == "successor":
+            if input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+                num_in_channels = 3
+            elif input_layers == "rgb+drivable":
+                num_in_channels = 4
+            elif input_layers == "rgb+drivable+angles":
+                num_in_channels = 6
+            else:
+                raise NotImplementedError
+
             self.model_succ = DeepLabv3Plus(models.resnet101(pretrained=True),
-                                            num_in_channels=9,
+                                            num_in_channels=num_in_channels,
                                             num_classes=1).cuda()
             self.model_succ.load_state_dict(new_state_dict)
             self.model_succ.eval()
@@ -257,7 +272,7 @@ class AerialDriver(object):
         self.canvas_angles[info_available] = warped_angles[info_available]
 
         canvas_viz = cv2.addWeighted(self.aerial_image, 0.5, self.canvas_angles, 0.5, 0)
-        # cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_angle_canvas.png".format(self.step), canvas_viz)
+        # cv2.imwrite("/home/zuern/Desktop/tmp/other/{}-{:04d}_angle_canvas.png".format(self.tile_id, self.step), canvas_viz)
 
         # resize to smaller
         # canvas_viz = cv2.resize(canvas_viz, (1000, 1000))
@@ -298,19 +313,15 @@ class AerialDriver(object):
         rgb_pose_viz = rgb_pose_viz[y1:y2, x1:x2]
 
         # cv2.imshow("rgb_pose_viz", rgb_pose_viz)
-        cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_rgb_pose_viz.png".format(self.step), rgb_pose_viz)
+        cv2.imwrite("/home/zuern/Desktop/tmp/other/{}-{:04d}_rgb_pose_viz.png".format(self.tile_id, self.step), rgb_pose_viz)
 
     def make_step(self):
 
         """Run one step of the driving loop."""
 
         self.pose_history = np.concatenate([self.pose_history, [self.pose]])
-
-        pos_encoding = self.generate_pos_encoding()
         rgb = self.crop_satellite_at_pose(self.pose)
-
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
-        pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
 
         with torch.no_grad():
             (pred, _) = self.model_full(rgb_torch)
@@ -322,8 +333,14 @@ class AerialDriver(object):
             pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
 
-        in_tensor = torch.cat([rgb_torch, pos_encoding_torch, pred_drivable, pred_angles], dim=1)
-        in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
+        if self.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+            in_tensor = rgb_torch
+        elif self.input_layers == "rgb+drivable":
+            in_tensor = torch.cat([rgb_torch, pred_drivable], dim=1)
+        elif self.input_layers == "rgb+drivable+angles":
+            in_tensor = torch.cat([rgb_torch, pred_drivable, pred_angles], dim=1)
+        else:
+            raise ValueError("Unknown input layers: ", self.input_layers)
 
         (pred_succ, features) = self.model_succ(in_tensor)
         pred_succ = torch.nn.functional.interpolate(pred_succ,
@@ -394,7 +411,7 @@ class AerialDriver(object):
             axarr[5].title.set_text('skeleton')
             plt.show()
 
-        cv2.imwrite("/home/zuern/Desktop/tmp/other/{:04d}_pred_succ_viz.png".format(self.step), pred_succ_viz)
+        cv2.imwrite("/home/zuern/Desktop/tmp/other/{}-{:04d}_pred_succ_viz.png".format(self.tile_id, self.step), pred_succ_viz)
 
         self.step += 1
 
@@ -431,7 +448,6 @@ class AerialDriver(object):
                                                 w_decay=False,
                                                 remove=False)
 
-
         # visualize_graph(G_pred_agg, ax=ax[1])
         # ax[1].set_title("Aggregated Graph")
         # plt.show()
@@ -447,6 +463,32 @@ class AerialDriver(object):
             yaw += 2 * np.pi
         return yaw
 
+
+    def visualize_write_G_single(self, graphs, name="G"):
+
+        G_agg_viz = self.aerial_image.copy()
+        G_agg_viz = G_agg_viz // 2
+
+        # history colors linearly interpolated
+        colors = matplotlib.cm.get_cmap('jet')(np.linspace(0, 1, len(graphs)))
+        colors = (colors[:, 0:3] * 255).astype(np.uint8)
+        colors = [tuple(color.tolist()) for color in colors]
+
+        for i, graph in enumerate(graphs):
+
+            if len(graph.edges) == 0:
+                continue
+
+            for edge in graph.edges:
+                # edge as arrow
+                start = graph.nodes[edge[0]]["pos"]
+                end = graph.nodes[edge[1]]["pos"]
+                start = (int(start[0]), int(start[1]))
+                end = (int(end[0]), int(end[1]))
+                cv2.arrowedLine(G_agg_viz, start, end, color=colors[i], thickness=1, line_type=cv2.LINE_AA)
+
+
+        cv2.imwrite("/home/zuern/Desktop/autograph/tmp/G_agg/{}-{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
 
     def visualize_write_G_agg(self, G_agg, name="G_agg"):
 
@@ -490,7 +532,7 @@ class AerialDriver(object):
 
             cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
-        cv2.imwrite("/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}_viz.png".format(self.step, name), G_agg_viz)
+        cv2.imwrite("/home/zuern/Desktop/autograph/tmp/G_agg/{}-{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
 
         margin = 400
         G_agg_viz = G_agg_viz[int(self.pose[1]) - margin:int(self.pose[1]) + margin,
@@ -499,7 +541,7 @@ class AerialDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        pickle.dump(self.G_agg_naive, open("/home/zuern/Desktop/autograph/tmp/G_agg/{:04d}_{}.pickle".format(self.step, name), "wb"))
+        pickle.dump(self.G_agg_naive, open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
 
 
     def drive_keyboard(self, key):
@@ -571,9 +613,9 @@ class AerialDriver(object):
 
     def drive_freely(self):
 
-        # if self.step > 10:
-        #     self.done = True
-        #     return
+        if self.step > 200:
+            self.done = True
+            return
 
         fps = 1 / (time.time() - self.time)
         self.time = time.time()
@@ -850,6 +892,7 @@ class AerialDriver(object):
         if self.step % write_every == 0:
             self.render_poses_in_aerial()
             self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
+            self.visualize_write_G_single(self.graphs, "G_single")
 
             # G_agg_cvpr = driver.aggregate_graphs(self.graphs)
 
@@ -897,21 +940,40 @@ class AerialDriver(object):
         cv2.destroyAllWindows()
 
         # write self.graphs to disk
-        with open("/home/zuern/Desktop/autograph/tmp/G_agg/graphs_all.pickle", "wb") as f:
+        with open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-graphs_all.pickle".format(self.tile_id), "wb") as f:
             pickle.dump(self.graphs, f)
 
-        with open("/home/zuern/Desktop/autograph/tmp/G_agg/G_agg_naive_all.pickle", "wb") as f:
+        with open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-G_agg_naive_all.pickle".format(self.tile_id), "wb") as f:
             pickle.dump(self.G_agg_naive, f)
 
 
 if __name__ == "__main__":
-    driver = AerialDriver(debug=False)
 
-    driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # (austin only, BIG)
+    input_layers = "rgb+drivable+angles"
+
+
+    # tile_id = "austin_83_34021_46605"
+    tile_id = "pittsburgh_36_27706_11407"
+
+
+
+    driver = AerialDriver(debug=False, input_layers=input_layers, tile_id=tile_id)
+
+    # driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # (austin only)
+    #                   type="full")
+    # driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # (austin only)
+    #                   type="successor",
+    #                   )
+
+    driver.load_model(model_path="/data/autograph/checkpoints/civilized-bothan-187/e-150.pth",  # (all-3004)
                       type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # (austin only, BIG)
-                      type="successor")
-    driver.load_satellite(impath="/data/lanegraph/urbanlanegraph-dataset-dev/austin/tiles/eval/austin_83_34021_46605.png")
+    driver.load_model(model_path="/data/autograph/checkpoints/jumping-spaceship-188/e-030.pth",  # (all-3004)
+                      type="successor",
+                      input_layers=input_layers,
+                      )
+
+
+    driver.load_satellite(impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
 
     while True:
         driver.drive_freely()

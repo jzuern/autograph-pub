@@ -18,7 +18,7 @@ export DATASET_NAME=all-3004
 #
 
 # SuccNet tracklets_raw supervised (no TrackletNet)
-CUDA_VISIBLE_DEVICES=0 =$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
+CUDA_VISIBLE_DEVICES=0 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target successor \
   --input_layers rgb \
