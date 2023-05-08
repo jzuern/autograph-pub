@@ -135,9 +135,6 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
-            # if step == 5:
-            #     break
-
             if torch.all(data["rgb"][0, 0] == torch.zeros([256, 256])):
                 print("skip in train loop")
                 continue
