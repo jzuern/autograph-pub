@@ -38,7 +38,7 @@ closest_lat_thresh = 30
 
 init_poses = {
     "austin_83_34021_46605": np.array([1163, 2982, -2.69]),
-    "pittsburgh_36_27706_11407": np.array([600, 3120, np.pi])
+    "pittsburgh_36_27706_11407": np.array([1789, 2280, np.pi])
 }
 
 
@@ -613,9 +613,9 @@ class AerialDriver(object):
 
     def drive_freely(self):
 
-        if self.step > 200:
-            self.done = True
-            return
+        # if self.step > 200:
+        #     self.done = True
+        #     return
 
         fps = 1 / (time.time() - self.time)
         self.time = time.time()
@@ -983,27 +983,27 @@ if __name__ == "__main__":
 
 
 
-    # load files from disk
-    with open("/home/zuern/Desktop/autograph/tmp/G_agg/graphs_all.pickle", "rb") as f:
-        graphs = pickle.load(f)
-    with open("/home/zuern/Desktop/autograph/tmp/G_agg/G_agg_naive_all.pickle", "rb") as f:
-        G_agg_naive = pickle.load(f)
-
-    G_agg_cvpr = driver.aggregate_graphs(graphs)
-    driver.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
-    driver.visualize_write_G_agg(G_agg_naive, "G_agg_naive")
-
-
-    fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
-    img = cv2.cvtColor(driver.aerial_image, cv2.COLOR_BGR2RGB)
-    [ax.imshow(img) for ax in axarr]
-    axarr[0].set_title("g single")
-    axarr[1].set_title("G_agg_naive")
-    axarr[2].set_title("G_agg_cvpr")
-    [visualize_graph(g, axarr[0], node_color=np.random.rand(3), edge_color=np.random.rand(3)) for g in graphs]
-    visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
-    visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
-    plt.show()
+    # # load files from disk
+    # with open("/home/zuern/Desktop/autograph/tmp/G_agg/graphs_all.pickle", "rb") as f:
+    #     graphs = pickle.load(f)
+    # with open("/home/zuern/Desktop/autograph/tmp/G_agg/G_agg_naive_all.pickle", "rb") as f:
+    #     G_agg_naive = pickle.load(f)
+    #
+    # G_agg_cvpr = driver.aggregate_graphs(graphs)
+    # driver.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
+    # driver.visualize_write_G_agg(G_agg_naive, "G_agg_naive")
+    #
+    #
+    # fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+    # img = cv2.cvtColor(driver.aerial_image, cv2.COLOR_BGR2RGB)
+    # [ax.imshow(img) for ax in axarr]
+    # axarr[0].set_title("g single")
+    # axarr[1].set_title("G_agg_naive")
+    # axarr[2].set_title("G_agg_cvpr")
+    # [visualize_graph(g, axarr[0], node_color=np.random.rand(3), edge_color=np.random.rand(3)) for g in graphs]
+    # visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
+    # visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
+    # plt.show()
 
     exit()
 
