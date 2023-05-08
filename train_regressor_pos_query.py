@@ -135,6 +135,9 @@ class Trainer():
         train_progress = tqdm(self.dataloader_train)
         for step, data in enumerate(train_progress):
 
+            # if step == 5:
+            #     break
+
             if torch.all(data["rgb"][0, 0] == torch.zeros([256, 256])):
                 print("skip in train loop")
                 continue
@@ -175,13 +178,10 @@ class Trainer():
                     in_tensor = rgb
 
                 if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
-                    # in_tensor = torch.cat([rgb, pos_enc], dim=1)
                     in_tensor = rgb
                 elif self.params.input_layers == "rgb+drivable":
-                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
                     in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1)], dim=1)
                 elif self.params.input_layers == "rgb+drivable+angles":
-                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
                     in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1), pred_angles], dim=1)
 
                 target_succ = data["mask_successor"].cuda()
@@ -232,12 +232,13 @@ class Trainer():
                     cv2.imshow("pred_succ", pred_succ)
                     cv2.imshow("target_succ", target_succ)
 
-                    angles_pred_rad = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
-                    angles_pred_color = self.ac.angle_to_color(angles_pred_rad)
+                    if self.model_full is not None:
+                        angles_pred_rad = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+                        angles_pred_color = self.ac.angle_to_color(angles_pred_rad)
 
-                    pred_drivable = torch_to_cv2(pred_drivable)
-                    cv2.imshow("frozen pred_drivable", pred_drivable)
-                    cv2.imshow("frozen angles_pred_color", angles_pred_color)
+                        pred_drivable = torch_to_cv2(pred_drivable)
+                        cv2.imshow("frozen pred_drivable", pred_drivable)
+                        cv2.imshow("frozen angles_pred_color", angles_pred_color)
 
                 cv2.waitKey(1)
 
@@ -547,8 +548,7 @@ def main():
 
     parser.add_argument('--dataset_name', type=str, help="which dataset to use for training")
     parser.add_argument('--target', type=str, help="which target to use for training", choices=["full", "successor"])
-    parser.add_argument('--input_layers', type=str, help="which input layers to use for training",
-                        choices=["rgb", "rgb+drivable", "rgb+drivable+angles"])
+    parser.add_argument('--input_layers', type=str, help="which input layers to use for training", choices=["rgb", "rgb+drivable", "rgb+drivable+angles"])
     parser.add_argument('--inference', action='store_true', help="perform inference instead of training")
     parser.add_argument('--full-checkpoint', type=str, default=None, help="path to full checkpoint for inference")
     parser.add_argument('--city', type=str, default="all", help="city to use for training")
@@ -574,7 +574,7 @@ def main():
         wandb.init(
             entity='jannik-zuern',
             project='autograph-regressor',
-            notes='regressor',
+            notes='{}|{}|{}'.format(opt.dataset_name, opt.target, opt.input_layers),
             settings=wandb.Settings(start_method="fork"),
         )
         wandb.config.update(params.paths)
@@ -588,13 +588,10 @@ def main():
     elif opt.target == "successor":
         if opt.full_checkpoint is not None:
             if opt.input_layers == "rgb":   # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
-                # num_in_channels = 6
                 num_in_channels = 3
             elif opt.input_layers == "rgb+drivable":
-                # num_in_channels = 7
                 num_in_channels = 4
             elif opt.input_layers == "rgb+drivable+angles":
-                # num_in_channels = 9
                 num_in_channels = 6
             else:
                 raise ValueError("Unknown input layers: ", opt.input_layers)
@@ -654,7 +651,7 @@ def main():
     dataset_val = SuccessorRegressorDataset(params=params,
                                             path=val_path,
                                             split='eval',
-                                            max_num_samples=1000)
+                                            max_num_samples=2000)
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,
                                   num_workers=params.model.loader_workers,
