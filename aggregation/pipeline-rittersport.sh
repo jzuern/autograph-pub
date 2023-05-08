@@ -10,7 +10,7 @@ export PYTHONPATH=$PYTHONPATH:/home/zuern/self-supervised-graph
 
 # iterate over all cities
 #CITIES=(pittsburgh austin detroit paloalto washington miami)
-CITIES=(washington miami)
+CITIES=(austin paloalto miami)
 #SOURCES=(lanegraph tracklets_joint tracklets_raw)
 SOURCES=(tracklets_joint tracklets_raw)
 
@@ -27,10 +27,10 @@ run_train () {
           --out_path_root /data/autograph/all-3004/$SOURCE/$CITY\
           --urbanlanegraph_root /data/lanegraph/urbanlanegraph-dataset-dev\
           --source $SOURCE \
-          --max_num_samples 20000 \
+          --max_num_samples 5000 \
           --num_parallel $NUM_PARALLEL \
           --thread_id $tid &
-        sleep 200 # sleep to give time start generating
+        sleep 600 # sleep to give time start generating
       done
       wait
     done

@@ -4,7 +4,6 @@ import pprint
 from urbanlanegraph_evaluator.evaluator import GraphEvaluator
 from urbanlanegraph_evaluator.utils import adjust_node_positions
 
-
 city_names = [
     "austin",
     "detroit",
@@ -41,7 +40,7 @@ def evaluate_successor_lgp(graphs_gt, graphs_pred):
 
             print("Successor-LGP evaluating sample", sample_id)
 
-            if graphs_pred[city][split][sample_id] is None:
+            if not sample_id in graphs_pred[city][split]:
                 print("No prediction for sample", sample_id)
                 metrics_sample = {metric_name: 0.0 for metric_name in metric_names}
             else:
@@ -261,6 +260,9 @@ def evaluate(annotation_file, user_submission_file, phase_codename, **kwargs):
 
         # To display the results in the result file
         output["submission_result"] = output["result"][0]
+
+    else:
+        raise ValueError("Unknown phase codename: {}".format(phase_codename))
 
     return output
 

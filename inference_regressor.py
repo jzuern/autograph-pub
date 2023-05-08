@@ -5,31 +5,27 @@ from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 from collections import OrderedDict
 import torchvision.models as models
 from glob import glob
-import pprint
 from PIL import Image
-Image.MAX_IMAGE_PIXELS = 2334477275000
+Image.MAX_IMAGE_PIXELS = None
 import networkx as nx
 import pickle
-import matplotlib.pyplot as plt
 import os
-import random
-
+from evaluate import evaluate
+from tqdm import tqdm
+import pprint
 from driving.utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
 
 
-def generate_pos_encoding(crop_shape=(256, 256)):
-    q = [crop_shape[0] - 1,
-         crop_shape[1] // 2 - 1]
+class FormatPrinter(pprint.PrettyPrinter):
 
-    pos_encoding = np.zeros([crop_shape[0], crop_shape[1], 3], dtype=np.float32)
-    x, y = np.meshgrid(np.arange(crop_shape[1]), np.arange(crop_shape[0]))
-    pos_encoding[q[0], q[1], 0] = 1
-    pos_encoding[..., 1] = np.abs((x - q[1])) / crop_shape[1]
-    pos_encoding[..., 2] = np.abs((y - q[0])) / crop_shape[0]
-    pos_encoding = (pos_encoding * 255).astype(np.uint8)
-    pos_encoding = cv2.cvtColor(pos_encoding, cv2.COLOR_BGR2RGB)
+    def __init__(self, formats):
+        super(FormatPrinter, self).__init__()
+        self.formats = formats
 
-    return pos_encoding
+    def format(self, obj, ctx, maxlvl, lvl):
+        if type(obj) in self.formats:
+            return self.formats[type(obj)] % obj, 1, 0
+        return pprint.PrettyPrinter.format(self, obj, ctx, maxlvl, lvl)
 
 
 def visualize_graph(G, ax, aerial_image, node_color=np.array([255, 0, 142])/255., edge_color=np.array([255, 0, 142])/255.):
@@ -42,6 +38,7 @@ def visualize_graph(G, ax, aerial_image, node_color=np.array([255, 0, 142])/255.
                      with_labels=False,
                      node_size=5,
                      arrowsize=15.0, )
+
 
 def load_full_model(model_path):
     state_dict = torch.load(model_path)
@@ -63,7 +60,8 @@ def load_full_model(model_path):
 
     return model_full
 
-def load_succ_model(model_path):
+
+def load_succ_model(model_path, full_model=False, input_layers="rgb+drivable+angles"):
     state_dict = torch.load(model_path)
     new_state_dict = OrderedDict()
     for k, v in state_dict.items():
@@ -73,9 +71,20 @@ def load_succ_model(model_path):
             name = k
         new_state_dict[name] = v
 
+    if full_model is True:
+        if input_layers == "rgb":   # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+            num_in_channels = 3
+        elif input_layers == "rgb+drivable":
+            num_in_channels = 4
+        elif input_layers == "rgb+drivable+angles":
+            num_in_channels = 6
+        else:
+            raise ValueError("Unknown input layers: ", input_layers)
+    else:
+        num_in_channels = 3  # rgb
 
     model_succ = DeepLabv3Plus(models.resnet101(pretrained=True),
-                               num_in_channels=9,
+                               num_in_channels=num_in_channels,
                                num_classes=1).cuda()
     model_succ.load_state_dict(new_state_dict)
     model_succ.eval()
@@ -83,8 +92,6 @@ def load_succ_model(model_path):
     print("Model {} loaded".format(model_path))
 
     return model_succ
-
-
 
 
 def run_successor_lgp(picklefile):
@@ -95,37 +102,39 @@ def run_successor_lgp(picklefile):
     test_images = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*-rgb.png".format(split)))
     test_graphs = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*.gpickle".format(split)))
 
-    # shuffle jointly
-    c = list(zip(test_images, test_graphs))
-    random.shuffle(c)
-    test_images, test_graphs = zip(*c)
+    # full model
+    full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model tracklets
+    #full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model lanegraph
+
+    # succ model
+    succ_model = "/data/autograph/checkpoints/cosmic-feather-189/e-010.pth"         # tracklets_joint rgb
+    input_layers = "rgb"
+
+    # succ_model = "/data/autograph/checkpoints/jumping-spaceship-188/e-030.pth"      # tracklets_joint rgb+drivable+angles
+    # input_layers = "rgb+drivable+angles"
+
 
     # Load model
-    model_full = load_full_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth")
-    model_succ = load_succ_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth")
+    model_full = load_full_model(model_path=full_model_pth)
+    model_succ = load_succ_model(model_path=succ_model,
+                                 full_model=True,
+                                 input_layers=input_layers)
 
+    pred_dict = {}
 
+    for test_image, test_graph in tqdm(zip(test_images, test_graphs), total=len(test_images), desc="Testing samples"):
 
-    pos_encoding = generate_pos_encoding()
-    pos_encoding_torch = torch.from_numpy(pos_encoding).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
-
-
-    results_dict = {}
-
-
-    for test_image, test_graph in zip(test_images, test_graphs):
-
-        print("Loading sample: {}".format(test_image))
+        # print("Loading sample: {}".format(test_image))
 
         sample_id = os.path.basename(test_image).replace("-rgb.png", "")
 
         city_name = test_image.split("/")[-4]
 
-        if city_name not in results_dict:
-            results_dict[city_name] = {}
+        if city_name not in pred_dict:
+            pred_dict[city_name] = {}
 
-        if split not in results_dict[city_name]:
-            results_dict[city_name][split] = {}
+        if split not in pred_dict[city_name]:
+            pred_dict[city_name][split] = {}
 
         img = Image.open(test_image)
         img = np.array(img)
@@ -146,8 +155,15 @@ def run_successor_lgp(picklefile):
             pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
             pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
-            in_tensor = torch.cat([rgb_torch, pos_encoding_torch, pred_drivable, pred_angles], dim=1)
-            in_tensor = torch.cat([in_tensor, in_tensor], dim=0)
+
+            if input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+                in_tensor = rgb_torch
+            elif input_layers == "rgb+drivable":
+                in_tensor = torch.cat([rgb_torch, pred_drivable], dim=1)
+            elif input_layers == "rgb+drivable+angles":
+                in_tensor = torch.cat([rgb_torch, pred_drivable, pred_angles], dim=1)
+            else:
+                raise ValueError("Unknown input layers: ", input_layers)
 
             (pred_succ, features) = model_succ(in_tensor)
             pred_succ = torch.nn.functional.interpolate(pred_succ,
@@ -167,8 +183,7 @@ def run_successor_lgp(picklefile):
         mapping = {n: i for i, n in enumerate(succ_graph.nodes)}
         succ_graph = nx.relabel_nodes(succ_graph, mapping)
 
-
-        results_dict[city_name][split][sample_id] = succ_graph
+        pred_dict[city_name][split][sample_id] = succ_graph
 
         # # Visualize
         # fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
@@ -177,11 +192,49 @@ def run_successor_lgp(picklefile):
         # visualize_graph(succ_graph, ax[1], aerial_image=img)
         # visualize_graph(gt_graph, ax[2], aerial_image=img, node_color='white', edge_color='white')
         # visualize_graph(succ_graph, ax[2], aerial_image=img)
+        # ax[1].imshow(pred_succ, vmin=0, alpha=0.5)
         # plt.show()
 
-    pickle.dump(results_dict, open(picklefile, "wb"))
+    pickle.dump(pred_dict, open(picklefile, "wb"))
 
 
 if __name__ == "__main__":
-    run_successor_lgp(picklefile='succ_lgp_eval_autograph.pickle')
 
+    split = "eval"
+
+    predictions_file = 'succ_lgp_eval_autograph.pickle'
+    run_successor_lgp(picklefile=predictions_file)
+
+    results_dict = evaluate(annotation_file="/home/zuern/lanegnn-dev/urbanlanegraph_evaluator/annotations_successor_lgp_eval.pickle",
+                            user_submission_file=predictions_file,
+                            phase_codename="phase_successor_lgp")
+
+    print("austin")
+    for k,v in results_dict['submission_result']["austin"][split]["avg"].items():
+        print("     {}: {:.3f}".format(k, v))
+
+    print("detroit")
+    for k,v in results_dict['submission_result']["detroit"][split]["avg"].items():
+        print("     {}: {:.3f}".format(k, v))
+
+    print("miami")
+    for k,v in results_dict['submission_result']["miami"][split]["avg"].items():
+        print("     {}: {:.3f}".format(k, v))
+
+    print("paloalto")
+    for k,v in results_dict['submission_result']["paloalto"][split]["avg"].items():
+        print("     {}: {:.3f}".format(k, v))
+
+    print("pittsburgh")
+    for k,v in results_dict['submission_result']["pittsburgh"][split]["avg"].items():
+        print("     {}: {:.3f}".format(k, v))
+
+    print("washington")
+    for k,v in results_dict['submission_result']["washington"][split]["avg"].items():
+        print("     {}: {:.3f}".format(k, v))
+
+
+
+    print("avg")
+    for k,v in results_dict['submission_result'][split]["avg"].items():
+        print("     {}: {:.3f}".format(k, v))
