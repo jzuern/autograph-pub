@@ -14,7 +14,7 @@ city_names = [
 ]
 
 
-def evaluate_successor_lgp(graphs_gt, graphs_pred):
+def evaluate_successor_lgp(graphs_gt, graphs_pred, split):
 
     '''Evaluate the successor graph prediction task.'''
 
@@ -29,7 +29,6 @@ def evaluate_successor_lgp(graphs_gt, graphs_pred):
                     ]
 
     metrics_all = {}
-    split = "eval"
 
     for city in city_names:
         metrics_all[city] = {}
@@ -38,7 +37,7 @@ def evaluate_successor_lgp(graphs_gt, graphs_pred):
         for sample_id in graphs_gt[city][split]:
             metrics_all[city][split][sample_id] = {}
 
-            print("Successor-LGP evaluating sample", sample_id)
+            # print("Successor-LGP evaluating sample", sample_id)
 
             if not sample_id in graphs_pred[city][split]:
                 print("No prediction for sample", sample_id)
@@ -81,7 +80,7 @@ def evaluate_successor_lgp(graphs_gt, graphs_pred):
     return metrics_all
 
 
-def evaluate_full_lgp(graphs_gt, graphs_pred):
+def evaluate_full_lgp(graphs_gt, graphs_pred, split):
 
     metric_names = ["TOPO Precision",
                     "TOPO Recall",
@@ -92,8 +91,6 @@ def evaluate_full_lgp(graphs_gt, graphs_pred):
                     ]
 
     metrics_all = {}
-    split = "eval"
-
     metrics_all[split] = {}
 
     for city in city_names:
@@ -149,11 +146,10 @@ def evaluate_full_lgp(graphs_gt, graphs_pred):
     return metrics_all
 
 
-def evaluate_planning(graphs_gt, graphs_pred):
+def evaluate_planning(graphs_gt, graphs_pred, split):
 
     metric_names = ["MMD", "MED", "SR"]
     metrics_all = {}
-    split = "eval"
 
     metrics_all[split] = {}
 
@@ -208,7 +204,7 @@ def evaluate_planning(graphs_gt, graphs_pred):
     return metrics_all
 
 
-def evaluate(annotation_file, user_submission_file, phase_codename, **kwargs):
+def evaluate(annotation_file, user_submission_file, phase_codename, split, **kwargs):
 
     with open(annotation_file, 'rb') as f:
         graphs_gt = pickle.load(f)
@@ -219,14 +215,12 @@ def evaluate(annotation_file, user_submission_file, phase_codename, **kwargs):
     output = {}
     if phase_codename == "phase_successor_lgp":
         print("%%%%%%%%%%%%%%%%%%%%%\n%%%%%%\tEvaluating for Phase: phase_successor_lgp\n%%%%%%%%%%%%%%%%%%%%%")
-        out_dict = evaluate_successor_lgp(graphs_gt, graphs_pred)
-
-        pprint.pprint(out_dict)
+        out_dict = evaluate_successor_lgp(graphs_gt, graphs_pred, split)
 
         # this goes to the leaderboard (average of all cities
-        metrics_successor = out_dict["eval"]["avg"]
+        metrics_successor = out_dict[split]["avg"]
 
-        output["result"] = [{"eval_split_succ": metrics_successor}]
+        output["result"] = [{"{}_split_succ".format(split): metrics_successor}]
 
         # To display the results in the result file (all cities)
         output["submission_result"] = out_dict
@@ -234,14 +228,12 @@ def evaluate(annotation_file, user_submission_file, phase_codename, **kwargs):
     elif phase_codename == "phase_full_lgp":
         print("%%%%%%%%%%%%%%%%%%%%%\n%%%%%%\tEvaluating for Phase: phase_full_lgp\n%%%%%%%%%%%%%%%%%%%%%")
 
-        out_dict = evaluate_full_lgp(graphs_gt, graphs_pred)
-
-        pprint.pprint(out_dict)
+        out_dict = evaluate_full_lgp(graphs_gt, graphs_pred, split)
 
         # the average over all cities for the eval split is this dict entry:
-        metrics_full = out_dict["eval"]["avg"]
+        metrics_full = out_dict[split]["avg"]
 
-        output["result"] = [{"eval_split_full": metrics_full}]
+        output["result"] = [{"{}_split_full".format(split): metrics_full}]
 
         # To display the results in the result file
         output["submission_result"] = output["result"][0]
@@ -249,14 +241,12 @@ def evaluate(annotation_file, user_submission_file, phase_codename, **kwargs):
     elif phase_codename == "phase_planning":
         print("%%%%%%%%%%%%%%%%%%%%%\n%%%%%%\tEvaluating for Phase: phase_planning\n%%%%%%%%%%%%%%%%%%%%%")
 
-        out_dict = evaluate_planning(graphs_gt, graphs_pred)
-
-        pprint.pprint(out_dict)
+        out_dict = evaluate_planning(graphs_gt, graphs_pred, split)
 
         # the average over all cities for the eval split is this dict entry:
-        metrics_planning = out_dict["eval"]["avg"]
+        metrics_planning = out_dict[split]["avg"]
 
-        output["result"] = [{"eval_split_planning": metrics_planning}]
+        output["result"] = [{"{}_split_planning".format(split): metrics_planning}]
 
         # To display the results in the result file
         output["submission_result"] = output["result"][0]
@@ -279,7 +269,8 @@ if __name__ == "__main__":
     # # Task: Full LGP, Eval Split
     results_dict = evaluate(annotation_file="annotations_full_lgp_eval.pickle",
                             user_submission_file="/home/zuern/Desktop/autograph/tmp/G_agg/0011_G_agg_cvpr.pickle",
-                            phase_codename="phase_full_lgp")
+                            phase_codename="phase_full_lgp",
+                            split="eval")
     #
     # # Task: Planning, Eval Split
     # results_dict = evaluate(annotation_file="annotations_full_lgp_eval.pickle",

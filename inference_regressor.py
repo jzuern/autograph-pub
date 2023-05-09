@@ -12,8 +12,11 @@ import pickle
 import os
 from evaluate import evaluate
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 import pprint
-from driving.utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
+from driving.utils import skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
+from random import shuffle
+import pandas as pd
 
 
 class FormatPrinter(pprint.PrettyPrinter):
@@ -36,8 +39,8 @@ def visualize_graph(G, ax, aerial_image, node_color=np.array([255, 0, 142])/255.
                      edge_color=node_color,
                      node_color=edge_color,
                      with_labels=False,
-                     node_size=5,
-                     arrowsize=15.0, )
+                     node_size=3,
+                     arrowsize=8.0, )
 
 
 def load_full_model(model_path):
@@ -94,37 +97,38 @@ def load_succ_model(model_path, full_model=False, input_layers="rgb+drivable+ang
     return model_succ
 
 
-def run_successor_lgp(picklefile):
-
-    split = "eval"
+def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, split):
 
     # Image folder
     test_images = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*-rgb.png".format(split)))
     test_graphs = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*.gpickle".format(split)))
+    # test_images = sorted(glob("//data/autograph/all-3004/lanegraph/pittsburgh/test/branching/*-rgb.png"))
+    # test_graphs = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*.gpickle".format(split)))
 
-    # full model
-    full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model tracklets
-    #full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model lanegraph
+    # shuffle(test_images)
 
-    # succ model
-    succ_model = "/data/autograph/checkpoints/cosmic-feather-189/e-010.pth"         # tracklets_joint rgb
-    input_layers = "rgb"
-
-    # succ_model = "/data/autograph/checkpoints/jumping-spaceship-188/e-030.pth"      # tracklets_joint rgb+drivable+angles
-    # input_layers = "rgb+drivable+angles"
-
+    # # jointly shuffle them
+    joint = list(zip(test_images, test_graphs))
+    np.random.shuffle(joint)
+    test_images, test_graphs = zip(*joint)
 
     # Load model
     model_full = load_full_model(model_path=full_model_pth)
-    model_succ = load_succ_model(model_path=succ_model,
+    model_succ = load_succ_model(model_path=succ_model_pth,
                                  full_model=True,
                                  input_layers=input_layers)
 
     pred_dict = {}
 
-    for test_image, test_graph in tqdm(zip(test_images, test_graphs), total=len(test_images), desc="Testing samples"):
+    images = []
+    images_succ = []
+    graphs_pred = []
+    graphs_gt = []
 
-        # print("Loading sample: {}".format(test_image))
+
+    for image_counter, (test_image, test_graph) in tqdm(enumerate(zip(test_images, test_graphs)),
+                                                        total=len(test_images),
+                                                        desc="Inference on samples"):
 
         sample_id = os.path.basename(test_image).replace("-rgb.png", "")
 
@@ -155,8 +159,7 @@ def run_successor_lgp(picklefile):
             pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
             pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
-
-            if input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+            if input_layers == "rgb":
                 in_tensor = rgb_torch
             elif input_layers == "rgb+drivable":
                 in_tensor = torch.cat([rgb_torch, pred_drivable], dim=1)
@@ -174,8 +177,9 @@ def run_successor_lgp(picklefile):
         pred_succ = torch.nn.Sigmoid()(pred_succ)
         pred_succ = pred_succ[0, 0].cpu().detach().numpy()
 
-        skeleton = skeletonize_prediction(pred_succ, threshold=0.05)
+        skeleton = skeletonize_prediction(pred_succ, threshold=0.15)
         succ_graph = skeleton_to_graph(skeleton)
+
         succ_graph = roundify_skeleton_graph(succ_graph)
 
 
@@ -185,56 +189,115 @@ def run_successor_lgp(picklefile):
 
         pred_dict[city_name][split][sample_id] = succ_graph
 
-        # # Visualize
-        # fig, ax = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
-        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        # visualize_graph(gt_graph, ax[0], aerial_image=img, node_color='white', edge_color='white')
-        # visualize_graph(succ_graph, ax[1], aerial_image=img)
-        # visualize_graph(gt_graph, ax[2], aerial_image=img, node_color='white', edge_color='white')
-        # visualize_graph(succ_graph, ax[2], aerial_image=img)
-        # ax[1].imshow(pred_succ, vmin=0, alpha=0.5)
-        # plt.show()
+
+        images.append(img)
+        images_succ.append(np.digitize(pred_succ, np.arange(0, 1.1, 0.1)))
+        graphs_pred.append(succ_graph)
+        graphs_gt.append(gt_graph)
+
+        # Visualize
+        print(sample_id)
+        plot_every = 10
+        if image_counter % plot_every == 0 and image_counter > 0:
+            fig, ax = plt.subplots(plot_every, 4, sharex=True, sharey=True, figsize=(10, 30))
+            plt.tight_layout()
+            plt.subplots_adjust(wspace=0, hspace=0)
+            for i in range(plot_every):
+                ax[i, 0].axis("off")
+                ax[i, 1].axis("off")
+                ax[i, 2].axis("off")
+                ax[i, 3].axis("off")
+                ax[i, 0].set_title(sample_id)
+                img = cv2.cvtColor(images[image_counter-i], cv2.COLOR_BGR2RGB)
+                visualize_graph(graphs_gt[image_counter-i], ax[i, 0], aerial_image=img, node_color='white', edge_color='white')
+                visualize_graph(graphs_pred[image_counter-i], ax[i, 1], aerial_image=img)
+                visualize_graph(graphs_gt[image_counter-i], ax[i, 2], aerial_image=img, node_color='white', edge_color='white')
+                visualize_graph(graphs_pred[image_counter-i], ax[i, 2], aerial_image=img)
+                ax[i, 3].imshow(images_succ[image_counter-i], vmin=1.1, cmap="jet")
+            plt.savefig("/home/zuern/Desktop/autograph/eval_succ/viz/{:04d}.svg".format(image_counter))
+            # exit()
 
     pickle.dump(pred_dict, open(picklefile, "wb"))
 
 
 if __name__ == "__main__":
 
-    split = "eval"
+    split = "test"
 
-    predictions_file = 'succ_lgp_eval_autograph.pickle'
-    run_successor_lgp(picklefile=predictions_file)
+    # full model
+    full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model tracklets
+    #full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model lanegraph
 
-    results_dict = evaluate(annotation_file="/home/zuern/lanegnn-dev/urbanlanegraph_evaluator/annotations_successor_lgp_eval.pickle",
-                            user_submission_file=predictions_file,
-                            phase_codename="phase_successor_lgp")
+    # succ model dict
+    model_dicts = [
+        {"model_path": "/data/autograph/checkpoints/jumping-spaceship-188/e-040.pth",
+         "model_notes": "tracklets_joint|successor|rgb+drivable+angles",
+         "input_layers": "rgb+drivable+angles"},
 
-    print("austin")
-    for k,v in results_dict['submission_result']["austin"][split]["avg"].items():
-        print("     {}: {:.3f}".format(k, v))
+        {"model_path": "/data/autograph/checkpoints/tough-blaze-198/e-008.pth",
+         "model_notes": "tracklets_joint|successor|rgb",
+         "input_layers": "rgb"},
 
-    print("detroit")
-    for k,v in results_dict['submission_result']["detroit"][split]["avg"].items():
-        print("     {}: {:.3f}".format(k, v))
+        {"model_path": "/data/autograph/checkpoints/hardy-frog-198/e-012.pth",
+            "model_notes": "tracklets_joint|successor|rgb+drivable",
+            "input_layers": "rgb+drivable"},
 
-    print("miami")
-    for k,v in results_dict['submission_result']["miami"][split]["avg"].items():
-        print("     {}: {:.3f}".format(k, v))
+        {"model_path": "/data/autograph/checkpoints/splendid-breeze-198/e-010.pth",
+            "model_notes": "tracklets_joint|successor|rgb+drivable+angles",
+            "input_layers": "rgb+drivable+angles"},
 
-    print("paloalto")
-    for k,v in results_dict['submission_result']["paloalto"][split]["avg"].items():
-        print("     {}: {:.3f}".format(k, v))
+        {"model_path": "/data/autograph/checkpoints/dandy-cherry-199/e-032.pth",
+            "model_notes": "tracklets_raw|successor|rgb",
+            "input_layers": "rgb"},
+    ]
 
-    print("pittsburgh")
-    for k,v in results_dict['submission_result']["pittsburgh"][split]["avg"].items():
-        print("     {}: {:.3f}".format(k, v))
+    results_df = pd.DataFrame(columns=["model_name", "model_notes", "split", "iou", "apls", "geo_precision",
+                                       "geo_recall","topo_precision","topo_recall","sda@20","sda@50"])
 
-    print("washington")
-    for k,v in results_dict['submission_result']["washington"][split]["avg"].items():
-        print("     {}: {:.3f}".format(k, v))
+    for model_dict in model_dicts:
+        succ_model_pth = model_dict["model_path"]
+        model_notes = model_dict["model_notes"]
+        input_layers = model_dict["input_layers"]
 
 
+        model_name = succ_model_pth.split("/")[-2:]
+        model_name = "_".join(model_name)
+        model_identifier = model_name + "_" + model_notes + "_" + split
 
-    print("avg")
-    for k,v in results_dict['submission_result'][split]["avg"].items():
-        print("     {}: {:.3f}".format(k, v))
+        predictions_file = '/home/zuern/Desktop/autograph/eval_succ/{}_predictions.pickle'.format(model_identifier)
+        run_successor_lgp(full_model_pth=full_model_pth,
+                          succ_model_pth=succ_model_pth,
+                          input_layers=input_layers,
+                          picklefile=predictions_file,
+                          split=split)
+
+        results_dict = evaluate(annotation_file="/home/zuern/lanegnn-dev/urbanlanegraph_evaluator/annotations_successor_lgp_{}.pickle".format(split),
+                                user_submission_file=predictions_file,
+                                phase_codename="phase_successor_lgp",
+                                split=split,)
+
+        print("avg")
+        for k, v in results_dict['submission_result'][split]["avg"].items():
+            print("     {}: {:.3f}".format(k, v))
+
+        # save dict
+        pickle.dump(results_dict, open("/home/zuern/Desktop/autograph/eval_succ/{}_results_dict.pickle".format(model_identifier), "wb"))
+
+        # save results
+        results_df = results_df.append({"model_name": model_name,
+                                        "model_notes": model_notes,
+                                        "split": split,
+                                        "iou": results_dict['submission_result'][split]["avg"]["Graph IoU"],
+                                        "apls": results_dict['submission_result'][split]["avg"]["APLS"],
+                                        "geo_precision": results_dict['submission_result'][split]["avg"]["GEO Precision"],
+                                        "geo_recall": results_dict['submission_result'][split]["avg"]["GEO Recall"],
+                                        "topo_precision": results_dict['submission_result'][split]["avg"]["TOPO Precision"],
+                                        "topo_recall": results_dict['submission_result'][split]["avg"]["TOPO Recall"],
+                                        "sda@20": results_dict['submission_result'][split]["avg"]["SDA20"],
+                                        "sda@50": results_dict['submission_result'][split]["avg"]["SDA50"]
+                                        },
+                                        ignore_index=True)
+
+    results_df.to_csv("/home/zuern/Desktop/autograph/eval_succ/results_all.csv", index=False)
+
+

@@ -39,6 +39,7 @@ def roundify_skeleton_graph(skeleton_graph: nx.DiGraph):
 
         # add new points and edges to the graph
         for i in range(0, len(pointlist) - 1):
+
             if i == 0:
                 point = (int(pointlist[i][0]), int(pointlist[i][1]))
                 skeleton_graph_.add_node(point, pos=pointlist[i], weight=1.0, score=1.0)
@@ -52,7 +53,6 @@ def roundify_skeleton_graph(skeleton_graph: nx.DiGraph):
                 skeleton_graph_.add_node(point0, pos=pointlist[i], weight=1.0, score=1.0)
                 point1 = (int(pointlist[i + 1][0]), int(pointlist[i + 1][1]))
                 skeleton_graph_.add_node(point1, pos=pointlist[i + 1], weight=1.0, score=1.0)
-
                 skeleton_graph_.add_edge(point0, point1)
 
         skeleton_graph_.remove_edge(edge[0], edge[1])
@@ -69,7 +69,21 @@ def skeletonize_prediction(pred_succ, threshold=0.5):
     # first, convert to binary
     pred_succ_thrshld = (pred_succ > threshold).astype(np.uint8)
 
-    #cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
+    # colorize with 0.1 bins
+    bins = np.arange(0, 1.1, 0.1)
+    bins_viz = np.digitize(pred_succ, bins) / len(bins)
+
+
+    # colorize
+    bins_viz = cv2.applyColorMap((bins_viz * 255).astype(np.uint8), cv2.COLORMAP_JET)
+
+    # visualize pred_succ_thrshld
+    # cv2.imshow("bins_viz", bins_viz)
+
+
+
+
+    # cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
 
     # then, skeletonize
     skeleton = skeletonize(pred_succ_thrshld)
@@ -79,6 +93,8 @@ def skeletonize_prediction(pred_succ, threshold=0.5):
     skeleton[:N, :] = 0
     skeleton[:, :N] = 0
     skeleton[:, -N:] = 0
+
+    skeleton[-20:, :] = 0  # TODO: does this work?
 
     return skeleton
 
@@ -125,6 +141,10 @@ def skeleton_to_graph(skeleton):
             if graph.has_edge(e, s):
                 graph[s][e]['pts'] = np.flip(graph[e][s]['pts'], axis=0)
                 graph.remove_edge(e, s)
+
+
+    # remove selfloops
+    graph.remove_edges_from(nx.selfloop_edges(graph))
 
     return graph
 
