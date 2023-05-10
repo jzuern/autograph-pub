@@ -61,29 +61,19 @@ def roundify_skeleton_graph(skeleton_graph: nx.DiGraph):
     return skeleton_graph_
 
 
-
-
-
-
 def skeletonize_prediction(pred_succ, threshold=0.5):
     # first, convert to binary
     pred_succ_thrshld = (pred_succ > threshold).astype(np.uint8)
 
     # colorize with 0.1 bins
-    bins = np.arange(0, 1.1, 0.1)
-    bins_viz = np.digitize(pred_succ, bins) / len(bins)
-
+    # bins = np.arange(0, 1.1, 0.1)
+    # bins_viz = np.digitize(pred_succ, bins) / len(bins)
 
     # colorize
-    bins_viz = cv2.applyColorMap((bins_viz * 255).astype(np.uint8), cv2.COLORMAP_JET)
-
+    # bins_viz = cv2.applyColorMap((bins_viz * 255).astype(np.uint8), cv2.COLORMAP_JET)
     # visualize pred_succ_thrshld
     # cv2.imshow("bins_viz", bins_viz)
 
-
-
-
-    # cv2.imshow("pred_succ_thrshld", pred_succ_thrshld * 255)
 
     # then, skeletonize
     skeleton = skeletonize(pred_succ_thrshld)

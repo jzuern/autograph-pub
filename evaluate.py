@@ -3,6 +3,10 @@ import numpy as np
 import pprint
 from urbanlanegraph_evaluator.evaluator import GraphEvaluator
 from urbanlanegraph_evaluator.utils import adjust_node_positions
+from aggregation.utils import visualize_graph, laplacian_smoothing, filter_graph
+import matplotlib.pyplot as plt
+from glob import glob
+
 
 city_names = [
     "austin",
@@ -257,7 +261,67 @@ def evaluate(annotation_file, user_submission_file, phase_codename, split, **kwa
     return output
 
 
+def evaluate_single_full_lgp(graph_gt, graph_pred):
+
+    evaluator = GraphEvaluator()
+    metrics = evaluator.evaluate_graph(graph_gt,
+                                       graph_pred,
+                                       area_size=[5000, 5000])
+
+    metrics_sample = {
+        "TOPO Precision": metrics['topo_precision'],
+        "TOPO Recall": metrics['topo_recall'],
+        "GEO Precision": metrics['topo_precision'],
+        "GEO Recall": metrics['geo_recall'],
+        "APLS": metrics['apls'],
+        "Graph IoU": metrics['iou'],
+    }
+
+    return metrics_sample
+
+
+
+
 if __name__ == "__main__":
+
+    tile_id = 'austin_83_34021_46605'
+    #tile_id = "pittsburgh_19_12706_31407"
+    #tile_id = "pittsburgh_36_27706_11407"
+
+    graph_gt = glob('/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.gpickle'.format(tile_id))[0]
+    graph_pred = '/home/zuern/Desktop/autograph/tmp/G_agg/{}-G_agg_naive_all.pickle'.format(tile_id)
+
+    with open(graph_gt, 'rb') as f:
+        graph_gt = pickle.load(f)
+
+    with open(graph_pred, 'rb') as f:
+        graph_pred = pickle.load(f)
+
+    # adjust node positions
+    x_offset = float(tile_id.split("_")[2])
+    y_offset = float(tile_id.split("_")[3])
+
+    graph_gt = adjust_node_positions(graph_gt, x_offset, y_offset)
+
+    graph_pred = filter_graph(target=graph_gt, source=graph_pred, threshold=50)
+
+
+    metrics_dict = evaluate_single_full_lgp(graph_gt, graph_pred)
+    print(metrics_dict)
+
+    fig, ax = plt.subplots(1, 3, figsize=(20, 10), sharex=True, sharey=True)
+    ax[0].set_aspect('equal')
+    ax[1].set_aspect('equal')
+    ax[2].set_aspect('equal')
+    visualize_graph(graph_gt, ax[0])
+    visualize_graph(graph_pred, ax[1])
+    visualize_graph(laplacian_smoothing(graph_pred, gamma=0.2), ax[2])
+    plt.show()
+
+
+
+    exit()
+
 
     # Evaluate the submission for each task
 

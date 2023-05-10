@@ -24,7 +24,7 @@ keyboard = Controller()
 
 # SETTINGS
 
-skeleton_threshold = 0.1  # threshold for skeletonization
+skeleton_threshold = 0.08  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
 write_every = 10            # write to disk every n steps
@@ -835,9 +835,9 @@ if __name__ == "__main__":
     input_layers = "rgb+drivable+angles"
 
 
-    # tile_id = "austin_83_34021_46605"
+    tile_id = "austin_83_34021_46605"
     #tile_id = "pittsburgh_36_27706_11407"
-    tile_id = 'pittsburgh_19_12706_31407'
+    #tile_id = 'pittsburgh_19_12706_31407'
 
 
     driver = AerialDriver(debug=True, input_layers=input_layers, tile_id=tile_id)
@@ -870,20 +870,20 @@ if __name__ == "__main__":
     with open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-G_agg_naive_all.pickle".format(driver.tile_id), "rb") as f:
         G_agg_naive = pickle.load(f)
 
-    G_agg_cvpr = driver.aggregate_graphs(graphs)
-    driver.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
-    driver.visualize_write_G_agg(G_agg_naive, "G_agg_naive")
+    # G_agg_cvpr = driver.aggregate_graphs(graphs)
+    # driver.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
+    # driver.visualize_write_G_agg(G_agg_naive, "G_agg_naive")
 
-    fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
-    img = cv2.cvtColor(driver.aerial_image, cv2.COLOR_BGR2RGB)
-    [ax.imshow(img) for ax in axarr]
-    axarr[0].set_title("g single")
-    axarr[1].set_title("G_agg_naive")
-    axarr[2].set_title("G_agg_cvpr")
-    [visualize_graph(g, axarr[0], node_color=np.random.rand(3), edge_color=np.random.rand(3)) for g in graphs]
-    visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
-    visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
-    plt.show()
+    # fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+    # img = cv2.cvtColor(driver.aerial_image, cv2.COLOR_BGR2RGB)
+    # [ax.imshow(img) for ax in axarr]
+    # axarr[0].set_title("g single")
+    # axarr[1].set_title("G_agg_naive")
+    # axarr[2].set_title("G_agg_cvpr")
+    # [visualize_graph(g, axarr[0], node_color=np.random.rand(3), edge_color=np.random.rand(3)) for g in graphs]
+    # visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
+    # visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
+    # plt.show()
 
     exit()
 

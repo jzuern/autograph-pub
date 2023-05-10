@@ -7,6 +7,7 @@ paths:
     home: /home/zuern/
     package: /home/zuern/self-supervised-graph/
     dataroot: /data/autograph/
+    dataroot_urbanlanegraph: /data/lanegraph/urbanlanegraph-dataset-dev/
     dataroot_av2: /data/argoverse2/motion-forecasting/
     checkpoints: /data/autograph/checkpoints/
     config_name: exp-successors-sparse/* # preprocessed/city_name or preprocessed/*

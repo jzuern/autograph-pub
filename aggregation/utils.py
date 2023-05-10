@@ -20,6 +20,53 @@ import matplotlib.pyplot as plt
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_angles,  get_oriented_crop, transform2vgg
 
 
+def filter_graph(target, source, threshold=100):
+
+    if len(source.nodes()) == 0:
+        return source
+
+    pos_target = np.array([list(target.nodes[n]['pos']) for n in target.nodes()])
+    pos_source = np.array([list(source.nodes[n]['pos']) for n in source.nodes()])
+
+    distance_matrix = cdist(pos_target, pos_source)
+
+
+    source_ = source.copy(as_view=False)
+    is_close_to_target = np.min(distance_matrix, axis=0) < threshold
+    for i, n in enumerate(list(source_.nodes())):
+        if not is_close_to_target[i]:
+            if n in source.nodes():
+                source.remove_node(n)
+
+    return source
+
+def laplacian_smoothing(G, gamma=0.5, iterations=1):
+    """
+    Takes input graph and applies multiple iterations of Laplacian smoothing weighted by gamma.
+    Note that this function produces an undirected graph when computing the Laplacian.
+    :param G: networkx graph to smooth
+    :param gamma: smoothing intensity
+    :param iterations: number of iterations to smooth for
+    :return: smoothed graph
+    """
+    L = nx.laplacian_matrix(nx.Graph(G)).todense()
+    O = np.eye(L.shape[0]) - gamma * L
+
+    for it in range(iterations):
+
+        node_pos = np.array([list(G.nodes[n]['pos']) for n in G.nodes()])
+        node_pos = np.dot(O, node_pos)
+
+        # Update node positions
+        for i, node in enumerate(G.nodes()):
+            if G.degree(node) == 2:
+                G.nodes[node]['pos'] = np.array(node_pos[i, :]).flatten()
+
+    return G
+
+
+
+
 class AngleColorizer:
     def __init__(self):
         pass

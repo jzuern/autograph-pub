@@ -7,6 +7,7 @@ paths:
     home: /home/buechner/zuern/
     package: /home/buechner/zuern/self-supervised-graph/
     dataroot: /data2/buechner/autograph/
+    dataroot_urbanlanegraph: /home/buechner/zuern/urbanlanegraph-dataset-dev/
     checkpoints: /home/buechner/zuern/self-supervised-graph/checkpoints/
     config_name: exp-11-01-23/* # preprocessed/city_name or preprocessed/*
 preprocessing:

@@ -15,9 +15,12 @@ import cv2
 from collections import OrderedDict
 from matplotlib import cm
 from aggregation.utils import AngleColorizer
-from data.datasets import SuccessorRegressorDataset
+from data.datasets import SuccessorRegressorDataset, SuccessorGraphDataset
 from lanegnn.utils import ParamLib, make_image_grid
 import glob
+from evaluate import evaluate_successor_lgp
+from driving.utils import skeletonize_prediction, skeleton_to_graph
+import pickle
 
 
 def weighted_mse_loss(input, target, weight):
@@ -100,12 +103,11 @@ def calc_torchmetrics_angles(angle_preds, angle_gts, name):
 
 
 class Trainer():
-
-    def __init__(self, params, model, dataloader_train, dataloader_val, optimizer, model_full=None):
-
+    def __init__(self, params, model, dataloader_train, dataloader_val, optimizer, dataloader_graph=None, model_full=None):
         self.model = model
         self.dataloader_train = dataloader_train
         self.dataloader_val = dataloader_val
+        self.dataloader_graph = dataloader_graph
         self.params = params
         self.optimizer = optimizer
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -370,22 +372,17 @@ class Trainer():
 
         return metrics_tracklet_drivable
 
-    def evaluate_succ(self, epoch):
-        print("evaluate_succ...")
+    def evaluate_heatmap_succ(self, epoch):
+        print("evaluate_heatmap_succ...")
         self.model.eval()
 
         val_losses = []
 
         mask_preds = []
         mask_targets = []
-        mask_gts = []
-        angle_preds = []
-        angle_targets = []
 
         target_overlay_list_mask = []
         pred_overlay_list_mask = []
-        target_overlay_list_angle = []
-        pred_overlay_list_angle = []
 
         eval_progress = tqdm(self.dataloader_val)
         for step, data in enumerate(eval_progress):
@@ -404,13 +401,10 @@ class Trainer():
                     pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
                 if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
-                    # in_tensor = torch.cat([rgb, pos_enc], dim=1)
                     in_tensor = rgb
                 elif self.params.input_layers == "rgb+drivable":
-                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1)], dim=1)
                     in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1)], dim=1)
                 elif self.params.input_layers == "rgb+drivable+angles":
-                    # in_tensor = torch.cat([rgb, pos_enc, pred_drivable.unsqueeze(1), pred_angles], dim=1)
                     in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1), pred_angles], dim=1)
             else:
                 in_tensor = rgb
@@ -468,6 +462,86 @@ class Trainer():
         print(metrics_tracklet_succ)
 
         return metrics_tracklet_succ
+
+
+    def evaluate_graph_succ(self, epoch):
+        print("evaluate_graph_succ...")
+        self.model.eval()
+
+        graphs_gt = {}
+        graphs_pred = {}
+
+        eval_progress = tqdm(self.dataloader_graph)
+
+        for step, data in enumerate(eval_progress):
+
+            rgb = data["rgb"].cuda()
+
+            if self.model_full is not None:
+                with torch.no_grad():
+                    (pred, _) = self.model_full(rgb)  # get from model
+                    pred = torch.nn.functional.interpolate(pred, size=rgb.shape[2:], mode='bilinear', align_corners=True)
+                    pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
+                    pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
+
+                if self.params.input_layers == "rgb":  # rgb [3], pos_enc [3], pred_drivable [1], pred_angles [2]
+                    in_tensor = rgb
+                elif self.params.input_layers == "rgb+drivable":
+                    in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1)], dim=1)
+                elif self.params.input_layers == "rgb+drivable+angles":
+                    in_tensor = torch.cat([rgb, pred_drivable.unsqueeze(1), pred_angles], dim=1)
+            else:
+                in_tensor = rgb
+
+            (pred_succ, features) = self.model(in_tensor)
+            pred_succ = torch.nn.functional.interpolate(pred_succ, size=rgb.shape[2:], mode='bilinear',
+                                                        align_corners=True)
+            pred_succ = torch.nn.Sigmoid()(pred_succ[:, 0, :, :])
+            pred_succ = pred_succ.cpu().detach().numpy()[0]
+
+            # get pred graph
+            skeleton = skeletonize_prediction(pred_succ, threshold=0.08)
+            skeleton_graph = skeleton_to_graph(skeleton)
+
+            for edge in skeleton_graph.edges():
+                skeleton_graph.edges[edge]['pts'] = skeleton_graph.edges[edge]['pts'][:, ::-1]
+
+            # get gt graph
+            graph_gt_fname = data['graph_gt'][0]
+
+            # get sample_id, city and split from graph_gt_fname
+            city = graph_gt_fname.split("/")[-4]
+            split = graph_gt_fname.split("/")[-2]
+            sample_id = graph_gt_fname.split("/")[-1].split("-")[0]
+
+            with open(graph_gt_fname, "rb") as f:
+                graph_gt = pickle.load(f)
+
+            if city not in graphs_gt:
+                graphs_gt[city] = {}
+                graphs_pred[city] = {}
+            if split not in graphs_gt[city]:
+                graphs_gt[city][split] = {}
+                graphs_pred[city][split] = {}
+
+            graphs_gt[city][split][sample_id] = graph_gt
+            graphs_pred[city][split][sample_id] = skeleton_graph
+
+        # Get metrics
+        metrics_successor_lgp = evaluate_successor_lgp(graphs_pred, graphs_gt, split="test")
+
+        # Do logging
+        if not self.params.main.disable_wandb:
+            wandb.log(metrics_successor_lgp)
+
+        metrics_successor_lgp = metrics_successor_lgp["test"]["avg"]
+
+        print(metrics_successor_lgp)
+
+        return metrics_successor_lgp
+
+
+
 
     def inference(self):
 
@@ -639,7 +713,16 @@ def main():
 
     train_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "train", "*")  # .../exp-name/city/split/branch-straight/*
     val_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "eval", "*")
-    #test_path = os.path.join(params.paths.dataroot, opt.dataset_name, "*", "test", "*")
+    graph_path = os.path.join(params.paths.dataroot_urbanlanegraph, "*", "test", "*")
+
+
+    dataset_graph_test = SuccessorGraphDataset(params=params,
+                                                    path=graph_path,
+                                                    split='test')
+    dataloader_graph = DataLoader(dataset_graph_test,
+                                      batch_size=1,
+                                      num_workers=1,
+                                      shuffle=False)
 
     dataset_train = SuccessorRegressorDataset(params=params,
                                               path=train_path,
@@ -649,6 +732,7 @@ def main():
                                             path=val_path,
                                             split='eval',
                                             max_num_samples=2000)
+
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=params.model.batch_size_reg,
                                   num_workers=params.model.loader_workers,
@@ -659,7 +743,9 @@ def main():
                                 num_workers=1,
                                 shuffle=False)
 
-    trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer, model_full=model_full)
+    trainer = Trainer(params, model, dataloader_train, dataloader_val, optimizer,
+                      dataloader_graph=dataloader_graph,
+                      model_full=model_full)
 
     if opt.inference:
         trainer.inference()
@@ -672,7 +758,8 @@ def main():
         if epoch % 2 == 0:
             with torch.no_grad():
                 if opt.target == "successor":
-                    trainer.evaluate_succ(epoch)
+                    trainer.evaluate_graph_succ(epoch)
+                    trainer.evaluate_heatmap_succ(epoch)
                 else:
                     trainer.evaluate_full(epoch)
             try:

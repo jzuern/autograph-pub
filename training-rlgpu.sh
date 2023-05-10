@@ -5,9 +5,9 @@ export DATASET_NAME=all-3004
 CUDA_VISIBLE_DEVICES=0,1,2 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target full \
-  --dataset_name $DATASET_NAME/lanegraph
+  --dataset_name $DATASET_NAME/lanegraph &
 
-sleep 1
+sleep 10
 
 # TrackletNet tracklet-supervised
 CUDA_VISIBLE_DEVICES=3,4,5 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \

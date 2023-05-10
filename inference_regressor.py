@@ -14,9 +14,14 @@ from evaluate import evaluate
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import pprint
-from driving.utils import skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
 from random import shuffle
 import pandas as pd
+
+from aggregation.utils import visualize_graph, AngleColorizer
+from driving.utils import skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
+
+
+skeleton_threshold = 0.15
 
 
 class FormatPrinter(pprint.PrettyPrinter):
@@ -105,11 +110,13 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
     # test_images = sorted(glob("//data/autograph/all-3004/lanegraph/pittsburgh/test/branching/*-rgb.png"))
     # test_graphs = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*.gpickle".format(split)))
 
+    ac = AngleColorizer()
+
     # shuffle(test_images)
 
     # # jointly shuffle them
     joint = list(zip(test_images, test_graphs))
-    np.random.shuffle(joint)
+    shuffle(joint)
     test_images, test_graphs = zip(*joint)
 
     # Load model
@@ -124,7 +131,9 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
     images_succ = []
     graphs_pred = []
     graphs_gt = []
-
+    preds_angles_color = []
+    preds_drivable = []
+    sample_ids = []
 
     for image_counter, (test_image, test_graph) in tqdm(enumerate(zip(test_images, test_graphs)),
                                                         total=len(test_images),
@@ -177,10 +186,17 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
         pred_succ = torch.nn.Sigmoid()(pred_succ)
         pred_succ = pred_succ[0, 0].cpu().detach().numpy()
 
-        skeleton = skeletonize_prediction(pred_succ, threshold=0.15)
+        skeleton = skeletonize_prediction(pred_succ, threshold=skeleton_threshold)
         succ_graph = skeleton_to_graph(skeleton)
 
         succ_graph = roundify_skeleton_graph(succ_graph)
+
+        # visualize full model predictions
+        pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
+
+        pred_angles = ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+        pred_angles_color = ac.angle_to_color(pred_angles, mask=pred_drivable > 0.3)
+
 
 
         # relabel nodes
@@ -194,28 +210,39 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
         images_succ.append(np.digitize(pred_succ, np.arange(0, 1.1, 0.1)))
         graphs_pred.append(succ_graph)
         graphs_gt.append(gt_graph)
+        preds_angles_color.append(pred_angles_color)
+        preds_drivable.append(pred_drivable)
+        sample_ids.append(sample_id)
 
         # Visualize
         print(sample_id)
         plot_every = 10
         if image_counter % plot_every == 0 and image_counter > 0:
-            fig, ax = plt.subplots(plot_every, 4, sharex=True, sharey=True, figsize=(10, 30))
+            fig, ax = plt.subplots(plot_every, 6, sharex=True, sharey=True, figsize=(10, 30))
             plt.tight_layout()
             plt.subplots_adjust(wspace=0, hspace=0)
             for i in range(plot_every):
-                ax[i, 0].axis("off")
-                ax[i, 1].axis("off")
-                ax[i, 2].axis("off")
-                ax[i, 3].axis("off")
-                ax[i, 0].set_title(sample_id)
+                [ax[i, j].axis("off") for j in range(6)]
+                ax[i, 0].set_title(sample_ids[image_counter-i])
                 img = cv2.cvtColor(images[image_counter-i], cv2.COLOR_BGR2RGB)
                 visualize_graph(graphs_gt[image_counter-i], ax[i, 0], aerial_image=img, node_color='white', edge_color='white')
                 visualize_graph(graphs_pred[image_counter-i], ax[i, 1], aerial_image=img)
                 visualize_graph(graphs_gt[image_counter-i], ax[i, 2], aerial_image=img, node_color='white', edge_color='white')
                 visualize_graph(graphs_pred[image_counter-i], ax[i, 2], aerial_image=img)
                 ax[i, 3].imshow(images_succ[image_counter-i], vmin=1.1, cmap="jet")
-            plt.savefig("/home/zuern/Desktop/autograph/eval_succ/viz/{:04d}.svg".format(image_counter))
-            # exit()
+                ax[i, 4].imshow(preds_drivable[image_counter - i])
+                ax[i, 5].imshow(preds_angles_color[image_counter - i])
+
+            svg_filename = "/home/zuern/Desktop/autograph/eval_succ/viz/{:04d}.svg".format(image_counter)
+            plt.savefig(svg_filename)
+
+            # open svg file and delete line containing "<g id="figure_1">"
+            with open(svg_filename, "r") as f:
+                lines = f.readlines()
+            with open(svg_filename, "w") as f:
+                for line in lines:
+                    if "<g id=\"figure_1\">" not in line:
+                        f.write(line)
 
     pickle.dump(pred_dict, open(picklefile, "wb"))
 
