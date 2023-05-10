@@ -529,13 +529,16 @@ class Trainer():
         # Get metrics
         metrics_successor_lgp = evaluate_successor_lgp(graphs_pred, graphs_gt, split="test")
 
+        metrics_successor_lgp = metrics_successor_lgp["test"]["avg"]
+
+        print(metrics_successor_lgp)
+
+
         # Do logging
         if not self.params.main.disable_wandb:
             wandb.log(metrics_successor_lgp)
 
-        metrics_successor_lgp = metrics_successor_lgp["test"]["avg"]
 
-        print(metrics_successor_lgp)
 
         return metrics_successor_lgp
 
