@@ -24,7 +24,7 @@ model:
     dataparallel: True
     device: cuda
     batch_size: 4
-    batch_size_reg: 384
+    batch_size_reg: 256
     lr: 1e-4
     beta_lo: 0.9
     beta_hi: 0.999

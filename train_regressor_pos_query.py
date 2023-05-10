@@ -157,7 +157,6 @@ class Trainer():
                 pred_angles = torch.nn.Tanh()(pred[:, 0:2, :, :])
                 pred_drivable = torch.nn.Sigmoid()(pred[:, 2, :, :])
 
-
                 loss_dict = {
                     'train/loss_drivable': torch.nn.BCELoss()(pred_drivable, target_drivable),
                     'train/loss_angles': torch.nn.MSELoss()(pred_angles, target_angles),
@@ -679,6 +678,7 @@ def main():
 
     model_full = None
     if opt.full_checkpoint is not None:
+        print("Loading full checkpoint: ", opt.full_checkpoint)
         model_full = DeepLabv3Plus(models.resnet101(pretrained=True),
                                    num_in_channels=3,
                                    num_classes=3).to(params.model.device)
