@@ -1,3 +1,5 @@
+import sys
+
 import cv2
 import torch
 from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
@@ -14,6 +16,7 @@ from tqdm import tqdm
 import time
 import pickle
 import glob
+import os
 
 from aggregation.utils import similarity_check, out_of_bounds_check, visualize_graph, AngleColorizer
 from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
@@ -28,7 +31,7 @@ skeleton_threshold = 0.08  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
 write_every = 10            # write to disk every n steps
-waitkey_ms = 2
+waitkey_ms = 1
 
 
 # CVPR graph aggregation
@@ -38,16 +41,38 @@ closest_lat_thresh = 30
 
 init_poses = {
     "austin_83_34021_46605": np.array([1163, 2982, -2.69]),
+    "austin_40_14021_51605": np.array([1252, 4232,  -np.pi]),
     "pittsburgh_36_27706_11407": np.array([1789, 2280, 0.4 * np.pi]),
     'pittsburgh_19_12706_31407': np.array([1789, 2280, 0.4 * np.pi]),
+    "detroit_136_10700_30709": np.array([1335, 3325, 0.2 * np.pi]),
+    "detroit_165_25700_30709": np.array([3032, 1167, - 0.2* np.pi]),
+    "miami_185_41863_18400": np.array([1322, 3287, 0.5 * np.pi]),
+    "miami_194_46863_3400": np.array([3311, 1907, 0.5 * np.pi]),
+    "paloalto_43_25359_23592": np.array([408, 4227, 0 * np.pi]),
+    "paloalto_62_35359_38592": np.array([2980, 3594, 0.5 * np.pi]),
+    "washington_46_36634_59625": np.array([1191, 2467, 0.5 * np.pi]),
+    "washington_55_41634_69625": np.array([871, 1924, 0.5 * np.pi]),
 }
 
+
+def move_graph_nodes(g, delta):
+    g_ = g.copy(as_view=False)
+    for node in g_.nodes():
+        g_.nodes[node]['pos'] += delta
+    return g_
 
 class AerialDriver(object):
     def __init__(self, debug=False, input_layers=None, tile_id=None):
         self.aerial_image = None
-        self.init_pose = init_poses[tile_id]
+
+        try:
+            self.init_pose = init_poses[tile_id]
+        except:
+            print("No init pose found for tile {}. Randomly generating one.".format(tile_id))
+            self.init_pose = np.array([np.random.randint(1000, 3000), np.random.randint(1000, 3000), np.random.rand()*2*np.pi])
+
         self.pose = self.init_pose.copy()
+
         self.current_crop = None
         self.model = None
         self.time = time.time()
@@ -109,7 +134,6 @@ class AerialDriver(object):
         print("Model {} loaded".format(model_path))
 
     def load_satellite(self, impath):
-        # if not os.path.exists("aerial_image.png"):
         print("Loading aerial image {}".format(impath))
         self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
         self.tile_id = impath.split("/")[-1].split(".")[0]
@@ -117,20 +141,17 @@ class AerialDriver(object):
         print("Tile ID: {}".format(self.tile_id))
         print("City: {}".format(self.city_name))
 
-        #     # Crop (horizontal, vertical)
-        #
-        #     # paloalto - 1
-        #     # center = [18082, 29236]
-        #     # delta = [4000, 4000]
-        #     # austin - 1
-        #     center = [43200, 21872]  # horizontal, vertical
-        #     delta = [4000, 4000]
-        #     self.aerial_image = self.aerial_image[center[1] - delta[1]//2:center[1] + delta[1]//2,
-        #                                           center[0] - delta[0]//2:center[0] + delta[0]//2, :]
+        dumpdir = "/home/zuern/Desktop/autograph/G_agg/{}".format(self.tile_id)
+        if not os.path.exists(dumpdir):
+            os.makedirs(dumpdir)
 
-        # Image.fromarray(self.aerial_image).save("aerial_image.png")
-        #
-        # self.aerial_image = np.asarray(Image.open("aerial_image.png")).astype(np.uint8)
+        # Embed the aerial image into a larger image to avoid edge effects
+        self.aerial_image = np.pad(self.aerial_image, ((500, 500), (500, 500),
+                                                       (0, 0)), mode="constant", constant_values=0)
+
+        print("Aerial image shape: {}".format(self.aerial_image.shape))
+
+        self.pose += np.array([500, 500, 0])
 
         self.aerial_image = cv2.cvtColor(self.aerial_image, cv2.COLOR_BGR2RGB)
         self.canvas_log_odds = np.ones([self.aerial_image.shape[0], self.aerial_image.shape[1]], dtype=np.float32)
@@ -273,7 +294,7 @@ class AerialDriver(object):
         self.canvas_angles[info_available] = warped_angles[info_available]
 
         canvas_viz = cv2.addWeighted(self.aerial_image, 0.5, self.canvas_angles, 0.5, 0)
-        # cv2.imwrite("/home/zuern/Desktop/tmp/other/{}-{:04d}_angle_canvas.png".format(self.tile_id, self.step), canvas_viz)
+        # cv2.imwrite("/home/zuern/Desktop/other/{}-{:04d}_angle_canvas.png".format(self.tile_id, self.step), canvas_viz)
 
         # resize to smaller
         # canvas_viz = cv2.resize(canvas_viz, (1000, 1000))
@@ -314,7 +335,7 @@ class AerialDriver(object):
         rgb_pose_viz = rgb_pose_viz[y1:y2, x1:x2]
 
         # cv2.imshow("rgb_pose_viz", rgb_pose_viz)
-        cv2.imwrite("/home/zuern/Desktop/tmp/other/{}-{:04d}_rgb_pose_viz.png".format(self.tile_id, self.step), rgb_pose_viz)
+        cv2.imwrite("/home/zuern/Desktop/other/{}-{:04d}_rgb_pose_viz.png".format(self.tile_id, self.step), rgb_pose_viz)
 
     def make_step(self):
 
@@ -380,6 +401,8 @@ class AerialDriver(object):
         cv2.imshow("pred_angles_color", pred_angles_color)
         cv2.imshow("rgb", rgb)
 
+        #cv2.waitKey(1000000)
+
         self.add_pred_to_canvas(skeleton)
 
         pred_succ = (pred_succ * 255).astype(np.uint8)
@@ -415,9 +438,9 @@ class AerialDriver(object):
             axarr[4].title.set_text('pred_angles_succ_color')
             axarr[5].imshow(skeleton)
             axarr[5].title.set_text('skeleton')
-            plt.savefig("/home/zuern/Desktop/autograph/tmp/debug/{}-{:04d}_matplotlib.png".format(self.tile_id, self.step))
+            plt.savefig("/home/zuern/Desktop/autograph/debug/{}-{:04d}_matplotlib.png".format(self.tile_id, self.step))
 
-        # cv2.imwrite("/home/zuern/Desktop/autograph/tmp/debug/{}-{:04d}_pred_succ_viz.png".format(self.tile_id, self.step), pred_succ_viz)
+        # cv2.imwrite("/home/zuern/Desktop/autograph/debug/{}-{:04d}_pred_succ_viz.png".format(self.tile_id, self.step), pred_succ_viz)
 
         self.step += 1
 
@@ -496,7 +519,7 @@ class AerialDriver(object):
             pos = (int(self.pose_history[i, 0]), int(self.pose_history[i, 1]) - 10)
             cv2.putText(G_agg_viz, "{} - {:.0f}".format(i, graph.graph["succ_graph_weight"]), pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
-        cv2.imwrite("/home/zuern/Desktop/autograph/tmp/G_agg/{}-{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
+        cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
 
     def visualize_write_G_agg(self, G_agg, name="G_agg"):
 
@@ -540,7 +563,7 @@ class AerialDriver(object):
 
             cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
-        cv2.imwrite("/home/zuern/Desktop/autograph/tmp/G_agg/{}-{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
+        cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
 
         margin = 400
         G_agg_viz = G_agg_viz[int(self.pose[1]) - margin:int(self.pose[1]) + margin,
@@ -549,7 +572,8 @@ class AerialDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        pickle.dump(self.G_agg_naive, open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
+        #
+        pickle.dump(G_agg, open("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
 
 
     def drive_keyboard(self, key):
@@ -822,82 +846,92 @@ class AerialDriver(object):
     def cleanup(self):
         cv2.destroyAllWindows()
 
-        # write self.graphs to disk
-        with open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-graphs_all.pickle".format(self.tile_id), "wb") as f:
-            pickle.dump(self.graphs, f)
+        dumpdir = "/home/zuern/Desktop/autograph/G_agg/{}".format(self.tile_id)
 
-        with open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-G_agg_naive_all.pickle".format(self.tile_id), "wb") as f:
-            pickle.dump(self.G_agg_naive, f)
+        # write self.graphs to disk
+        if not os.path.exists(dumpdir):
+            os.makedirs(dumpdir)
+
+        graphs_all = [move_graph_nodes(g, [500, 500]) for g in self.graphs]
+
+        with open("{}/graphs_all.pickle".format(dumpdir), "wb") as f:
+            pickle.dump(graphs_all, f)
+
+        G_agg_naive = move_graph_nodes(self.G_agg_naive, [500, 500])
+        with open("{}/G_agg_naive_all.pickle".format(dumpdir), "wb") as f:
+            pickle.dump(G_agg_naive, f)
 
 
 if __name__ == "__main__":
 
     input_layers = "rgb+drivable+angles"
 
+    tile_ids = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/eval/*.png")
+    tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
-    tile_id = "austin_83_34021_46605"
-    #tile_id = "pittsburgh_36_27706_11407"
-    #tile_id = 'pittsburgh_19_12706_31407'
-
-
-    driver = AerialDriver(debug=True, input_layers=input_layers, tile_id=tile_id)
-
-    # driver.load_model(model_path="/data/autograph/checkpoints/clean-hill-97/e-014.pth",  # (austin only)
-    #                   type="full")
-    # driver.load_model(model_path="/data/autograph/checkpoints/smart-rain-99/e-023.pth",  # (austin only)
-    #                   type="successor",
-    #                   )
-
-    driver.load_model(model_path="/data/autograph/checkpoints/civilized-bothan-187/e-150.pth",  # (all-3004)
-                      type="full")
-    driver.load_model(model_path="/data/autograph/checkpoints/jumping-spaceship-188/e-040.pth",  # (all-3004)
-                      type="successor",
-                      input_layers=input_layers,
-                      )
-
-    driver.load_satellite(impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
-
-    while True:
-        driver.drive_freely()
-        if driver.done:
-            driver.cleanup()
-            break
+    #tile_ids = ['pittsburgh_19_12706_31407']
 
 
-    # load files from disk
-    with open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-graphs_all.pickle".format(driver.tile_id), "rb") as f:
-        graphs = pickle.load(f)
-    with open("/home/zuern/Desktop/autograph/tmp/G_agg/{}-G_agg_naive_all.pickle".format(driver.tile_id), "rb") as f:
-        G_agg_naive = pickle.load(f)
+    for tile_id in tile_ids:
 
-    # G_agg_cvpr = driver.aggregate_graphs(graphs)
-    # driver.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
-    # driver.visualize_write_G_agg(G_agg_naive, "G_agg_naive")
+        print("Driving on tile {}".format(tile_id))
 
-    # fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
-    # img = cv2.cvtColor(driver.aerial_image, cv2.COLOR_BGR2RGB)
-    # [ax.imshow(img) for ax in axarr]
-    # axarr[0].set_title("g single")
-    # axarr[1].set_title("G_agg_naive")
-    # axarr[2].set_title("G_agg_cvpr")
-    # [visualize_graph(g, axarr[0], node_color=np.random.rand(3), edge_color=np.random.rand(3)) for g in graphs]
-    # visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
-    # visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
-    # plt.show()
+        driver = AerialDriver(debug=True, input_layers=input_layers, tile_id=tile_id)
 
-    exit()
+        driver.load_model(model_path="/data/autograph/checkpoints/civilized-bothan-187/e-150.pth",  # (all-3004)
+                          type="full")
+        driver.load_model(model_path="/data/autograph/checkpoints/jumping-spaceship-188/e-040.pth",  # (all-3004)
+                          type="successor",
+                          input_layers=input_layers,
+                          )
 
-    print("Press arrow keys to drive")
+        driver.load_satellite(impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
 
-    def on_press(key):
-        driver.drive_keyboard(key)
+        while True:
+            driver.drive_freely()
+            if driver.done:
+                driver.cleanup()
+                break
+
+        #
+        # # load files from disk
+        # with open("/home/zuern/Desktop/autograph/G_agg/{}/graphs_all.pickle".format(driver.tile_id, driver.tile_id), "rb") as f:
+        #     graphs = pickle.load(f)
+        # with open("/home/zuern/Desktop/autograph/G_agg/{}/G_agg_naive_all.pickle".format(driver.tile_id, driver.tile_id), "rb") as f:
+        #     G_agg_naive = pickle.load(f)
+
+        # G_agg_cvpr = driver.aggregate_graphs(graphs)
+        # driver.visualize_write_G_agg(G_agg_cvpr, "G_agg_cvpr")
+        # driver.visualize_write_G_agg(G_agg_naive, "G_agg_naive")
+
+        # fig, axarr = plt.subplots(1, 3, figsize=(15, 5), sharex=True, sharey=True)
+        # img = cv2.cvtColor(driver.aerial_image, cv2.COLOR_BGR2RGB)
+        # [ax.imshow(img) for ax in axarr]
+        # axarr[0].set_title("g single")
+        # axarr[1].set_title("G_agg_naive")
+        # axarr[2].set_title("G_agg_cvpr")
+        # [visualize_graph(g, axarr[0], node_color=np.random.rand(3), edge_color=np.random.rand(3)) for g in graphs]
+        # visualize_graph(driver.G_agg_naive, axarr[1], node_color="b", edge_color="b")
+        # visualize_graph(G_agg_cvpr, axarr[2], node_color="r", edge_color="r")
+        # plt.show()
+
+        continue
 
 
-    def on_release(key):
-        if key == Key.esc:
-            return False
 
-    # Collect events until released
-    with Listener(on_press=on_press) as listener:
-        listener.join()
+
+
+        print("Press arrow keys to drive")
+
+        def on_press(key):
+            driver.drive_keyboard(key)
+
+
+        def on_release(key):
+            if key == Key.esc:
+                return False
+
+        # Collect events until released
+        with Listener(on_press=on_press) as listener:
+            listener.join()
 
