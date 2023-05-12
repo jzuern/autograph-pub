@@ -645,9 +645,9 @@ class AerialDriver(object):
 
     def drive_freely(self):
 
-        # if self.step > 50:
-        #     self.done = True
-        #     return
+        if self.step > 4:
+            self.done = True
+            return
 
         fps = 1 / (time.time() - self.time)
         self.time = time.time()

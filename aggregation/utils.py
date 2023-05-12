@@ -1100,10 +1100,18 @@ def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color
         None
     '''
 
-    nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
-                     edge_color=node_color,
-                     node_color=edge_color,
-                     with_labels=False,
-                     width=0.2,
-                     arrowsize=0.4,
-                     node_size=2)
+    # nx.draw_networkx(G, ax=ax, pos=nx.get_node_attributes(G, "pos"),
+    #                  edge_color=node_color,
+    #                  node_color=edge_color,
+    #                  with_labels=False,
+    #                  width=0.2,
+    #                  arrowsize=0.4,
+    #                  node_size=0.04)
+
+    for e in G.edges:
+        start = G.nodes[e[0]]["pos"]
+        end = G.nodes[e[1]]["pos"]
+        ax.arrow(start[0], start[1], end[0] - start[0], end[1] - start[1],
+                 head_width=0.01, head_length=0.01, fc=edge_color, ec=node_color)
+
+
