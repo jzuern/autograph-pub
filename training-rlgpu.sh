@@ -25,59 +25,59 @@ export DATASET_NAME=all-3004
 #  --dataset_name $DATASET_NAME/tracklets_raw &
 #
 #sleep 10
-#
-## SuccNet tracklets_joint supervised (no TrackletNet)
-#CUDA_VISIBLE_DEVICES=3 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
-#  --config cfg-rlgpu.yaml \
-#  --target successor \
-#  --input_layers rgb \
-#  --dataset_name $DATASET_NAME/tracklets_joint &
-#
-#sleep 10
-#
-## SuccNet tracklets_joint supervised (TrackletNet D)
-#CUDA_VISIBLE_DEVICES=4 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
-#  --config cfg-rlgpu.yaml \
-#  --target successor \
-#  --input_layers rgb+drivable \
-#  --full-checkpoint checkpoints/serene-voice-204/e-016.pth \
-#  --dataset_name $DATASET_NAME/tracklets_joint &
-#
-#sleep 10
-#
-## SuccNet tracklets_joint supervised (TrackletNet D + A)
-#CUDA_VISIBLE_DEVICES=5 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
-#  --config cfg-rlgpu.yaml \
-#  --target successor \
-#  --input_layers rgb+drivable+angles \
-#  --full-checkpoint checkpoints/serene-voice-204/e-016.pth \
-#  --dataset_name $DATASET_NAME/tracklets_joint
 
-
-## SuccNet gt-supervised
+# SuccNet tracklets_joint supervised (no TrackletNet)
 CUDA_VISIBLE_DEVICES=0,1 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target successor \
   --input_layers rgb \
-  --dataset_name $DATASET_NAME/lanegraph &
+  --dataset_name $DATASET_NAME/tracklets_joint &
 
 sleep 10
 
-## SuccNet gt-supervised (TrackletNet A + D)
+# SuccNet tracklets_joint supervised (TrackletNet D)
 CUDA_VISIBLE_DEVICES=2,3 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target successor \
   --input_layers rgb+drivable \
-  --full-checkpoint /home/buechner/zuern/self-supervised-graph/checkpoints/dulcet-water-210/e-050.pth \
-  --dataset_name $DATASET_NAME/lanegraph &
+  --full-checkpoint checkpoints/serene-voice-204/e-016.pth \
+  --dataset_name $DATASET_NAME/tracklets_joint &
 
 sleep 10
 
-## SuccNet gt-supervised (TrackletNet A + D)
+# SuccNet tracklets_joint supervised (TrackletNet D + A)
 CUDA_VISIBLE_DEVICES=4,5 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
   --config cfg-rlgpu.yaml \
   --target successor \
   --input_layers rgb+drivable+angles \
-  --full-checkpoint /home/buechner/zuern/self-supervised-graph/checkpoints/dulcet-water-210/e-050.pth \
-  --dataset_name $DATASET_NAME/lanegraph &
+  --full-checkpoint checkpoints/serene-voice-204/e-016.pth \
+  --dataset_name $DATASET_NAME/tracklets_joint
 
+
+### SuccNet gt-supervised
+#CUDA_VISIBLE_DEVICES=0,1 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
+#  --config cfg-rlgpu.yaml \
+#  --target successor \
+#  --input_layers rgb \
+#  --dataset_name $DATASET_NAME/lanegraph &
+#
+#sleep 10
+#
+### SuccNet gt-supervised (TrackletNet A + D)
+#CUDA_VISIBLE_DEVICES=2,3 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
+#  --config cfg-rlgpu.yaml \
+#  --target successor \
+#  --input_layers rgb+drivable \
+#  --full-checkpoint /home/buechner/zuern/self-supervised-graph/checkpoints/dulcet-water-210/e-050.pth \
+#  --dataset_name $DATASET_NAME/lanegraph &
+#
+#sleep 10
+#
+### SuccNet gt-supervised (TrackletNet A + D)
+#CUDA_VISIBLE_DEVICES=4,5 WANDB_API_KEY=$WANDB_API_KEY ~/zuern/geometric/bin/python train_regressor_pos_query.py \
+#  --config cfg-rlgpu.yaml \
+#  --target successor \
+#  --input_layers rgb+drivable+angles \
+#  --full-checkpoint /home/buechner/zuern/self-supervised-graph/checkpoints/dulcet-water-210/e-050.pth \
+#  --dataset_name $DATASET_NAME/lanegraph &
+#

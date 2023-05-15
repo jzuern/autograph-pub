@@ -3,7 +3,7 @@ import numpy as np
 import pprint
 from urbanlanegraph_evaluator.evaluator import GraphEvaluator
 from urbanlanegraph_evaluator.utils import adjust_node_positions
-from aggregation.utils import visualize_graph, laplacian_smoothing, filter_graph
+from aggregation.utils import visualize_graph, filter_graph
 import matplotlib.pyplot as plt
 from glob import glob
 from PIL import Image
@@ -291,6 +291,8 @@ if __name__ == "__main__":
     tile_ids = glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/eval/*.png")
     tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
+    #tile_ids = ["washington_46_36634_59625"]
+
     for tile_id in tile_ids:
 
 
@@ -319,29 +321,31 @@ if __name__ == "__main__":
 
         graph_gt = adjust_node_positions(graph_gt, x_offset, y_offset)
         graph_pred = adjust_node_positions(graph_pred, 1000, 1000)
-
         graph_pred = filter_graph(target=graph_gt, source=graph_pred, threshold=50)
-        graph_pred = laplacian_smoothing(graph_pred, gamma=0.2)
+
+
+        # # clean up self.G_agg_naive and remove all nodes for which the successor graph is smaller than 2
+        # G_agg_naive = self.G_agg_naive.copy()
+        # for node in self.G_agg_naive.nodes():
+        #     # get subgraph of successors
+        #     succ_nodes = nx.descendants(self.G_agg_naive, node)
+        #     if len(succ_nodes) < 3:
+        #         G_agg_naive.remove_node(node)
+        #         print("removed node {} from G_agg_naive because it has too few descendents".format(node))
+        #
+        # # same with ancestors
+        # G_agg_naive_ = G_agg_naive.copy()
+        # for node in G_agg_naive_.nodes():
+        #     # get subgraph of successors
+        #     pred_nodes = nx.ancestors(G_agg_naive_, node)
+        #     if len(pred_nodes) < 3:
+        #         G_agg_naive.remove_node(node)
+        #         print("removed node {} from G_agg_naive because it has too few ancestors".format(node))
+
 
 
         # metrics_dict = evaluate_single_full_lgp(graph_gt, graph_pred)
         # print(metrics_dict)
-
-        # fig, ax = plt.subplots(1, 2, figsize=(20, 10), sharex=True, sharey=True, dpi=600)
-        # ax[0].set_aspect('equal')
-        # ax[1].set_aspect('equal')
-        # ax[0].imshow(aerial_image)
-        # ax[1].imshow(aerial_image)
-        #
-        # # ax[2].set_aspect('equal')
-        # visualize_graph(graph_gt, ax[0])
-        # visualize_graph(laplacian_smoothing(graph_pred, gamma=0.2), ax[1])
-        # # visualize_graph(laplacian_smoothing(graph_pred, gamma=0.2), ax[2])
-        # ax[0].set_title("Ground Truth")
-        # ax[1].set_title("Prediction")
-        # # ax[2].set_title("Smoothed")
-        # plt.savefig("/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed.svg".format(tile_id))
-        # plt.savefig("/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed.png".format(tile_id))
 
         # also visualize with cv2
         aerial_image_viz = cv2.cvtColor(aerial_image, cv2.COLOR_RGB2BGR)
@@ -350,9 +354,37 @@ if __name__ == "__main__":
             end = graph_pred.nodes[edge[1]]['pos']
             start = (int(start[0]), int(start[1]))
             end = (int(end[0]), int(end[1]))
-            cv2.arrowedLine(aerial_image_viz, start, end, (142, 0, 255), 1, tipLength=0.2, line_type=cv2.LINE_AA)
+
+            arrow_length = np.linalg.norm(np.array(start) - np.array(end))
+            tip_len = 1 / arrow_length * 5
+
+            cv2.arrowedLine(aerial_image_viz, start, end, (142, 0, 255), 1, tipLength=tip_len, line_type=cv2.LINE_AA)
 
         cv2.imwrite("/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed_cv2.png".format(tile_id), aerial_image_viz)
+
+        fig, ax = plt.subplots(1, 2, figsize=(40, 20), sharex=True, sharey=True, dpi=600)
+        for a in ax:
+            a.set_xticks([])
+            a.set_yticks([])
+            a.set_aspect('equal')
+            a.axis('off')
+        # ax[0].imshow(aerial_image)
+        # ax[1].imshow(aerial_image)
+        visualize_graph(graph_gt, ax[0])
+        visualize_graph(graph_pred, ax[1])
+        ax[0].set_title("Ground Truth")
+        ax[1].set_title("Prediction")
+        svg_filename = "/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed.svg".format(tile_id)
+        plt.savefig(svg_filename)
+        plt.savefig("/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed.png".format(tile_id))
+
+        # open svg file and delete line containing "<g id="figure_1">"
+        with open(svg_filename, "r") as f:
+            lines = f.readlines()
+        with open(svg_filename, "w") as f:
+            for line in lines:
+                if "<g id=\"figure_1\">" not in line:
+                    f.write(line)
 
     exit()
 

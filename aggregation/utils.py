@@ -1060,7 +1060,7 @@ def mean_angle_abs_diff(x, y):
 
 def similarity_check(pose, pose_list, min_dist=10, min_angle=np.pi/4):
     if len(pose_list) == 0:
-        return False
+        return False, None
     poslist = np.array(pose_list)[:, :2]
     anglelist = np.array(pose_list)[:, 2:]
 
@@ -1071,11 +1071,16 @@ def similarity_check(pose, pose_list, min_dist=10, min_angle=np.pi/4):
     angle_criterium = angle_distances < min_angle
     criterium = position_criterium & angle_criterium
 
+    # get pose indices that satisfy criterium
+    indices = np.where(criterium)[1]
+
     # Check criterium sum
     if np.sum(criterium) > 0:
-        return True
+        return True, indices
     else:
-        return False
+        return False, indices
+
+
 
 
 def out_of_bounds_check(pose, satellite_shape, oob_margin=400):
@@ -1083,7 +1088,6 @@ def out_of_bounds_check(pose, satellite_shape, oob_margin=400):
         return True
     else:
         return False
-
 
 
 def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color=np.array([255, 0, 142]) / 255.):
@@ -1112,6 +1116,9 @@ def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color
         start = G.nodes[e[0]]["pos"]
         end = G.nodes[e[1]]["pos"]
         ax.arrow(start[0], start[1], end[0] - start[0], end[1] - start[1],
-                 head_width=0.01, head_length=0.01, fc=edge_color, ec=node_color)
+                 head_width=2,
+                 head_length=1,
+                 width=0.01,
+                 fc=edge_color, ec=node_color)
 
 
