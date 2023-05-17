@@ -30,7 +30,7 @@ edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
 write_every = 5           # write to disk every n steps
 waitkey_ms = 1
-
+step_size = 40           # step size along ego edge in pixels
 
 # CVPR graph aggregation
 threshold_px = 30
@@ -59,6 +59,7 @@ class AerialDriver(object):
         if len(init_poses[tile_id]) > 1:
             self.future_poses = list(my_init_poses[1:])
 
+        self.future_poses_destinations = {}
 
         self.pose = self.init_pose.copy()
 
@@ -141,11 +142,12 @@ class AerialDriver(object):
 
         print("Aerial image shape: {}".format(self.aerial_image.shape))
 
-        self.pose += np.array([500, 500, 0])
-
         self.aerial_image = cv2.cvtColor(self.aerial_image, cv2.COLOR_BGR2RGB)
         self.canvas_log_odds = np.ones([self.aerial_image.shape[0], self.aerial_image.shape[1]], dtype=np.float32)
         self.canvas_angles = np.zeros([self.aerial_image.shape[0], self.aerial_image.shape[1], 3], dtype=np.uint8)
+
+        self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
+
 
     def generate_pos_encoding(self):
         q = [self.crop_shape[0]-1,
@@ -220,7 +222,7 @@ class AerialDriver(object):
         img2 = cv2.resize(self.aerial_image, (1500, 1500))
         canvas_viz = cv2.addWeighted(img1, 0.5, img2, 0.5, 0)
 
-        for p in self.pose_history:
+        for iter, p in enumerate(self.pose_history):
             x_0, y_0, _ = p
             x_0 = int(x_0 / df)
             y_0 = int(y_0 / df)
@@ -284,12 +286,12 @@ class AerialDriver(object):
 
     def render_poses_in_aerial(self):
         rgb_pose_viz = self.aerial_image.copy()
-        arrow_len = 60
+        arrow_len = 40
 
         for pose in self.pose_history:
             # render pose as arrow
-            y = pose[0]
-            x = pose[1]
+            y = pose[0] + 1
+            x = pose[1] + 1
             theta = pose[2]
             x2 = x - arrow_len * np.cos(theta)
             y2 = y + arrow_len * np.sin(theta)
@@ -297,8 +299,8 @@ class AerialDriver(object):
 
         for pose in self.future_poses:
             # render pose as arrow
-            y = pose[0]
-            x = pose[1]
+            y = pose[0] - 1
+            x = pose[1] - 1
             theta = pose[2]
             x2 = x - arrow_len * np.cos(theta)
             y2 = y + arrow_len * np.sin(theta)
@@ -506,8 +508,8 @@ class AerialDriver(object):
         G_agg_viz = self.aerial_image.copy()
         G_agg_viz = G_agg_viz // 2
 
-        if len(G_agg.edges) == 0:
-            return
+        # if len(G_agg.edges) == 0:
+        #     return
 
         # history colors linearly interpolated
         colors = matplotlib.cm.get_cmap('jet')(np.linspace(0, 1, len(list(G_agg.edges))))
@@ -552,8 +554,7 @@ class AerialDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        #
-        pickle.dump(G_agg, open("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
+        # pickle.dump(G_agg, open("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
 
 
     def drive_keyboard(self, key):
@@ -625,7 +626,7 @@ class AerialDriver(object):
 
     def drive_freely(self):
 
-        # if self.step > 4:
+        # if self.step > 20:
         #     self.done = True
         #     return
 
@@ -698,9 +699,11 @@ class AerialDriver(object):
                 for successor in succ:
                     succ_edges.append(G_current_global.edges[successor_point, successor])
 
-            if len(succ_edges) == 0:
-                print("     No successor edges found.")
+            print("     Number of successor edges: {}".format(len(succ_edges)))
 
+            self.future_poses_destinations = []
+
+            node_current_pose = (int(self.pose[0]), int(self.pose[1]))
 
             # loop over all successor edges to find future poses
             for edge in succ_edges:
@@ -709,143 +712,182 @@ class AerialDriver(object):
                 if num_points_in_edge < edge_end_idx+1:
                     continue
 
-                pos_start = np.array([edge["pts"][edge_start_idx][0],
-                                      edge["pts"][edge_start_idx][1]])
-                pos_end = np.array([edge["pts"][edge_end_idx][0],
-                                    edge["pts"][edge_end_idx][1]])
+                succ_edge_start = np.array([edge["pts"][edge_start_idx][0],
+                                            edge["pts"][edge_start_idx][1]])
+                succ_edge_end = np.array([edge["pts"][edge_end_idx][0],
+                                          edge["pts"][edge_end_idx][1]])
 
-                edge_delta = pos_end - pos_start
+                node_succ_edge_start = (int(succ_edge_start[0]), int(succ_edge_start[1]))
+                node_succ_edge_end = (int(succ_edge_end[0]), int(succ_edge_end[1]))
+
+                edge_delta = succ_edge_end - succ_edge_start
                 angle_global = np.arctan2(edge_delta[0], -edge_delta[1])
 
-                # step_sizes = [20, 40, 60] # number of pixels to move forward along edge
-                step_sizes = [40]
+                # define future pose
+                future_pose_global = np.zeros(3)
+                diff = step_size * (succ_edge_end - succ_edge_start) / np.linalg.norm(succ_edge_end - succ_edge_start)
+                future_pose_global[0:2] = succ_edge_start + diff
+                future_pose_global[2] = self.yaw_check(angle_global)
 
-                for step_size in step_sizes:
+                # put future pose in queue if not yet visited
+                is_already_in_queue, matches_future = similarity_check(future_pose_global,
+                                                                       self.future_poses,
+                                                                       min_dist=30,
+                                                                       min_angle=np.pi/4)
 
-                    # define future pose
-                    future_pose_global = np.zeros(3)
-                    diff = step_size * (pos_end - pos_start) / np.linalg.norm(pos_end - pos_start)
-                    future_pose_global[0:2] = pos_start + diff
-                    future_pose_global[2] = self.yaw_check(angle_global)
+                if is_already_in_queue:
+                    print("     future pose already in queue. Connecting to current pose.")
+                    node_current_pose = (int(self.pose[0]), int(self.pose[1]))
 
-                    # put future pose in queue if not yet visited
-                    was_visited, matches_visited = similarity_check(future_pose_global,
-                                                            self.pose_history,
-                                                            min_dist=30,
-                                                            min_angle=np.pi/4)
+                    for match_future in matches_future:
+                        try:
+                            future_pose = self.future_poses[match_future][np.newaxis, 0:2]
+                        except:
+                            continue
 
-                    is_already_in_queue, matches_future = similarity_check(future_pose_global,
-                                                              self.future_poses,
-                                                              min_dist=30,
-                                                              min_angle=np.pi/4)
+                        future_pose_node = (int(future_pose[0, 0]), int(future_pose[0, 1]))
 
-                    # print("     Current branch age: {}".format(self.current_branch_age))
+                        # now add edge from ego pose to ego edge start
+                        # and edge from ego edge start to future pose
+                        self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
+                        self.G_agg_naive.add_node(node_succ_edge_start, pos=succ_edge_start)
+                        self.G_agg_naive.add_node(future_pose_node, pos=future_pose[0, 0:2])
 
-                    # get pointlist from ego-edge
-                    pointlist = np.array(edge["pts"][edge_start_idx:edge_end_idx])
-
-                    node_ego_edge_start = (int(pos_start[0]), int(pos_start[1]))
-                    node_ego_edge_end = (int(pos_end[0]), int(pos_end[1]))
-
-
-                    if is_already_in_queue:
-
-                        print("     future pose already in queue. Connecting to current pose.")
-                        node_positions = nx.get_node_attributes(self.G_agg_naive, "pos")
-                        node_positions = np.array(list(node_positions.values()))
-                        nodes_list = np.array(list(self.G_agg_naive.nodes()))
-
-                        for match in matches_future:
-                            future_pose = self.future_poses[match][np.newaxis, 0:2]
-                            # get node in G_agg_naive that corresponds to visited pose
-                            closest_node = np.argmin(np.linalg.norm(node_positions - future_pose, axis=1))
-                            edge_end_id = nodes_list[closest_node]
-                            edge_end_id = (int(edge_end_id[0]), int(edge_end_id[1]))
-
-                            # now add edge from future_pose_global to node_id
-                            try:
-                                node_ego = (int(pos_start[0]), int(pos_start[1]))
-                                self.G_agg_naive.add_node(node_ego, pos=pos_start)
-
-                                edge_start_pos = future_pose_global[0:2]
-                                edge_start_id = (int(edge_start_pos[0]), int(edge_start_pos[1]))
-
-                                self.G_agg_naive.add_node(node_ego, pos=pos_start)
-                                self.G_agg_naive.add_node(edge_start_id, pos=edge_start_pos)
-                                self.G_agg_naive.add_edge(node_ego, edge_start_id)
-                                print("     ! Added edge to visited pose: {} -> {}".format(edge_start_id, edge_end_id))
-
-                            except Exception as e:
-                                print(e)
-                                continue
+                        self.G_agg_naive.add_edge(node_current_pose, node_succ_edge_start, step=self.step)
+                        self.G_agg_naive.add_edge(node_succ_edge_start, future_pose_node, step=self.step)
+                        print("     ! Added edge to already queued pose: {} -> {}".format(node_current_pose,
+                                                                                          node_succ_edge_start))
+                    continue
 
 
-                    if was_visited:
-                        node_positions = nx.get_node_attributes(self.G_agg_naive, "pos")
-                        node_positions = np.array(list(node_positions.values()))
-                        nodes_list = np.array(list(self.G_agg_naive.nodes()))
+                was_visited, matches_visited = similarity_check(future_pose_global,
+                                                                self.pose_history,
+                                                                min_dist=30,
+                                                                min_angle=np.pi/4)
 
-                        for match in matches_visited:
-                            visited_pose = self.pose_history[match][np.newaxis, 0:2]
-                            # get node in G_agg_naive that corresponds to visited pose
-                            closest_node = np.argmin(np.linalg.norm(node_positions - visited_pose, axis=1))
-                            edge_end_id = nodes_list[closest_node]
-                            edge_end_id = (int(edge_end_id[0]), int(edge_end_id[1]))
+                if was_visited:
+                    print("     future pose was already visited. Connecting to current pose.")
+                    for match_visited in matches_visited:
+                        try:
+                            future_pose = self.pose_history[match_visited][np.newaxis, 0:2]
+                        except:
+                            continue
 
-                            # now add edge from future_pose_global to node_id
-                            try:
+                        future_pose_node = (int(future_pose[0, 0]), int(future_pose[0, 1]))
 
-                                node_ego = (int(pos_start[0]), int(pos_start[1]))
-                                self.G_agg_naive.add_node(node_ego, pos=pos_start)
+                        # now add edge from ego pose to ego edge start
+                        # and edge from ego edge start to future pose
+                        self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
+                        self.G_agg_naive.add_node(node_succ_edge_start, pos=succ_edge_start)
+                        self.G_agg_naive.add_node(future_pose_node, pos=future_pose[0, 0:2])
 
-                                edge_start_pos = future_pose_global[0:2]
-                                edge_start_id = (int(edge_start_pos[0]), int(edge_start_pos[1]))
+                        self.G_agg_naive.add_edge(node_current_pose, node_succ_edge_start, step=self.step)
+                        self.G_agg_naive.add_edge(node_succ_edge_start, future_pose_node, step=self.step)
+                        print("     ! Added edge to already visited pose: {} -> {}".format(node_current_pose,
+                                                                                           node_succ_edge_start))
+                    continue
 
-                                self.G_agg_naive.add_node(node_ego, pos=pos_start)
-                                self.G_agg_naive.add_node(edge_start_id, pos=edge_start_pos)
-                                self.G_agg_naive.add_edge(edge_start_id, edge_end_id)
-                                print("     ! Added edge to visited pose: {} -> {}".format(edge_start_id, edge_end_id))
 
-                            except Exception as e:
-                                print(e)
-                                continue
+                # define future pose 2
+                future_pose_global2 = np.zeros(3)
+                diff2 = step_size / 2 * (succ_edge_end - succ_edge_start) / np.linalg.norm(succ_edge_end - succ_edge_start)
+                future_pose_global2[0:2] = succ_edge_start + diff2
+                future_pose_global2[2] = self.yaw_check(angle_global)
 
-                    if not was_visited and not is_already_in_queue:
+                was_visited2, matches_visited2 = similarity_check(future_pose_global2,
+                                                                self.pose_history,
+                                                                min_dist=30,
+                                                                min_angle=np.pi/4)
 
-                        self.future_poses.append(future_pose_global)
 
-                        # add G_agg-edge from edge start to edge end
-                        self.G_agg_naive.add_node(node_ego_edge_start, pos=pos_start)
-                        self.G_agg_naive.add_node(node_ego_edge_end, pos=pos_end)
-                        self.G_agg_naive.add_edge(node_ego_edge_start, node_ego_edge_end, pts=pointlist)
+                if was_visited2:
+                    print("     future pose was already visited2. Connecting to current pose.")
+                    for match_visited2 in matches_visited2:
+                        try:
+                            future_pose2 = self.pose_history[match_visited2][np.newaxis, 0:2]
+                        except Exception as e:
+                            print(e)
+                            continue
+                        future_pose_node2 = (int(future_pose2[0, 0]), int(future_pose2[0, 1]))
 
-                        # add G_agg-edge from current pose to edge start
-                        if np.linalg.norm(pos_start - self.pose[0:2]) < 300:
-                            node_current_pose = (int(self.pose[0]), int(self.pose[1]))
-                            self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
-                            self.G_agg_naive.add_edge(node_current_pose, node_ego_edge_start)
+                        # now add edge from ego pose to ego edge start
+                        # and edge from ego edge start to future pose
+                        self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
+                        self.G_agg_naive.add_node(node_succ_edge_start, pos=succ_edge_start)
+                        self.G_agg_naive.add_node(future_pose_node2, pos=future_pose2[0, 0:2])
 
-                        # add G_agg-edge from edge end to future pose start
-                        closest_distance = 100000
-                        closest_edge = None
-                        for inner_edge in succ_edges:
-                            distance = np.linalg.norm(edge["pts"][0] - inner_edge["pts"][-1])
-                            if distance < 1e-3: # same edge
-                                continue
-                            if distance < closest_distance and distance < 300:
-                                closest_distance = distance
-                                closest_edge = inner_edge
+                        self.G_agg_naive.add_edge(node_current_pose, node_succ_edge_start)
+                        self.G_agg_naive.add_edge(node_succ_edge_start, future_pose_node2)
+                        print("     ! Added edge to already visited pose: {} -> {}".format(node_current_pose,
+                                                                                           node_succ_edge_start))
+                    continue
 
-                        if closest_edge is not None:
-                            if len(closest_edge["pts"]) > edge_end_idx:
-                                print("     adding edge from edge end to future pose start")
-                                pos_start = closest_edge["pts"][edge_end_idx]
-                                node_start = (int(pos_start[0]), int(pos_start[1]))
-                                self.G_agg_naive.add_node(node_start, pos=pos_start)
-                                self.G_agg_naive.add_edge(node_start, node_ego_edge_start)
+                if not was_visited and not is_already_in_queue:
 
-                                self.current_branch_age += 1
-                        break
+                    self.future_poses.append(future_pose_global)
+                    self.future_poses_destinations.append(future_pose_global)
+
+                    # add G_agg-edge from edge start to edge end
+                    self.G_agg_naive.add_node(node_succ_edge_start, pos=succ_edge_start)
+                    self.G_agg_naive.add_node(node_succ_edge_end, pos=succ_edge_end)
+
+
+                    # pointlist = np.array(edge["pts"][edge_start_idx:edge_end_idx])
+                    # self.G_agg_naive.add_edge(node_succ_edge_start, node_succ_edge_end, pts=pointlist)
+
+
+                    # # # add G_agg-edge from current pose to edge start
+                    # if np.linalg.norm(succ_edge_start - self.pose[0:2]) < 50:
+                    #     self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
+                    #     self.G_agg_naive.add_edge(node_current_pose, node_succ_edge_start)
+                    #
+                    # if np.linalg.norm(future_pose_global[0:2] - succ_edge_start) < 50:
+                    #     node_future_pose = (int(future_pose_global[0]), int(future_pose_global[1]))
+                    #     self.G_agg_naive.add_node(node_future_pose, pos=future_pose_global[0:2])
+                    #     self.G_agg_naive.add_edge(node_succ_edge_start, node_future_pose)
+
+
+                    # # add G_agg-edge from edge end to future pose start
+                    # closest_distance = 100000
+                    # closest_edge = None
+                    # for inner_edge in succ_edges:
+                    #     distance = np.linalg.norm(edge["pts"][0] - inner_edge["pts"][-1])
+                    #     if distance < 1e-3: # same edge
+                    #         continue
+                    #     if distance < closest_distance and distance < 100:
+                    #         closest_distance = distance
+                    #         closest_edge = inner_edge
+                    #
+                    # if closest_edge is not None:
+                    #     if len(closest_edge["pts"]) > edge_end_idx:
+                    #         pos_start = closest_edge["pts"][edge_end_idx]
+                    #         node_start = (int(pos_start[0]), int(pos_start[1]))
+                    #         self.G_agg_naive.add_node(node_start, pos=pos_start)
+                    #
+                    #
+                    #         # self.G_agg_naive.add_edge(node_start, node_succ_edge_start)
+                    #
+                    #         # print("     added edge from edge end to future pose start: {} -> {}".format(node_start,
+                    #         #                                                                             node_succ_edge_start))
+                    #         self.current_branch_age += 1
+
+            # add future poses to graph
+            for dest in self.future_poses_destinations:
+                node_dest = (int(dest[0]), int(dest[1]))
+                self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
+                self.G_agg_naive.add_node(node_dest, pos=dest[0:2])
+                self.G_agg_naive.add_edge(node_current_pose, node_dest)
+                print("     added edge from current pose to future pose: {} -> {}".format(node_current_pose, node_dest))
+
+
+            G_agg_naive_copy = self.G_agg_naive.copy(as_view=False)
+            # also remove all edges longer than 80 px
+            for edge in G_agg_naive_copy.edges():
+                node_1_pos = np.array(self.G_agg_naive.nodes[edge[0]]["pos"])
+                node_2_pos = np.array(self.G_agg_naive.nodes[edge[1]]["pos"])
+                if np.linalg.norm(node_1_pos - node_2_pos) > 90:
+                    self.G_agg_naive.remove_edge(edge[0], edge[1])
+                    print("     removed edge: {} -> {}".format(edge[0], edge[1]))
 
 
             if self.step % write_every == 0:
@@ -853,7 +895,7 @@ class AerialDriver(object):
                 self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
                 # self.visualize_write_G_single(self.graphs, "G_single")
 
-                cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_angle_canvas.png".format(self.tile_id, self.step), self.canvas_angles)
+                # cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_angle_canvas.png".format(self.tile_id, self.step), self.canvas_angles)
 
                 # G_agg_cvpr = driver.aggregate_graphs(self.graphs)
                 #
@@ -903,14 +945,64 @@ class AerialDriver(object):
         # if not os.path.exists(dumpdir):
         os.makedirs(dumpdir, exist_ok=True)
 
+
+        with open("{}/G_agg_naive_raw.pickle".format(dumpdir), "wb") as f:
+            pickle.dump(self.G_agg_naive, f)
+
+        G_agg = self.G_agg_naive.copy(as_view=False)
+
+        # remove node if it has no successors:
+        G_agg_copy = G_agg.copy(as_view=False)
+        for node in G_agg_copy.nodes():
+            if len(list(G_agg_copy.successors(node))) == 0:
+                G_agg.remove_node(node)
+
+        print("Number of nodes: {}, Number of edges".format(len(G_agg.nodes()), len(G_agg.edges())))
+
+        G_agg_copy = G_agg.copy(as_view=False)
+        for node in G_agg_copy.nodes():
+            if len(list(G_agg_copy.predecessors(node))) == 0:
+                G_agg.remove_node(node)
+
+        print("Number of nodes: {}, Number of edges".format(len(G_agg.nodes()), len(G_agg.edges())))
+
+        # connect edges that are close according to their step attribute
+
+        # sample edges more densly:
+        G_agg_copy = G_agg.copy(as_view=False)
+        for edge in G_agg_copy.edges():
+            # place midpoint between two nodes
+            node_1_pos = G_agg_copy.nodes[edge[0]]["pos"]
+            node_2_pos = G_agg_copy.nodes[edge[1]]["pos"]
+            midpoint = (node_1_pos + node_2_pos) / 2
+            midpoint_node = (int(midpoint[0]), int(midpoint[1]))
+            G_agg.add_node(midpoint_node, pos=midpoint)
+            G_agg.remove_edge(edge[0], edge[1])
+            # add edge between midpoint and both nodes
+            G_agg.add_edge(edge[0], midpoint_node)
+            G_agg.add_edge(midpoint_node, edge[1])
+
+
+
+        # visualize
+        self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive_final_raw")
+        self.visualize_write_G_agg(G_agg, "G_agg_naive_final_cleanup")
+
+
         # move to correct position
-        G_agg_naive = move_graph_nodes(self.G_agg_naive, [500, 500])
+        self.G_agg_naive = move_graph_nodes(self.G_agg_naive, [500, 500])
+        with open("{}/G_agg_naive_raw.pickle".format(dumpdir), "wb") as f:
+            pickle.dump(self.G_agg_naive, f)
 
-        # smooth graph
-        G_agg_naive = laplacian_smoothing(G_agg_naive, gamma=0.2, iterations=1)
+        # move to correct position
+        G_agg = move_graph_nodes(G_agg, [500, 500])
+        with open("{}/G_agg_naive_cleanup.pickle".format(dumpdir), "wb") as f:
+            pickle.dump(G_agg, f)
 
-        with open("{}/G_agg_naive_all.pickle".format(dumpdir), "wb") as f:
-            pickle.dump(G_agg_naive, f)
+
+
+
+
 
         # also move all graphs to correct position
         graphs_all = [move_graph_nodes(g, [500, 500]) for g in self.graphs]
@@ -924,10 +1016,13 @@ if __name__ == "__main__":
     tile_ids = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/*.png")
     tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
-    #tile_ids = ['4028_5330']  # freiburg
-
     if len(sys.argv) > 1:
         tile_ids = [sys.argv[1]]
+
+
+
+    # tile_ids = ['freiburg_8057_7995']  # freiburg
+
 
     for tile_id in tile_ids:
 
@@ -951,8 +1046,13 @@ if __name__ == "__main__":
         #                   type="successor",
         #                   input_layers="rgb")
 
-        driver.load_satellite(impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
-        #driver.load_satellite(impath="/data/lanegraph/freiburg/4028_5330.png")
+
+        if "freiburg" in tile_id:
+            driver.load_satellite(impath="/data/lanegraph/freiburg/{}.png".format(tile_id))
+
+        else:
+            driver.load_satellite(
+                impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
 
         while True:
             driver.drive_freely()
