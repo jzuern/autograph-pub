@@ -18,7 +18,7 @@ from aggregation.utils import AngleColorizer
 from data.datasets import SuccessorRegressorDataset, SuccessorGraphDataset
 from lanegnn.utils import ParamLib, make_image_grid
 import glob
-from evaluate import evaluate_successor_lgp
+from evaluate_full import evaluate_successor_lgp
 from driving.utils import skeletonize_prediction, skeleton_to_graph
 import pickle
 

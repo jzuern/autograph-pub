@@ -107,8 +107,7 @@ def evaluate_full_lgp(graphs_gt, graphs_pred, split):
             metrics_all[split][city][sample_id] = {}
 
             print("Full-LGP evaluating sample", sample_id)
-
-            if graphs_pred[city][split][sample_id] is None:
+            if not sample_id in graphs_pred[city][split]:
                 print("     No prediction for sample", sample_id)
                 metrics_sample = {metric_name: 0.0 for metric_name in metric_names}
             else:
@@ -119,13 +118,14 @@ def evaluate_full_lgp(graphs_gt, graphs_pred, split):
                 x_offset = float(sample_id.split("_")[2])
                 y_offset = float(sample_id.split("_")[3])
 
-                graph_pred = adjust_node_positions(graph_pred, x_offset, y_offset)
+                #graph_pred = adjust_node_positions(graph_pred, x_offset, y_offset)
                 graph_gt = adjust_node_positions(graph_gt, x_offset, y_offset)
 
                 evaluator = GraphEvaluator()
                 metrics = evaluator.evaluate_graph(graph_gt,
                                                    graph_pred,
                                                    area_size=[5000, 5000])
+                print("     Metrics:", metrics)
 
                 metrics_sample = {
                     "TOPO Precision": metrics['topo_precision'],
@@ -167,8 +167,7 @@ def evaluate_planning(graphs_gt, graphs_pred, split):
             metrics_all[split][city][sample_id] = {}
 
             print("Planning evaluating sample", sample_id)
-
-            if graphs_pred[city][split][sample_id] is None:
+            if not sample_id in graphs_pred[city][split]:
                 print("     No prediction for sample", sample_id)
                 metrics_sample = {metric_name: 0.0 for metric_name in metric_names}
             else:
@@ -283,25 +282,27 @@ def evaluate_single_full_lgp(graph_gt, graph_pred):
     return metrics_sample
 
 
-
-
 if __name__ == "__main__":
 
 
-    tile_ids = glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/eval/*.png")
+    results_dict = {}
+
+    split = 'test'
+    tile_ids = glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/{}/*.png".format(split))
+
+    model = "lanegraph"
+    # model = "tracklets"
+
+
     tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
-    #tile_ids = ["washington_46_36634_59625"]
-
     for tile_id in tile_ids:
-
-
         try:
             graph_gt = glob('/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.gpickle'.format(tile_id))[0]
-            graph_pred = '/home/zuern/Desktop/autograph/G_agg/{}/G_agg_naive_all.pickle'.format(tile_id)
+            graph_pred = '/home/zuern/Desktop/autograph/G_agg/{}/{}/G_agg_naive_all.pickle'.format(model, tile_id)
             aerial_image = glob('/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png'.format(tile_id))[0]
 
-            print("Plotting for tile: {}".format(graph_pred))
+            print("Analyzing tile: {}".format(graph_pred))
 
             aerial_image = Image.open(aerial_image)
             aerial_image = np.array(aerial_image)
@@ -311,8 +312,9 @@ if __name__ == "__main__":
             with open(graph_pred, 'rb') as f:
                 graph_pred = pickle.load(f)
 
-        except:
+        except Exception as e:
             print("Could not load graph for tile: {}".format(tile_id))
+            print(e)
             continue
 
         # adjust node positions
@@ -321,8 +323,8 @@ if __name__ == "__main__":
 
         graph_gt = adjust_node_positions(graph_gt, x_offset, y_offset)
         graph_pred = adjust_node_positions(graph_pred, 1000, 1000)
-        graph_pred = filter_graph(target=graph_gt, source=graph_pred, threshold=50)
 
+        graph_pred_filtered = filter_graph(target=graph_gt, source=graph_pred, threshold=50)
 
         # # clean up self.G_agg_naive and remove all nodes for which the successor graph is smaller than 2
         # G_agg_naive = self.G_agg_naive.copy()
@@ -342,70 +344,68 @@ if __name__ == "__main__":
         #         G_agg_naive.remove_node(node)
         #         print("removed node {} from G_agg_naive because it has too few ancestors".format(node))
 
+        #metrics_dict = evaluate_single_full_lgp(graph_gt, graph_pred)
 
+        city = tile_id.split("_")[0]
 
-        # metrics_dict = evaluate_single_full_lgp(graph_gt, graph_pred)
-        # print(metrics_dict)
+        if city not in results_dict:
+            results_dict[city] = {}
+        if split not in results_dict[city]:
+            results_dict[city][split] = {}
 
-        # also visualize with cv2
-        aerial_image_viz = cv2.cvtColor(aerial_image, cv2.COLOR_RGB2BGR)
-        for edge in graph_pred.edges:
-            start = graph_pred.nodes[edge[0]]['pos']
-            end = graph_pred.nodes[edge[1]]['pos']
-            start = (int(start[0]), int(start[1]))
-            end = (int(end[0]), int(end[1]))
+        results_dict[city][split][tile_id] = graph_pred
 
-            arrow_length = np.linalg.norm(np.array(start) - np.array(end))
-            tip_len = 1 / arrow_length * 5
-
-            cv2.arrowedLine(aerial_image_viz, start, end, (142, 0, 255), 1, tipLength=tip_len, line_type=cv2.LINE_AA)
-
-        cv2.imwrite("/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed_cv2.png".format(tile_id), aerial_image_viz)
-
-        fig, ax = plt.subplots(1, 2, figsize=(40, 20), sharex=True, sharey=True, dpi=600)
+        fig, ax = plt.subplots(1, 3, figsize=(60, 20), sharex=True, sharey=True, dpi=200)
         for a in ax:
             a.set_xticks([])
             a.set_yticks([])
             a.set_aspect('equal')
             a.axis('off')
-        # ax[0].imshow(aerial_image)
-        # ax[1].imshow(aerial_image)
+            ax.imshow(aerial_image)
         visualize_graph(graph_gt, ax[0])
-        visualize_graph(graph_pred, ax[1])
+        visualize_graph(graph_pred_filtered, ax[1])
+        visualize_graph(graph_pred, ax[2])
         ax[0].set_title("Ground Truth")
-        ax[1].set_title("Prediction")
-        svg_filename = "/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed.svg".format(tile_id)
-        plt.savefig(svg_filename)
-        plt.savefig("/home/zuern/Desktop/autograph/keep-viz/{}_pred_smoothed.png".format(tile_id))
+        ax[1].set_title("Prediction (filtered)")
+        ax[2].set_title("Prediction (unfiltered)")
+        plt.savefig("/home/zuern/Desktop/autograph/keep-viz/{}/{}_pred.png".format(model, tile_id))
+        plt.close()
 
-        # open svg file and delete line containing "<g id="figure_1">"
-        with open(svg_filename, "r") as f:
-            lines = f.readlines()
-        with open(svg_filename, "w") as f:
-            for line in lines:
-                if "<g id=\"figure_1\">" not in line:
-                    f.write(line)
+        # svg_filename = "/home/zuern/Desktop/autograph/keep-viz/{}/{}_pred.svg".format(model, tile_id)
+        #plt.savefig(svg_filename)
+        # # open svg file and delete line containing "<g id="figure_1">"
+        # with open(svg_filename, "r") as f:
+        #     lines = f.readlines()
+        # with open(svg_filename, "w") as f:
+        #     for line in lines:
+        #         if "<g id=\"figure_1\">" not in line:
+        #             f.write(line)
 
-    exit()
+    print(results_dict)
 
+    user_submission_file = "/home/zuern/Desktop/autograph/eval_full_{}_{}.pickle".format(split, model)
 
+    with open(user_submission_file, "wb") as f:
+        pickle.dump(results_dict, f)
 
 
 
     # Evaluate the submission for each task
 
     # Task: Successor LGP, Eval Split
-    # results_dict = evaluate(annotation_file="annotations_successor_lgp_eval.pickle",
+    # metrics_dict = evaluate(annotation_file="annotations_successor_lgp_eval.pickle",
     #                         user_submission_file="succ_lgp_eval_autograph.pickle",
     #                         phase_codename="phase_successor_lgp")
 
     # # Task: Full LGP, Eval Split
-    results_dict = evaluate(annotation_file="annotations_full_lgp_eval.pickle",
-                            user_submission_file="/home/zuern/Desktop/autograph/tmp/G_agg/0011_G_agg_cvpr.pickle",
+    metrics_dict = evaluate(annotation_file="/home/zuern/lanegnn-dev/urbanlanegraph_evaluator/annotations_full_lgp_test.pickle",
+                            user_submission_file=user_submission_file,
                             phase_codename="phase_full_lgp",
-                            split="eval")
-    #
+                            split="test")
+
+    pprint.pprint(metrics_dict)
+
     # # Task: Planning, Eval Split
-    # results_dict = evaluate(annotation_file="annotations_full_lgp_eval.pickle",
+    # metrics_dict = evaluate(annotation_file="annotations_full_lgp_eval.pickle",
     #                         user_submission_file="annotations_full_lgp_eval.pickle",
     #                         phase_codename="phase_planning")

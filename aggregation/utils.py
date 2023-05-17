@@ -20,7 +20,9 @@ import matplotlib.pyplot as plt
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_angles,  get_oriented_crop, transform2vgg
 
 
-def filter_graph(target, source, threshold=100):
+def filter_graph(target, source_, threshold=100):
+
+    source = source_.copy(as_view=False)
 
     if len(source.nodes()) == 0:
         return source

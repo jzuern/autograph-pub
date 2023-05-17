@@ -17,16 +17,18 @@ import glob
 import os
 from aggregation.utils import similarity_check, out_of_bounds_check, visualize_graph, AngleColorizer, laplacian_smoothing
 from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
+import sys
+import json
 
 keyboard = Controller()
 
 
 # SETTINGS
 
-skeleton_threshold = 0.08  # threshold for skeletonization
+skeleton_threshold = 0.05  # 0.08  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
-write_every = 10            # write to disk every n steps
+write_every = 5           # write to disk every n steps
 waitkey_ms = 1
 
 
@@ -35,254 +37,7 @@ threshold_px = 30
 threshold_rad = 0.2
 closest_lat_thresh = 30
 
-
-# init_poses = {'paloalto_43_25359_23592': [[2925, 1557, 0.5317240672588055],
-#                                           [3132, 1479, -1.0303768265243125],
-#                                           [2853, 1341, 2.2236429578956707],
-#                                           [3060, 1269, 3.7670776938290222]],
-#               'washington_46_36634_59625': [[2565, 798, 1.6092389168160846],
-#                                             [3015, 603, 3.2610215796081317],
-#                                             [3036, 990, 0.04164257909858837],
-#                                             [3285, 777, -1.5102643070127897],
-#                                             [1272, 2466, 1.6672701019774834],
-#                                             [1776, 2247, 3.104572537715863],
-#                                             [1959, 2466, 4.71238898038469],
-#                                             [2157, 2490, 1.6563016204731011],
-#                                             [2667, 2478, -1.4940244355251187],
-#                                             [2397, 2733, 0.0],
-#                                             [2370, 2277, 3.0916342578678506]]}
-
-
-
-init_poses = {'austin_40_14021_51605': [[339, 4353, 0.3347368373168147],
-                                        [231, 1422, 1.7894652726688385],
-                                        [2907, 30, 2.958481836327309],
-                                        [4623, 405, -1.5152978215491797],
-                                        [4239, 3807, 0.4506613260806336],
-                                        [1266, 4116, -0.18534794999569493],
-                                        [429, 4053, 0.291456794477867],
-                                        [1707, 2637, 0.7853981633974483],
-                                        [3234, 1902, -1.4994888620096063],
-                                        [4752, 2082, -0.551654982528547]],
-              'austin_83_34021_46605': [[33, 1917, 2.0106389096106327],
-                                        [4239, 105, 3.638015406994675],
-                                        [4968, 1455, -1.2490457723982544],
-                                        [30, 3543, 0.244978663126864],
-                                        [1794, 3894, 0.372987721800061],
-                                        [24, 495, 2.0647376957144776],
-                                        [57, 927, 1.9890206563741257],
-                                        [1935, 2658, 1.8391625377008034],
-                                        [1785, 1356, 3.5380339368082345],
-                                        [4818, 3702, -1.1597317794050324],
-                                        [3873, 2994, 0.39479111969976155]],
-              'detroit_136_10700_30709': [[33, 4005, 1.1441688336680205],
-                                          [45, 636, 1.7004988639508087],
-                                          [4221, 36, 4.19683997292571],
-                                          [4701, 807, -0.3109982806055409],
-                                          [4023, 3891, -0.2965458090697006],
-                                          [4590, 3804, -0.3612037554936818],
-                                          [1746, 3702, -0.5619215622568152],
-                                          [315, 3837, 1.2627435457711202]],
-              'detroit_165_25700_30709': [[3606, 2313, 4.209545769456829],
-                                          [3516, 2418, 1.1659045405098132],
-                                          [243, 4140, 1.2793395323170293],
-                                          [6, 3387, 2.761086276477428],
-                                          [216, 4560, -0.7853981633974483],
-                                          [201, 1692, 2.3996453855838755],
-                                          [27, 2244, 0.9544993893988253],
-                                          [2364, 1725, 4.14386443265365],
-                                          [2526, 189, 2.626043646130814],
-                                          [3342, 39, 2.5625183842220625],
-                                          [4962, 309, 4.124386376837123],
-                                          [4251, 513, 2.709184878019255],
-                                          [4974, 1782, -0.6078019961139605]],
-              'miami_185_41863_18400': [[45, 1887, 1.729451588981298],
-                                        [1515, 1272, 3.064820762320015],
-                                        [153, 39, 3.173839536025047],
-                                        [3465, 69, 3.1145722044025286],
-                                        [4740, 990, 4.71238898038469],
-                                        [4716, 3822, -1.5152978215491797],
-                                        [33, 3324, 1.6352231662204502],
-                                        [2793, 3849, -0.09347678115858948],
-                                        [1221, 615, 2.2655346029915995],
-                                        [4488, 2211, -1.1164942401015803]],
-              'miami_194_46863_3400': [[66, 2319, 1.5707963267948966],
-                                       [99, 273, 1.5363272257953886],
-                                       [3465, 36, 3.1638112189165124],
-                                       [4878, 288, 4.691558660348473],
-                                       [4416, 3879, 0.0739390376579403],
-                                       [2583, 3000, 0.0],
-                                       [75, 1656, 1.4056476493802696],
-                                       [2532, 1035, 1.5971060440478189]],
-              'paloalto_43_25359_23592': [[780, 3663, 0.6202494859828214],
-                                          [1875, 4116, -0.9481255380378295],
-                                          [210, 1407, 2.4061528859142878],
-                                          [2841, 1302, -0.9827937232473292],
-                                          [3498, 1941, 0.6435011087932844],
-                                          [4362, 4332, 0.7188299996216244],
-                                          [3357, 4056, -1.0074800653029286],
-                                          [2163, 222, 3.6299266046461987]],
-              'paloalto_62_35359_38592': [[327, 1740, 0.39852244566642026],
-                                          [228, 1431, 2.525295716193722],
-                                          [408, 4206, 0.5763752205911836],
-                                          [4533, 4068, 0.6799088548723576],
-                                          [3693, 4257, -1.0617254383725134],
-                                          [4875, 1587, -0.9357695914045827],
-                                          [3180, 33, 3.719494590552039],
-                                          [4398, 402, 3.7618421395726145],
-                                          [51, 273, 2.0647376957144776],
-                                          [2067, 291, 3.593746515875569]],
-              'pittsburgh_36_27706_11407': [[9, 3219, 1.396124127786657],
-                                            [24, 2358, 1.4141944498128811],
-                                            [21, 1455, 1.2490457723982544],
-                                            [516, 39, 2.356194490192345],
-                                            [2148, 33, 2.245537269018449],
-                                            [3225, 255, 2.5213431676069717],
-                                            [4983, 249, 4.514993420534809],
-                                            [4989, 909, -0.7853981633974483],
-                                            [4974, 2103, 4.508371000792142],
-                                            [4239, 1674, 4.4674103172578254]],
-              'pittsburgh_5_2706_31407': [[3561, 2730, 0.44441920990109884],
-                                          [18, 537, 2.0344439357957027],
-                                          [1413, 180, 0.48995732625372823],
-                                          [4692, 318, 3.653982113900531],
-                                          [4614, 1470, -1.0014831356942349],
-                                          [3054, 768, 2.0899424410414196],
-                                          [2910, 1530, 0.4266274931268761],
-                                          [4845, 2991, -0.41822432957922917],
-                                          [4542, 2979, 2.173083672929861]],
-              'washington_46_36634_59625': [[447, 2487, 1.6107750139181867],
-                                            [33, 3042, 3.0940095503128098],
-                                            [2067, 3426, 4.71238898038469],
-                                            [1800, 534, 3.141592653589793],
-                                            [3018, 528, 3.141592653589793],
-                                            [3057, 1053, 0.03123983343026815],
-                                            [4923, 690, 3.9540112661745064],
-                                            [4785, 2526, -1.4711276743037347],
-                                            [4302, 3723, 0.043450895391530686],
-                                            [2970, 4398, 0.0688564893010446]],
-              'washington_55_41634_69625': [[57, 255, 1.6052654277944045],
-                                            [90, 1098, 1.4659193880646626],
-                                            [216, 4113, 1.6078164426688266],
-                                            [1758, 3996, 0.04542327942157698],
-                                            [3627, 3951, 0.07878396098914364],
-                                            [4842, 2775, 4.412217809554578],
-                                            [4752, 1974, -1.5422326689561365],
-                                            [4770, 1476, -0.9900399732272263],
-                                            [4602, 318, 4.680142097949435],
-                                            [2538, 1260, 3.1749136494680403],
-                                            [1800, 2403, -0.08314123188844125]],
-              'austin_41_14021_56605': [[4959, 1341, -1.0552473193359178],
-                                        [4305, 54, 3.618938035963465],
-                                        [516, 3990, 0.11065722117389565],
-                                        [2712, 3996, 0.25367409613864256],
-                                        [4308, 3303, 0.0],
-                                        [213, 1350, 0.448723344010721],
-                                        [1977, 297, 3.4633432079864352],
-                                        [9, 3474, 2.0344439357957027],
-                                        [411, 1722, 2.256525837701183],
-                                        [3405, 2652, 0.5937496667107711],
-                                        [3723, 2034, 3.792669375034273],
-                                        [1734, 1017, 3.589112628746963]],
-              'austin_72_29021_46605': [[192, 33, 1.800028260071892],
-                                        [3402, 39, 3.5284683713208214],
-                                        [15, 726, 1.9862884227357873],
-                                        [1902, 3996, 0.47646741947370663],
-                                        [927, 3984, 0.30970294454245617],
-                                        [4497, 3984, -1.2397002500907646],
-                                        [4251, 3102, -1.1987285679367763],
-                                        [4977, 2598, -1.3382393849899876],
-                                        [4932, 1839, -1.3258176636680323],
-                                        [2562, 2301, 0.46364760900080615],
-                                        [774, 2544, 1.9990604796715514],
-                                        [234, 1572, 2.0131705497716412],
-                                        [78, 3678, 0.30092023436042514],
-                                        [1623, 1335, 2.0647376957144776]],
-              'detroit_204_45700_25709': [[24, 2163, 1.0636978224025597],
-                                          [21, 618, 1.4288992721907325],
-                                          [336, 1038, 1.1801892830972098],
-                                          [1740, 1290, 1.1071487177940904],
-                                          [3294, 747, -0.46364760900080615],
-                                          [2514, 1851, 1.5707963267948966]],
-              'miami_143_21863_48400': [[2745, 9, 3.2129001183750834],
-                                        [3522, 12, 3.1915510493117356],
-                                        [4953, 120, 4.509343763131225],
-                                        [4686, 3978, -0.8139618212362083],
-                                        [3456, 2586, -0.8050034942546529],
-                                        [3009, 3984, 0.09347678115858948],
-                                        [252, 3951, 0.0],
-                                        [30, 3060, 1.5707963267948966],
-                                        [24, 900, 1.1441688336680205],
-                                        [2943, 2640, 0.0],
-                                        [2142, 3000, 1.5011417530663285]],
-              'miami_94_1863_43400': [[3708, 3978, 0.05875582271572255],
-                                      [3636, 1473, -0.09966865249116208],
-                                      [3471, 87, 3.141592653589793],
-                                      [3, 2877, 1.5707963267948966],
-                                      [741, 231, 3.141592653589793],
-                                      [4977, 3378, 4.63022145802299],
-                                      [4644, 1179, 4.71238898038469],
-                                      [4620, 636, 4.71238898038469],
-                                      [1290, 1893, 1.4157995848709555],
-                                      [2589, 3453, 1.2637505947761059],
-                                      [918, 3168, 0.0]],
-              'paloalto_24_15359_8592': [[1083, 4182, 0.6610431688506868],
-                                         [204, 3750, 0.7216548508647612],
-                                         [15, 2349, 2.2367655641740063],
-                                         [27, 906, 2.181522291184105],
-                                         [2631, 39, 2.2264919530364327],
-                                         [3855, 609, 3.9724140964088184],
-                                         [4926, 1791, -0.9440534255838497],
-                                         [4773, 3090, -0.8728935041998396],
-                                         [4431, 4278, -0.9119902906774207]],
-              'paloalto_49_30359_13592': [[15, 489, 1.3415643935179011],
-                                          [957, 252, 2.356194490192345],
-                                          [3084, 87, 3.8885482269660536],
-                                          [3624, 477, 3.8088987885681473],
-                                          [3972, 2160, 3.8744077553763],
-                                          [4260, 2433, 3.7083218711132995],
-                                          [2136, 4257, 0.8441539861131709],
-                                          [51, 4065, 0.702256931509007]],
-              'pittsburgh_19_12706_31407': [[24, 3432, 1.5707963267948966],
-                                            [21, 1899, 1.6447353644528369],
-                                            [15, 495, 1.7561442767905913],
-                                            [2784, 18, 3.4198923125949046],
-                                            [4950, 222, 4.71238898038469],
-                                            [4977, 1410, -1.3009471708564275],
-                                            [4959, 2631, 4.67536886451076],
-                                            [2529, 1905, 1.8076450877418169],
-                                            [1938, 1032, 3.2564692590066926],
-                                            [1848, 3081, 0.2252767792140553],
-                                            [3249, 1533, 0.18822150530477066],
-                                            [903, 921, 3.141592653589793]],
-              'pittsburgh_67_47706_26407': [[57, 1194, 1.5707963267948966],
-                                            [516, 45, 2.7291822119924056],
-                                            [3858, 51, 2.8501358591119264],
-                                            [4980, 1083, 4.446136931233765],
-                                            [4986, 2673, 4.53397848103365],
-                                            [4794, 3972, -0.1651486774146269],
-                                            [2760, 3930, 0.0],
-                                            [1482, 3882, 0.0739390376579403],
-                                            [627, 3462, 1.4968572891369563],
-                                            [123, 2763, 1.5707963267948966],
-                                            [2499, 2247, -0.3455555805817121],
-                                            [3612, 1275, -1.3886280163221332],
-                                            [4530, 2478, -0.27300870308671077]],
-              'washington_48_36634_69625': [[15, 1875, 2.3036114285814033],
-                                            [495, 1782, 1.5707963267948966],
-                                            [1563, 1221, 3.2112472273183617],
-                                            [2178, 1230, 3.1093457711545396],
-                                            [1578, 12, 3.1941757152007346],
-                                            [2205, 18, 3.3726833207856903],
-                                            [2814, 33, 3.141592653589793],
-                                            [4131, 12, 3.189175756866777],
-                                            [4977, 1053, 4.71238898038469],
-                                            [4542, 4197, -0.962107019467485],
-                                            [1527, 4215, 0.03123983343026815],
-                                            [2766, 4197, 0.0],
-                                            [663, 4161, 0.04164257909858837]]}
-
-
+init_poses = json.load(open('starting_poses.json', 'r'))
 
 def move_graph_nodes(g, delta):
     g_ = g.copy(as_view=False)
@@ -377,8 +132,8 @@ class AerialDriver(object):
         print("City: {}".format(self.city_name))
 
         dumpdir = "/home/zuern/Desktop/autograph/G_agg/{}".format(self.tile_id)
-        if not os.path.exists(dumpdir):
-            os.makedirs(dumpdir)
+        os.makedirs(dumpdir, exist_ok=True)
+        os.makedirs(dumpdir + "/debug/", exist_ok=True)
 
         # Embed the aerial image into a larger image to avoid edge effects
         self.aerial_image = np.pad(self.aerial_image, ((500, 500), (500, 500),
@@ -627,8 +382,6 @@ class AerialDriver(object):
         cv2.imshow("pred_angles_color", pred_angles_color)
         cv2.imshow("rgb", rgb)
 
-        #cv2.waitKey(1000000)
-
         self.add_pred_to_canvas(skeleton)
 
         pred_succ = (pred_succ * 255).astype(np.uint8)
@@ -664,7 +417,7 @@ class AerialDriver(object):
             axarr[4].title.set_text('pred_angles_succ_color')
             axarr[5].imshow(skeleton)
             axarr[5].title.set_text('skeleton')
-            plt.savefig("/home/zuern/Desktop/autograph/debug/{}-{:04d}_matplotlib.png".format(self.tile_id, self.step))
+            plt.savefig("/home/zuern/Desktop/autograph/G_agg/{}/debug/{:04d}.png".format(self.tile_id, self.step))
             plt.close(fig)
 
         # cv2.imwrite("/home/zuern/Desktop/autograph/debug/{}-{:04d}_pred_succ_viz.png".format(self.tile_id, self.step), pred_succ_viz)
@@ -898,15 +651,17 @@ class AerialDriver(object):
 
         succ_graph_weight = np.sum(self.skeleton * self.pred_drivable)
 
+        #plt.imshow(self.current_crop)
+        #plt.imshow(self.skeleton, alpha=0.5)
+        #plt.show()
+
         # do branch_alive check
         branch_alive = True
         if succ_graph_weight < 50:
             print("     Successor Graph too weak, aborting branch")
             branch_alive = False
 
-
         if branch_alive:
-
             G_current_global = nx.DiGraph()
 
             # add nodes and edges from self.graph_skeleton and transform to global coordinates (for aggregation)
@@ -974,23 +729,63 @@ class AerialDriver(object):
                     future_pose_global[2] = self.yaw_check(angle_global)
 
                     # put future pose in queue if not yet visited
-                    was_visited, matches = similarity_check(future_pose_global,
+                    was_visited, matches_visited = similarity_check(future_pose_global,
                                                             self.pose_history,
                                                             min_dist=30,
                                                             min_angle=np.pi/4)
 
-                    is_already_in_queue, _ = similarity_check(future_pose_global,
+                    is_already_in_queue, matches_future = similarity_check(future_pose_global,
                                                               self.future_poses,
                                                               min_dist=30,
                                                               min_angle=np.pi/4)
 
                     # print("     Current branch age: {}".format(self.current_branch_age))
+
+                    # get pointlist from ego-edge
+                    pointlist = np.array(edge["pts"][edge_start_idx:edge_end_idx])
+
+                    node_ego_edge_start = (int(pos_start[0]), int(pos_start[1]))
+                    node_ego_edge_end = (int(pos_end[0]), int(pos_end[1]))
+
+
+                    if is_already_in_queue:
+
+                        print("     future pose already in queue. Connecting to current pose.")
+                        node_positions = nx.get_node_attributes(self.G_agg_naive, "pos")
+                        node_positions = np.array(list(node_positions.values()))
+                        nodes_list = np.array(list(self.G_agg_naive.nodes()))
+
+                        for match in matches_future:
+                            future_pose = self.future_poses[match][np.newaxis, 0:2]
+                            # get node in G_agg_naive that corresponds to visited pose
+                            closest_node = np.argmin(np.linalg.norm(node_positions - future_pose, axis=1))
+                            edge_end_id = nodes_list[closest_node]
+                            edge_end_id = (int(edge_end_id[0]), int(edge_end_id[1]))
+
+                            # now add edge from future_pose_global to node_id
+                            try:
+                                node_ego = (int(pos_start[0]), int(pos_start[1]))
+                                self.G_agg_naive.add_node(node_ego, pos=pos_start)
+
+                                edge_start_pos = future_pose_global[0:2]
+                                edge_start_id = (int(edge_start_pos[0]), int(edge_start_pos[1]))
+
+                                self.G_agg_naive.add_node(node_ego, pos=pos_start)
+                                self.G_agg_naive.add_node(edge_start_id, pos=edge_start_pos)
+                                self.G_agg_naive.add_edge(node_ego, edge_start_id)
+                                print("     ! Added edge to visited pose: {} -> {}".format(edge_start_id, edge_end_id))
+
+                            except Exception as e:
+                                print(e)
+                                continue
+
+
                     if was_visited:
                         node_positions = nx.get_node_attributes(self.G_agg_naive, "pos")
                         node_positions = np.array(list(node_positions.values()))
                         nodes_list = np.array(list(self.G_agg_naive.nodes()))
 
-                        for match in matches:
+                        for match in matches_visited:
                             visited_pose = self.pose_history[match][np.newaxis, 0:2]
                             # get node in G_agg_naive that corresponds to visited pose
                             closest_node = np.argmin(np.linalg.norm(node_positions - visited_pose, axis=1))
@@ -1015,33 +810,20 @@ class AerialDriver(object):
                                 print(e)
                                 continue
 
-
-
-
                     if not was_visited and not is_already_in_queue:
 
                         self.future_poses.append(future_pose_global)
-                        # print("     put pose in queue: {:.0f}, {:.0f}, {:.1f} (step size: {})".format(future_pose_global[0],
-                        #                                                                               future_pose_global[1],
-                        #                                                                               future_pose_global[2],
-                        #                                                                               step_size))
-
-                        # add edge to aggregated graph
-                        pointlist = np.array(edge["pts"][edge_start_idx:edge_end_idx])
-
-                        node_edge_start = (int(pos_start[0]), int(pos_start[1]))
-                        node_edge_end = (int(pos_end[0]), int(pos_end[1]))
 
                         # add G_agg-edge from edge start to edge end
-                        self.G_agg_naive.add_node(node_edge_start, pos=pos_start)
-                        self.G_agg_naive.add_node(node_edge_end, pos=pos_end)
-                        self.G_agg_naive.add_edge(node_edge_start, node_edge_end, pts=pointlist)
+                        self.G_agg_naive.add_node(node_ego_edge_start, pos=pos_start)
+                        self.G_agg_naive.add_node(node_ego_edge_end, pos=pos_end)
+                        self.G_agg_naive.add_edge(node_ego_edge_start, node_ego_edge_end, pts=pointlist)
 
                         # add G_agg-edge from current pose to edge start
-                        if np.linalg.norm(pos_start - self.pose[0:2]) < 50:
+                        if np.linalg.norm(pos_start - self.pose[0:2]) < 300:
                             node_current_pose = (int(self.pose[0]), int(self.pose[1]))
                             self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
-                            self.G_agg_naive.add_edge(node_current_pose, node_edge_start)
+                            self.G_agg_naive.add_edge(node_current_pose, node_ego_edge_start)
 
                         # add G_agg-edge from edge end to future pose start
                         closest_distance = 100000
@@ -1050,7 +832,7 @@ class AerialDriver(object):
                             distance = np.linalg.norm(edge["pts"][0] - inner_edge["pts"][-1])
                             if distance < 1e-3: # same edge
                                 continue
-                            if distance < closest_distance and distance < 100:
+                            if distance < closest_distance and distance < 300:
                                 closest_distance = distance
                                 closest_edge = inner_edge
 
@@ -1060,15 +842,16 @@ class AerialDriver(object):
                                 pos_start = closest_edge["pts"][edge_end_idx]
                                 node_start = (int(pos_start[0]), int(pos_start[1]))
                                 self.G_agg_naive.add_node(node_start, pos=pos_start)
-                                self.G_agg_naive.add_edge(node_start, node_edge_start)
+                                self.G_agg_naive.add_edge(node_start, node_ego_edge_start)
 
                                 self.current_branch_age += 1
                         break
 
+
             if self.step % write_every == 0:
                 self.render_poses_in_aerial()
                 self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
-                self.visualize_write_G_single(self.graphs, "G_single")
+                # self.visualize_write_G_single(self.graphs, "G_single")
 
                 cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_angle_canvas.png".format(self.tile_id, self.step), self.canvas_angles)
 
@@ -1117,8 +900,8 @@ class AerialDriver(object):
         dumpdir = "/home/zuern/Desktop/autograph/G_agg/{}".format(self.tile_id)
 
         # write self.graphs to disk
-        if not os.path.exists(dumpdir):
-            os.makedirs(dumpdir)
+        # if not os.path.exists(dumpdir):
+        os.makedirs(dumpdir, exist_ok=True)
 
         # move to correct position
         G_agg_naive = move_graph_nodes(self.G_agg_naive, [500, 500])
@@ -1138,28 +921,38 @@ class AerialDriver(object):
 
 if __name__ == "__main__":
 
-    input_layers = "rgb+drivable+angles"
-
-    tile_ids = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/test/*.png")
+    tile_ids = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/*.png")
     tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
-    # tile_ids = ['washington_46_36634_59625']
+    #tile_ids = ['4028_5330']  # freiburg
 
+    if len(sys.argv) > 1:
+        tile_ids = [sys.argv[1]]
 
     for tile_id in tile_ids:
 
         print("Driving on tile {}".format(tile_id))
 
-        driver = AerialDriver(debug=True, input_layers=input_layers, tile_id=tile_id)
+        driver = AerialDriver(debug=True,
+                              input_layers="rgb",
+                              tile_id=tile_id)
 
-        driver.load_model(model_path="/data/autograph/checkpoints/civilized-bothan-187/e-150.pth",  # (all-3004)
+        # Tracklets_joint
+        driver.load_model(model_path="/data/autograph/checkpoints/serene-voice-204/e-016.pth",  # (all-3004)
                           type="full")
-        driver.load_model(model_path="/data/autograph/checkpoints/jumping-spaceship-188/e-040.pth",  # (all-3004)
+        driver.load_model(model_path="/data/autograph/checkpoints/visionary-voice-212/e-030.pth",  # (all-3004)
                           type="successor",
-                          input_layers=input_layers,
-                          )
+                          input_layers="rgb")
+
+        # Lanegraph
+        # driver.load_model(model_path="/data/autograph/checkpoints/dulcet-water-210/e-058.pth",  # (all-3004)
+        #                   type="full")
+        # driver.load_model(model_path="/data/autograph/checkpoints/fallen-oath-217/e-050.pth",  # (all-3004)
+        #                   type="successor",
+        #                   input_layers="rgb")
 
         driver.load_satellite(impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
+        #driver.load_satellite(impath="/data/lanegraph/freiburg/4028_5330.png")
 
         while True:
             driver.drive_freely()

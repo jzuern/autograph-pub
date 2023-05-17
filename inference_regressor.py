@@ -10,7 +10,7 @@ Image.MAX_IMAGE_PIXELS = None
 import networkx as nx
 import pickle
 import os
-from evaluate import evaluate
+from evaluate_full import evaluate
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import pprint
@@ -20,8 +20,6 @@ import pandas as pd
 from aggregation.utils import visualize_graph, AngleColorizer
 from driving.utils import skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
 
-
-skeleton_threshold = 0.15
 
 
 class FormatPrinter(pprint.PrettyPrinter):
@@ -102,7 +100,7 @@ def load_succ_model(model_path, full_model=False, input_layers="rgb+drivable+ang
     return model_succ
 
 
-def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, split):
+def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_threshold, picklefile, split):
 
     # Image folder
     test_images = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*-rgb.png".format(split)))
@@ -112,15 +110,13 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
 
     ac = AngleColorizer()
 
-    # shuffle(test_images)
-
-    # # jointly shuffle them
+    # jointly shuffle them
     joint = list(zip(test_images, test_graphs))
     shuffle(joint)
     test_images, test_graphs = zip(*joint)
 
     # Load model
-    model_full = load_full_model(model_path=full_model_pth)
+    # model_full = load_full_model(model_path=full_model_pth)
     model_succ = load_succ_model(model_path=succ_model_pth,
                                  full_model=True,
                                  input_layers=input_layers)
@@ -160,13 +156,13 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
             rgb_torch = torch.from_numpy(img).permute(2, 0, 1).float().cuda() / 255.
             rgb_torch = rgb_torch.unsqueeze(0)
 
-            (pred, _) = model_full(rgb_torch)
-            pred = torch.nn.functional.interpolate(pred,
-                                                   size=rgb_torch.shape[2:],
-                                                   mode='bilinear',
-                                                   align_corners=True)
-            pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
-            pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
+            # (pred, _) = model_full(rgb_torch)
+            # pred = torch.nn.functional.interpolate(pred,
+            #                                        size=rgb_torch.shape[2:],
+            #                                        mode='bilinear',
+            #                                        align_corners=True)
+            # pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
+            # pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
             if input_layers == "rgb":
                 in_tensor = rgb_torch
@@ -191,11 +187,11 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
 
         succ_graph = roundify_skeleton_graph(succ_graph)
 
-        # visualize full model predictions
-        pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
+        # # visualize full model predictions
+        # pred_drivable = pred_drivable[0, 0].cpu().detach().numpy()
 
-        pred_angles = ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
-        pred_angles_color = ac.angle_to_color(pred_angles, mask=pred_drivable > 0.3)
+        # pred_angles = ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
+        # pred_angles_color = ac.angle_to_color(pred_angles, mask=pred_drivable > 0.3)
 
 
 
@@ -207,42 +203,45 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
 
 
         images.append(img)
-        images_succ.append(np.digitize(pred_succ, np.arange(0, 1.1, 0.1)))
+        # images_succ.append(np.digitize(pred_succ, np.arange(0, 1.1, 0.1)))
+        images_succ.append(pred_succ)
         graphs_pred.append(succ_graph)
         graphs_gt.append(gt_graph)
-        preds_angles_color.append(pred_angles_color)
-        preds_drivable.append(pred_drivable)
+        # preds_angles_color.append(pred_angles_color)
+        # preds_drivable.append(pred_drivable)
         sample_ids.append(sample_id)
 
-        # Visualize
-        print(sample_id)
-        plot_every = 10
-        if image_counter % plot_every == 0 and image_counter > 0:
-            fig, ax = plt.subplots(plot_every, 6, sharex=True, sharey=True, figsize=(10, 30))
-            plt.tight_layout()
-            plt.subplots_adjust(wspace=0, hspace=0)
-            for i in range(plot_every):
-                [ax[i, j].axis("off") for j in range(6)]
-                ax[i, 0].set_title(sample_ids[image_counter-i])
-                img = cv2.cvtColor(images[image_counter-i], cv2.COLOR_BGR2RGB)
-                visualize_graph(graphs_gt[image_counter-i], ax[i, 0], aerial_image=img, node_color='white', edge_color='white')
-                visualize_graph(graphs_pred[image_counter-i], ax[i, 1], aerial_image=img)
-                visualize_graph(graphs_gt[image_counter-i], ax[i, 2], aerial_image=img, node_color='white', edge_color='white')
-                visualize_graph(graphs_pred[image_counter-i], ax[i, 2], aerial_image=img)
-                ax[i, 3].imshow(images_succ[image_counter-i], vmin=1.1, cmap="jet")
-                ax[i, 4].imshow(preds_drivable[image_counter - i])
-                ax[i, 5].imshow(preds_angles_color[image_counter - i])
+        # # Visualize
+        # print(sample_id)
+        # plot_every = 10
+        # if image_counter % plot_every == 0 and image_counter > 0:
+        #     fig, ax = plt.subplots(plot_every, 4, sharex=True, sharey=True, figsize=(10, 30), dpi=600)
+        #     plt.tight_layout()
+        #     plt.subplots_adjust(wspace=0, hspace=0)
+        #     for i in range(plot_every):
+        #         [ax[i, j].axis("off") for j in range(4)]
+        #         ax[i, 0].set_title(sample_ids[image_counter-i])
+        #         img = cv2.cvtColor(images[image_counter-i], cv2.COLOR_BGR2RGB)
+        #         visualize_graph(graphs_gt[image_counter-i], ax[i, 0], aerial_image=img, node_color='white', edge_color='white')
+        #         visualize_graph(graphs_pred[image_counter-i], ax[i, 1], aerial_image=img)
+        #         visualize_graph(graphs_gt[image_counter-i], ax[i, 2], aerial_image=img, node_color='white', edge_color='white')
+        #         visualize_graph(graphs_pred[image_counter-i], ax[i, 2], aerial_image=img)
+        #         ax[i, 3].imshow(images_succ[image_counter-i], cmap="viridis")
+        #         # ax[i, 4].imshow(preds_drivable[image_counter - i])
+        #         # ax[i, 5].imshow(preds_angles_color[image_counter - i])
+        #
+        #     svg_filename = "/home/zuern/Desktop/autograph/eval_succ/viz/{:04d}.svg".format(image_counter)
+        #     # plt.savefig(svg_filename)
+        #     # # open svg file and delete line containing "<g id="figure_1">"
+        #     # with open(svg_filename, "r") as f:
+        #     #     lines = f.readlines()
+        #     # with open(svg_filename, "w") as f:
+        #     #     for line in lines:
+        #     #         if "<g id=\"figure_1\">" not in line:
+        #     #             f.write(line)
+        #
+        #     plt.savefig(svg_filename.replace(".svg", ".png"))
 
-            svg_filename = "/home/zuern/Desktop/autograph/eval_succ/viz/{:04d}.svg".format(image_counter)
-            plt.savefig(svg_filename)
-
-            # open svg file and delete line containing "<g id="figure_1">"
-            with open(svg_filename, "r") as f:
-                lines = f.readlines()
-            with open(svg_filename, "w") as f:
-                for line in lines:
-                    if "<g id=\"figure_1\">" not in line:
-                        f.write(line)
 
     pickle.dump(pred_dict, open(picklefile, "wb"))
 
@@ -250,80 +249,79 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, picklefile, 
 if __name__ == "__main__":
 
     split = "test"
+    skeleton_thresholds = np.arange(0.0, 0.2, 0.01)
+    #skeleton_thresholds = [0.05]
 
-    # full model
-    full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model tracklets
-    #full_model_pth = "/data/autograph/checkpoints/civilized-bothan-187/e-150.pth"     # full model lanegraph
+    # best threshold tracklets: 0.02
+    # best threshold lanegraph: 0.02
 
-    # succ model dict
+
     model_dicts = [
-        {"model_path": "/data/autograph/checkpoints/jumping-spaceship-188/e-040.pth",
-         "model_notes": "tracklets_joint|successor|rgb+drivable+angles",
-         "input_layers": "rgb+drivable+angles"},
-
-        {"model_path": "/data/autograph/checkpoints/tough-blaze-198/e-008.pth",
+        {"model_path": "/data/autograph/checkpoints/visionary-voice-212/e-030.pth",    # tracklets
+         "full_model_pth": "/data/autograph/checkpoints/serene-voice-204/e-016.pth",   # tracklets
          "model_notes": "tracklets_joint|successor|rgb",
          "input_layers": "rgb"},
 
-        {"model_path": "/data/autograph/checkpoints/hardy-frog-198/e-012.pth",
-            "model_notes": "tracklets_joint|successor|rgb+drivable",
-            "input_layers": "rgb+drivable"},
-
-        {"model_path": "/data/autograph/checkpoints/splendid-breeze-198/e-010.pth",
-            "model_notes": "tracklets_joint|successor|rgb+drivable+angles",
-            "input_layers": "rgb+drivable+angles"},
-
-        {"model_path": "/data/autograph/checkpoints/dandy-cherry-199/e-032.pth",
-            "model_notes": "tracklets_raw|successor|rgb",
-            "input_layers": "rgb"},
+        {"model_path": "/data/autograph/checkpoints/fallen-oath-217/e-050.pth",       # lanegraph
+         "full_model_pth": "/data/autograph/checkpoints/dulcet-water-210/e-058.pth",  # lanegraph
+         "model_notes": "tracklets_joint|successor|rgb",
+         "input_layers": "rgb"},
     ]
 
     results_df = pd.DataFrame(columns=["model_name", "model_notes", "split", "iou", "apls", "geo_precision",
                                        "geo_recall","topo_precision","topo_recall","sda@20","sda@50"])
 
+
     for model_dict in model_dicts:
         succ_model_pth = model_dict["model_path"]
         model_notes = model_dict["model_notes"]
         input_layers = model_dict["input_layers"]
-
+        full_model_pth = model_dict["full_model_pth"]
 
         model_name = succ_model_pth.split("/")[-2:]
         model_name = "_".join(model_name)
         model_identifier = model_name + "_" + model_notes + "_" + split
 
-        predictions_file = '/home/zuern/Desktop/autograph/eval_succ/{}_predictions.pickle'.format(model_identifier)
-        run_successor_lgp(full_model_pth=full_model_pth,
-                          succ_model_pth=succ_model_pth,
-                          input_layers=input_layers,
-                          picklefile=predictions_file,
-                          split=split)
+        for skeleton_threshold in skeleton_thresholds:
 
-        results_dict = evaluate(annotation_file="/home/zuern/lanegnn-dev/urbanlanegraph_evaluator/annotations_successor_lgp_{}.pickle".format(split),
-                                user_submission_file=predictions_file,
-                                phase_codename="phase_successor_lgp",
-                                split=split,)
+            print("model: {}, skeleton_threshold: {}".format(model_identifier, skeleton_threshold))
 
-        print("avg")
-        for k, v in results_dict['submission_result'][split]["avg"].items():
-            print("     {}: {:.3f}".format(k, v))
+            predictions_file = '/home/zuern/Desktop/autograph/eval_succ/{}_{:.2f}_predictions.pickle'.format(model_identifier, skeleton_threshold)
 
-        # save dict
-        pickle.dump(results_dict, open("/home/zuern/Desktop/autograph/eval_succ/{}_results_dict.pickle".format(model_identifier), "wb"))
+            run_successor_lgp(full_model_pth=None,
+                              succ_model_pth=succ_model_pth,
+                              input_layers=input_layers,
+                              skeleton_threshold=skeleton_threshold,
+                              picklefile=predictions_file,
+                              split=split)
 
-        # save results
-        results_df = results_df.append({"model_name": model_name,
-                                        "model_notes": model_notes,
-                                        "split": split,
-                                        "iou": results_dict['submission_result'][split]["avg"]["Graph IoU"],
-                                        "apls": results_dict['submission_result'][split]["avg"]["APLS"],
-                                        "geo_precision": results_dict['submission_result'][split]["avg"]["GEO Precision"],
-                                        "geo_recall": results_dict['submission_result'][split]["avg"]["GEO Recall"],
-                                        "topo_precision": results_dict['submission_result'][split]["avg"]["TOPO Precision"],
-                                        "topo_recall": results_dict['submission_result'][split]["avg"]["TOPO Recall"],
-                                        "sda@20": results_dict['submission_result'][split]["avg"]["SDA20"],
-                                        "sda@50": results_dict['submission_result'][split]["avg"]["SDA50"]
-                                        },
-                                        ignore_index=True)
+            results_dict = evaluate(annotation_file="/home/zuern/lanegnn-dev/urbanlanegraph_evaluator/annotations_successor_lgp_{}.pickle".format(split),
+                                    user_submission_file=predictions_file,
+                                    phase_codename="phase_successor_lgp",
+                                    split=split,)
+
+            print("avg")
+            for k, v in results_dict['submission_result'][split]["avg"].items():
+                print("     {}: {:.3f}".format(k, v))
+
+            # save dict
+            pickle.dump(results_dict, open("/home/zuern/Desktop/autograph/eval_succ/{}_results_dict.pickle".format(model_identifier), "wb"))
+
+            # save results
+            results_df = results_df.append({"skeleton_threshold": skeleton_threshold,
+                                            "model_name": model_name,
+                                            "model_notes": model_notes,
+                                            "split": split,
+                                            "iou": results_dict['submission_result'][split]["avg"]["Graph IoU"],
+                                            "apls": results_dict['submission_result'][split]["avg"]["APLS"],
+                                            "geo_precision": results_dict['submission_result'][split]["avg"]["GEO Precision"],
+                                            "geo_recall": results_dict['submission_result'][split]["avg"]["GEO Recall"],
+                                            "topo_precision": results_dict['submission_result'][split]["avg"]["TOPO Precision"],
+                                            "topo_recall": results_dict['submission_result'][split]["avg"]["TOPO Recall"],
+                                            "sda@20": results_dict['submission_result'][split]["avg"]["SDA20"],
+                                            "sda@50": results_dict['submission_result'][split]["avg"]["SDA50"]
+                                            },
+                                            ignore_index=True)
 
     results_df.to_csv("/home/zuern/Desktop/autograph/eval_succ/results_all.csv", index=False)
 
