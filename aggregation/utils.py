@@ -20,27 +20,26 @@ import matplotlib.pyplot as plt
 from lanegnn.utils import poisson_disk_sampling, get_random_edges, visualize_angles,  get_oriented_crop, transform2vgg
 
 
-def filter_graph(target, source_, threshold=100):
+def filter_graph(target, source, threshold=100):
 
-    source = source_.copy(as_view=False)
+    source_ = source.copy(as_view=False)
 
-    if len(source.nodes()) == 0:
-        return source
+    if len(source_.nodes()) == 0:
+        return source_
 
     pos_target = np.array([list(target.nodes[n]['pos']) for n in target.nodes()])
-    pos_source = np.array([list(source.nodes[n]['pos']) for n in source.nodes()])
+    pos_source = np.array([list(source_.nodes[n]['pos']) for n in source_.nodes()])
 
     distance_matrix = cdist(pos_target, pos_source)
 
-
-    source_ = source.copy(as_view=False)
+    _source_ = source_.copy(as_view=False)
     is_close_to_target = np.min(distance_matrix, axis=0) < threshold
     for i, n in enumerate(list(source_.nodes())):
         if not is_close_to_target[i]:
-            if n in source.nodes():
-                source.remove_node(n)
+            if n in source_.nodes():
+                _source_.remove_node(n)
 
-    return source
+    return _source_
 
 def laplacian_smoothing(G, gamma=0.5, iterations=1):
     """

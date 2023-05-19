@@ -15,7 +15,7 @@ import time
 import pickle
 import glob
 import os
-from aggregation.utils import similarity_check, out_of_bounds_check, visualize_graph, AngleColorizer, laplacian_smoothing
+from aggregation.utils import similarity_check, out_of_bounds_check, AngleColorizer
 from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
 import sys
 import json
@@ -25,12 +25,15 @@ keyboard = Controller()
 
 # SETTINGS
 
-skeleton_threshold = 0.05  # 0.08  # threshold for skeletonization
+skeleton_threshold = 0.08  # 0.08  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
-write_every = 5           # write to disk every n steps
+write_every = 10           # write to disk every n steps
 waitkey_ms = 1
 step_size = 40           # step size along ego edge in pixels
+max_edge_length = 100    # max length of any graph edge in pixels
+succ_graph_weight_threshold = 50  # threshold for successor graph edge weight below which we abandon branch
+
 
 # CVPR graph aggregation
 threshold_px = 30
@@ -47,7 +50,7 @@ def move_graph_nodes(g, delta):
 
 
 class AerialDriver(object):
-    def __init__(self, debug=False, input_layers=None, tile_id=None):
+    def __init__(self, debug=False, input_layers=None, tile_id=None, data_source=None):
         self.aerial_image = None
 
         my_init_poses = np.array(init_poses[tile_id])
@@ -83,9 +86,12 @@ class AerialDriver(object):
         self.step = 0
         self.graph_skeleton = None
 
+        self.data_source = data_source
+
         self.G_agg_naive = nx.DiGraph()
 
         self.done = False # flag to indicate end of episode
+
 
 
     def load_model(self, model_path, type=None, input_layers="rgb"):
@@ -132,9 +138,14 @@ class AerialDriver(object):
         print("Tile ID: {}".format(self.tile_id))
         print("City: {}".format(self.city_name))
 
-        dumpdir = "/home/zuern/Desktop/autograph/G_agg/{}".format(self.tile_id)
-        os.makedirs(dumpdir, exist_ok=True)
-        os.makedirs(dumpdir + "/debug/", exist_ok=True)
+        self.dumpdir = "/data/autograph/evaluations/G_agg/{}/{}".format(self.data_source, self.tile_id)
+        os.makedirs(self.dumpdir, exist_ok=True)
+        os.makedirs(self.dumpdir + "/debug/", exist_ok=True)
+
+
+        if os.path.exists("{}/G_agg_naive_cleanup.pickle".format(self.dumpdir)):
+            print("G_agg_naive_cleanup already exists. Exiting.")
+            sys.exit(0)
 
         # Embed the aerial image into a larger image to avoid edge effects
         self.aerial_image = np.pad(self.aerial_image, ((500, 500), (500, 500),
@@ -318,7 +329,7 @@ class AerialDriver(object):
         rgb_pose_viz = rgb_pose_viz[y1:y2, x1:x2]
 
         # cv2.imshow("rgb_pose_viz", rgb_pose_viz)
-        cv2.imwrite("/home/zuern/Desktop/other/{}-{:04d}_rgb_pose_viz.png".format(self.tile_id, self.step), rgb_pose_viz)
+        cv2.imwrite("/data/autograph/evaluations/other/{}/{}-{:04d}_rgb_pose_viz.png".format(self.data_source, self.tile_id, self.step), rgb_pose_viz)
 
     def make_step(self):
 
@@ -419,10 +430,12 @@ class AerialDriver(object):
             axarr[4].title.set_text('pred_angles_succ_color')
             axarr[5].imshow(skeleton)
             axarr[5].title.set_text('skeleton')
-            plt.savefig("/home/zuern/Desktop/autograph/G_agg/{}/debug/{:04d}.png".format(self.tile_id, self.step))
+            plt.savefig("/data/autograph/evaluations/G_agg/{}/{}/debug/{:04d}.png".format(self.data_source,
+                                                                                          self.tile_id,
+                                                                                          self.step))
             plt.close(fig)
 
-        # cv2.imwrite("/home/zuern/Desktop/autograph/debug/{}-{:04d}_pred_succ_viz.png".format(self.tile_id, self.step), pred_succ_viz)
+        # cv2.imwrite("/data/autograph/evaluations/debug/{}-{:04d}_pred_succ_viz.png".format(self.tile_id, self.step), pred_succ_viz)
 
         self.step += 1
 
@@ -501,7 +514,8 @@ class AerialDriver(object):
             pos = (int(self.pose_history[i, 0]), int(self.pose_history[i, 1]) - 10)
             cv2.putText(G_agg_viz, "{} - {:.0f}".format(i, graph.graph["succ_graph_weight"]), pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
-        cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
+        cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{:04d}_{}_viz.png".format(self.data_source, self.tile_id, self.step, name), G_agg_viz)
+
 
     def visualize_write_G_agg(self, G_agg, name="G_agg"):
 
@@ -545,7 +559,9 @@ class AerialDriver(object):
 
             cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
-        cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}_viz.png".format(self.tile_id, self.step, name), G_agg_viz)
+        cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{:04d}_{}_viz.png".format(self.data_source,
+                                                                                       self.tile_id,
+                                                                                       self.step, name), G_agg_viz)
 
         margin = 400
         G_agg_viz = G_agg_viz[int(self.pose[1]) - margin:int(self.pose[1]) + margin,
@@ -554,7 +570,7 @@ class AerialDriver(object):
         cv2.imshow("G_agg_viz", G_agg_viz)
 
         # serialize graph
-        # pickle.dump(G_agg, open("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
+        # pickle.dump(G_agg, open("/data/autograph/evaluations/G_agg/{}/{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
 
 
     def drive_keyboard(self, key):
@@ -626,14 +642,16 @@ class AerialDriver(object):
 
     def drive_freely(self):
 
-        # if self.step > 20:
+        # if self.step > 50:
         #     self.done = True
         #     return
 
         fps = 1 / (time.time() - self.time)
         self.time = time.time()
 
-        print("Step: {} | FPS = {:.1f} | Current pose: {:.0f}, {:.0f}, {:.1f}".format(self.step, fps, self.pose[0], self.pose[1], self.pose[2]))
+        print("Step: {} | FPS = {:.1f} | Pose: {:.0f}, {:.0f}, {:.1f} | {}".format(self.step, fps, self.pose[0],
+                                                                                   self.pose[1], self.pose[2],
+                                                                                   self.tile_id))
 
         if self.graph_skeleton is None:
             self.make_step()
@@ -641,25 +659,13 @@ class AerialDriver(object):
 
         G_current_local = self.graph_skeleton.copy()
 
-        # # calculate the edge weights of the current graph
-        # succ_graph_weight = 0
-        # for edge in G_current_local.edges:
-        #     edges_u = G_current_local.edges[edge]['pts'][:, 0].astype(np.uint8)
-        #     edges_v = G_current_local.edges[edge]['pts'][:, 1].astype(np.uint8)
-        #     # edge_len = np.linalg.norm(G_current_local.edges[edge]['pts'][0] - G_current_local.edges[edge]['pts'][-1])
-        #     # succ_graph_weight += np.sum(self.pred_succ[edges_u, edges_v])
-        #     succ_graph_weight += np.sum(self.pred_succ[edges_u, edges_v])
-
+        # succ_graph_weight = np.sum(self.skeleton * self.pred_succ)
         succ_graph_weight = np.sum(self.skeleton * self.pred_drivable)
-
-        #plt.imshow(self.current_crop)
-        #plt.imshow(self.skeleton, alpha=0.5)
-        #plt.show()
 
         # do branch_alive check
         branch_alive = True
-        if succ_graph_weight < 50:
-            print("     Successor Graph too weak, aborting branch")
+        if succ_graph_weight < succ_graph_weight_threshold:
+            print("     Successor Graph too weak ({:.1f}), aborting branch".format(succ_graph_weight))
             branch_alive = False
 
         if branch_alive:
@@ -795,9 +801,9 @@ class AerialDriver(object):
                 future_pose_global2[2] = self.yaw_check(angle_global)
 
                 was_visited2, matches_visited2 = similarity_check(future_pose_global2,
-                                                                self.pose_history,
-                                                                min_dist=30,
-                                                                min_angle=np.pi/4)
+                                                                  self.pose_history,
+                                                                  min_dist=30,
+                                                                  min_angle=np.pi/4)
 
 
                 if was_visited2:
@@ -831,46 +837,6 @@ class AerialDriver(object):
                     self.G_agg_naive.add_node(node_succ_edge_start, pos=succ_edge_start)
                     self.G_agg_naive.add_node(node_succ_edge_end, pos=succ_edge_end)
 
-
-                    # pointlist = np.array(edge["pts"][edge_start_idx:edge_end_idx])
-                    # self.G_agg_naive.add_edge(node_succ_edge_start, node_succ_edge_end, pts=pointlist)
-
-
-                    # # # add G_agg-edge from current pose to edge start
-                    # if np.linalg.norm(succ_edge_start - self.pose[0:2]) < 50:
-                    #     self.G_agg_naive.add_node(node_current_pose, pos=self.pose[0:2])
-                    #     self.G_agg_naive.add_edge(node_current_pose, node_succ_edge_start)
-                    #
-                    # if np.linalg.norm(future_pose_global[0:2] - succ_edge_start) < 50:
-                    #     node_future_pose = (int(future_pose_global[0]), int(future_pose_global[1]))
-                    #     self.G_agg_naive.add_node(node_future_pose, pos=future_pose_global[0:2])
-                    #     self.G_agg_naive.add_edge(node_succ_edge_start, node_future_pose)
-
-
-                    # # add G_agg-edge from edge end to future pose start
-                    # closest_distance = 100000
-                    # closest_edge = None
-                    # for inner_edge in succ_edges:
-                    #     distance = np.linalg.norm(edge["pts"][0] - inner_edge["pts"][-1])
-                    #     if distance < 1e-3: # same edge
-                    #         continue
-                    #     if distance < closest_distance and distance < 100:
-                    #         closest_distance = distance
-                    #         closest_edge = inner_edge
-                    #
-                    # if closest_edge is not None:
-                    #     if len(closest_edge["pts"]) > edge_end_idx:
-                    #         pos_start = closest_edge["pts"][edge_end_idx]
-                    #         node_start = (int(pos_start[0]), int(pos_start[1]))
-                    #         self.G_agg_naive.add_node(node_start, pos=pos_start)
-                    #
-                    #
-                    #         # self.G_agg_naive.add_edge(node_start, node_succ_edge_start)
-                    #
-                    #         # print("     added edge from edge end to future pose start: {} -> {}".format(node_start,
-                    #         #                                                                             node_succ_edge_start))
-                    #         self.current_branch_age += 1
-
             # add future poses to graph
             for dest in self.future_poses_destinations:
                 node_dest = (int(dest[0]), int(dest[1]))
@@ -885,7 +851,7 @@ class AerialDriver(object):
             for edge in G_agg_naive_copy.edges():
                 node_1_pos = np.array(self.G_agg_naive.nodes[edge[0]]["pos"])
                 node_2_pos = np.array(self.G_agg_naive.nodes[edge[1]]["pos"])
-                if np.linalg.norm(node_1_pos - node_2_pos) > 90:
+                if np.linalg.norm(node_1_pos - node_2_pos) > max_edge_length:
                     self.G_agg_naive.remove_edge(edge[0], edge[1])
                     print("     removed edge: {} -> {}".format(edge[0], edge[1]))
 
@@ -895,7 +861,7 @@ class AerialDriver(object):
                 self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
                 # self.visualize_write_G_single(self.graphs, "G_single")
 
-                # cv2.imwrite("/home/zuern/Desktop/autograph/G_agg/{}/{:04d}_angle_canvas.png".format(self.tile_id, self.step), self.canvas_angles)
+                # cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{:04d}_angle_canvas.png".format(self.tile_id, self.step), self.canvas_angles)
 
                 # G_agg_cvpr = driver.aggregate_graphs(self.graphs)
                 #
@@ -939,14 +905,10 @@ class AerialDriver(object):
     def cleanup(self):
         cv2.destroyAllWindows()
 
-        dumpdir = "/home/zuern/Desktop/autograph/G_agg/{}".format(self.tile_id)
-
         # write self.graphs to disk
-        # if not os.path.exists(dumpdir):
-        os.makedirs(dumpdir, exist_ok=True)
+        os.makedirs(self.dumpdir, exist_ok=True)
 
-
-        with open("{}/G_agg_naive_raw.pickle".format(dumpdir), "wb") as f:
+        with open("{}/G_agg_naive_raw.pickle".format(self.dumpdir), "wb") as f:
             pickle.dump(self.G_agg_naive, f)
 
         G_agg = self.G_agg_naive.copy(as_view=False)
@@ -957,14 +919,14 @@ class AerialDriver(object):
             if len(list(G_agg_copy.successors(node))) == 0:
                 G_agg.remove_node(node)
 
-        print("Number of nodes: {}, Number of edges".format(len(G_agg.nodes()), len(G_agg.edges())))
+        print("Number of nodes: {}, Number of edges: {}".format(len(G_agg.nodes()), len(G_agg.edges())))
 
         G_agg_copy = G_agg.copy(as_view=False)
         for node in G_agg_copy.nodes():
             if len(list(G_agg_copy.predecessors(node))) == 0:
                 G_agg.remove_node(node)
 
-        print("Number of nodes: {}, Number of edges".format(len(G_agg.nodes()), len(G_agg.edges())))
+        print("Number of nodes: {}, Number of edges: {}".format(len(G_agg.nodes()), len(G_agg.edges())))
 
         # connect edges that are close according to their step attribute
 
@@ -982,33 +944,18 @@ class AerialDriver(object):
             G_agg.add_edge(edge[0], midpoint_node)
             G_agg.add_edge(midpoint_node, edge[1])
 
-
-
         # visualize
         self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive_final_raw")
         self.visualize_write_G_agg(G_agg, "G_agg_naive_final_cleanup")
 
-
-        # move to correct position
-        self.G_agg_naive = move_graph_nodes(self.G_agg_naive, [500, 500])
-        with open("{}/G_agg_naive_raw.pickle".format(dumpdir), "wb") as f:
+        with open("{}/G_agg_naive_raw.pickle".format(self.dumpdir), "wb") as f:
             pickle.dump(self.G_agg_naive, f)
 
-        # move to correct position
-        G_agg = move_graph_nodes(G_agg, [500, 500])
-        with open("{}/G_agg_naive_cleanup.pickle".format(dumpdir), "wb") as f:
+        with open("{}/G_agg_naive_cleanup.pickle".format(self.dumpdir), "wb") as f:
             pickle.dump(G_agg, f)
 
-
-
-
-
-
-        # also move all graphs to correct position
-        graphs_all = [move_graph_nodes(g, [500, 500]) for g in self.graphs]
-
-        with open("{}/graphs_all.pickle".format(dumpdir), "wb") as f:
-            pickle.dump(graphs_all, f)
+        with open("{}/graphs_all.pickle".format(self.dumpdir), "wb") as f:
+            pickle.dump(self.graphs, f)
 
 
 if __name__ == "__main__":
@@ -1019,10 +966,12 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         tile_ids = [sys.argv[1]]
 
-
+    if len(sys.argv) > 2:
+        data_source = sys.argv[2]
+    else:
+        data_source = "tracklets"
 
     # tile_ids = ['freiburg_8057_7995']  # freiburg
-
 
     for tile_id in tile_ids:
 
@@ -1030,26 +979,31 @@ if __name__ == "__main__":
 
         driver = AerialDriver(debug=True,
                               input_layers="rgb",
-                              tile_id=tile_id)
+                              tile_id=tile_id,
+                              data_source=data_source)
 
         # Tracklets_joint
-        driver.load_model(model_path="/data/autograph/checkpoints/serene-voice-204/e-016.pth",  # (all-3004)
-                          type="full")
-        driver.load_model(model_path="/data/autograph/checkpoints/visionary-voice-212/e-030.pth",  # (all-3004)
-                          type="successor",
-                          input_layers="rgb")
-
+        if data_source == "tracklets":
+            print("Using tracklets model")
+            driver.load_model(model_path="/data/autograph/checkpoints/serene-voice-204/e-016.pth",  # (all-3004)
+                              type="full")
+            driver.load_model(model_path="/data/autograph/checkpoints/visionary-voice-212/e-030.pth",  # (all-3004)
+                              type="successor",
+                              input_layers="rgb")
         # Lanegraph
-        # driver.load_model(model_path="/data/autograph/checkpoints/dulcet-water-210/e-058.pth",  # (all-3004)
-        #                   type="full")
-        # driver.load_model(model_path="/data/autograph/checkpoints/fallen-oath-217/e-050.pth",  # (all-3004)
-        #                   type="successor",
-        #                   input_layers="rgb")
+        elif data_source == "lanegraph":
+            print("Using lanegraph model")
+            driver.load_model(model_path="/data/autograph/checkpoints/dulcet-water-210/e-058.pth",  # (all-3004)
+                              type="full")
+            driver.load_model(model_path="/data/autograph/checkpoints/fallen-oath-217/e-050.pth",  # (all-3004)
+                              type="successor",
+                              input_layers="rgb")
+        else:
+            raise ValueError("Unknown data_source {}".format(data_source))
 
 
         if "freiburg" in tile_id:
             driver.load_satellite(impath="/data/lanegraph/freiburg/{}.png".format(tile_id))
-
         else:
             driver.load_satellite(
                 impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
@@ -1060,11 +1014,11 @@ if __name__ == "__main__":
                 driver.cleanup()
                 break
 
-        #
+
         # # load files from disk
-        # with open("/home/zuern/Desktop/autograph/G_agg/{}/graphs_all.pickle".format(driver.tile_id, driver.tile_id), "rb") as f:
+        # with open("/data/autograph/evaluations/G_agg/{}/graphs_all.pickle".format(driver.tile_id, driver.tile_id), "rb") as f:
         #     graphs = pickle.load(f)
-        # with open("/home/zuern/Desktop/autograph/G_agg/{}/G_agg_naive_all.pickle".format(driver.tile_id, driver.tile_id), "rb") as f:
+        # with open("/data/autograph/evaluations/G_agg/{}/G_agg_naive_all.pickle".format(driver.tile_id, driver.tile_id), "rb") as f:
         #     G_agg_naive = pickle.load(f)
 
         # G_agg_cvpr = driver.aggregate_graphs(graphs)
@@ -1084,12 +1038,10 @@ if __name__ == "__main__":
 
         continue
 
-
         print("Press arrow keys to drive")
 
         def on_press(key):
             driver.drive_keyboard(key)
-
 
         def on_release(key):
             if key == Key.esc:

@@ -230,7 +230,7 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_thr
         #         # ax[i, 4].imshow(preds_drivable[image_counter - i])
         #         # ax[i, 5].imshow(preds_angles_color[image_counter - i])
         #
-        #     svg_filename = "/home/zuern/Desktop/autograph/eval_succ/viz/{:04d}.svg".format(image_counter)
+        #     svg_filename = "/data/autograph/evaluations/eval_succ/viz/{:04d}.svg".format(image_counter)
         #     # plt.savefig(svg_filename)
         #     # # open svg file and delete line containing "<g id="figure_1">"
         #     # with open(svg_filename, "r") as f:
@@ -286,7 +286,7 @@ if __name__ == "__main__":
 
             print("model: {}, skeleton_threshold: {}".format(model_identifier, skeleton_threshold))
 
-            predictions_file = '/home/zuern/Desktop/autograph/eval_succ/{}_{:.2f}_predictions.pickle'.format(model_identifier, skeleton_threshold)
+            predictions_file = '/data/autograph/evaluations/eval_succ/{}_{:.2f}_predictions.pickle'.format(model_identifier, skeleton_threshold)
 
             run_successor_lgp(full_model_pth=None,
                               succ_model_pth=succ_model_pth,
@@ -305,7 +305,7 @@ if __name__ == "__main__":
                 print("     {}: {:.3f}".format(k, v))
 
             # save dict
-            pickle.dump(results_dict, open("/home/zuern/Desktop/autograph/eval_succ/{}_results_dict.pickle".format(model_identifier), "wb"))
+            pickle.dump(results_dict, open("/data/autograph/evaluations/eval_succ/{}_results_dict.pickle".format(model_identifier), "wb"))
 
             # save results
             results_df = results_df.append({"skeleton_threshold": skeleton_threshold,
@@ -323,6 +323,6 @@ if __name__ == "__main__":
                                             },
                                             ignore_index=True)
 
-    results_df.to_csv("/home/zuern/Desktop/autograph/eval_succ/results_all.csv", index=False)
+    results_df.to_csv("/data/autograph/evaluations/eval_succ/results_all.csv", index=False)
 
 

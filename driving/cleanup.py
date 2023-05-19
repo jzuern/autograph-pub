@@ -2,7 +2,7 @@ import pickle
 from aggregation.utils import visualize_graph, laplacian_smoothing
 import matplotlib.pyplot as plt
 
-fname = "/home/zuern/Desktop/autograph/G_agg/austin_72_29021_46605/G_agg_naive_all.pickle"
+fname = "/data/autograph/evaluations/G_agg/austin_72_29021_46605/G_agg_naive_all.pickle"
 
 
 with open(fname, "rb") as f:

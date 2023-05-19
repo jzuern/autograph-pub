@@ -185,8 +185,8 @@ def nx_to_geo_topo_format(nx_graph):
     return neighbors
 
 if __name__ == '__main__':
-    graph_gt = nx.read_gpickle('/home/zuern/Desktop/graph_gt.pkl')
-    graph_pred = nx.read_gpickle('/home/zuern/Desktop/graph_pred.pkl')
+    graph_gt = nx.read_gpickle('/data/autograph/evaluations/graph_gt.pkl')
+    graph_pred = nx.read_gpickle('/data/autograph/evaluations/graph_pred.pkl')
 
     metrics_dict = calc_all_metrics(graph_gt, graph_pred, split="drive")
 

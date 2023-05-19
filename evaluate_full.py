@@ -290,17 +290,18 @@ if __name__ == "__main__":
     split = 'test'
     tile_ids = glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/{}/*.png".format(split))
 
-    model = "lanegraph"
-    # model = "tracklets"
-
+    data_source = "lanegraph"
+    # data_source = "tracklets"
 
     tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
     for tile_id in tile_ids:
         try:
             graph_gt = glob('/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.gpickle'.format(tile_id))[0]
-            graph_pred = '/home/zuern/Desktop/autograph/G_agg/{}/{}/G_agg_naive_all.pickle'.format(model, tile_id)
             aerial_image = glob('/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png'.format(tile_id))[0]
+
+            graph_pred = '/data/autograph/evaluations/G_agg/{}/{}/G_agg_naive_cleanup.pickle'.format(data_source, tile_id)
+            #graph_pred = '/data/autograph/evaluations/G_agg/{}/{}/G_agg_naive_raw.pickle'.format(model, tile_id)
 
             print("Analyzing tile: {}".format(graph_pred))
 
@@ -322,27 +323,9 @@ if __name__ == "__main__":
         y_offset = float(tile_id.split("_")[3])
 
         graph_gt = adjust_node_positions(graph_gt, x_offset, y_offset)
-        graph_pred = adjust_node_positions(graph_pred, 1000, 1000)
+        graph_pred = adjust_node_positions(graph_pred, 500, 500)
 
         graph_pred_filtered = filter_graph(target=graph_gt, source=graph_pred, threshold=50)
-
-        # # clean up self.G_agg_naive and remove all nodes for which the successor graph is smaller than 2
-        # G_agg_naive = self.G_agg_naive.copy()
-        # for node in self.G_agg_naive.nodes():
-        #     # get subgraph of successors
-        #     succ_nodes = nx.descendants(self.G_agg_naive, node)
-        #     if len(succ_nodes) < 3:
-        #         G_agg_naive.remove_node(node)
-        #         print("removed node {} from G_agg_naive because it has too few descendents".format(node))
-        #
-        # # same with ancestors
-        # G_agg_naive_ = G_agg_naive.copy()
-        # for node in G_agg_naive_.nodes():
-        #     # get subgraph of successors
-        #     pred_nodes = nx.ancestors(G_agg_naive_, node)
-        #     if len(pred_nodes) < 3:
-        #         G_agg_naive.remove_node(node)
-        #         print("removed node {} from G_agg_naive because it has too few ancestors".format(node))
 
         #metrics_dict = evaluate_single_full_lgp(graph_gt, graph_pred)
 
@@ -361,17 +344,18 @@ if __name__ == "__main__":
             a.set_yticks([])
             a.set_aspect('equal')
             a.axis('off')
-            ax.imshow(aerial_image)
+            a.imshow(aerial_image)
         visualize_graph(graph_gt, ax[0])
         visualize_graph(graph_pred_filtered, ax[1])
         visualize_graph(graph_pred, ax[2])
         ax[0].set_title("Ground Truth")
         ax[1].set_title("Prediction (filtered)")
         ax[2].set_title("Prediction (unfiltered)")
-        plt.savefig("/home/zuern/Desktop/autograph/keep-viz/{}/{}_pred.png".format(model, tile_id))
+        plt.savefig("/data/autograph/evaluations/keep-viz/{}/{}_pred.png".format(data_source, tile_id))
         plt.close()
+        #plt.show()
 
-        # svg_filename = "/home/zuern/Desktop/autograph/keep-viz/{}/{}_pred.svg".format(model, tile_id)
+        # svg_filename = "/data/autograph/evaluations/keep-viz/{}/{}_pred.svg".format(model, tile_id)
         #plt.savefig(svg_filename)
         # # open svg file and delete line containing "<g id="figure_1">"
         # with open(svg_filename, "r") as f:
@@ -381,14 +365,10 @@ if __name__ == "__main__":
         #         if "<g id=\"figure_1\">" not in line:
         #             f.write(line)
 
-    print(results_dict)
-
-    user_submission_file = "/home/zuern/Desktop/autograph/eval_full_{}_{}.pickle".format(split, model)
+    user_submission_file = "/data/autograph/evaluations/eval_full_{}_{}.pickle".format(split, data_source)
 
     with open(user_submission_file, "wb") as f:
         pickle.dump(results_dict, f)
-
-
 
     # Evaluate the submission for each task
 
