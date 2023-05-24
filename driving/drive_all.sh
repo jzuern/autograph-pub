@@ -1,5 +1,5 @@
 export PYTHONPATH=$PYTHONPATH:~/self-supervised-graph/
-export N_PARALLEL=8
+export N_PARALLEL=6
 
 EVALTILES=(
   austin_40_14021_51605

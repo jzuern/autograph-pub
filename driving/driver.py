@@ -28,7 +28,7 @@ keyboard = Controller()
 skeleton_threshold = 0.08  # 0.08  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
-write_every = 10           # write to disk every n steps
+write_every = 1           # write to disk every n steps
 waitkey_ms = 1
 step_size = 40           # step size along ego edge in pixels
 max_edge_length = 100    # max length of any graph edge in pixels
@@ -417,19 +417,20 @@ class AerialDriver(object):
         skeleton_succ_weight = np.sum(skeleton * pred_succ / 255.)
 
         if self.debug:
-            fig, axarr = plt.subplots(1, 6, figsize=(20, 5), sharex=True, sharey=True)
+            fig, axarr = plt.subplots(1, 5, figsize=(20, 5), sharex=True, sharey=True)
+            fig.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=0, hspace=0)
+            [axi.set_axis_off() for axi in axarr.ravel()]
+
             axarr[0].imshow(cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB))
-            axarr[0].title.set_text('rgb')
-            axarr[1].imshow(pred_drivable)
-            axarr[1].title.set_text('pred_drivable - {:.0f}'.format(skeleton_drivable_weight))
-            axarr[2].imshow(pred_succ)
-            axarr[2].title.set_text('pred_succ - {:.0f}'.format(skeleton_succ_weight))
-            axarr[3].imshow(pred_angles_color)
-            axarr[3].title.set_text('pred_angles_color')
-            axarr[4].imshow(pred_angles_succ_color)
-            axarr[4].title.set_text('pred_angles_succ_color')
-            axarr[5].imshow(skeleton)
-            axarr[5].title.set_text('skeleton')
+            axarr[0].title.set_text('RGB')
+            axarr[1].imshow(pred_drivable, cmap='gray')
+            axarr[1].title.set_text('Drivable')
+            axarr[2].imshow(pred_angles_color)
+            axarr[2].title.set_text('Angles')
+            axarr[3].imshow(pred_succ, cmap='gray')
+            axarr[3].title.set_text('Successor Heatmap')
+            axarr[4].imshow(skeleton, cmap='gray')
+            axarr[4].title.set_text('Successor Skeleton')
             plt.savefig("/data/autograph/evaluations/G_agg/{}/{}/debug/{:04d}.png".format(self.data_source,
                                                                                           self.tile_id,
                                                                                           self.step))
@@ -520,7 +521,9 @@ class AerialDriver(object):
     def visualize_write_G_agg(self, G_agg, name="G_agg"):
 
         G_agg_viz = self.aerial_image.copy()
-        G_agg_viz = G_agg_viz // 2
+
+        # make darker
+        G_agg_viz = G_agg_viz // 4
 
         # if len(G_agg.edges) == 0:
         #     return
@@ -537,7 +540,17 @@ class AerialDriver(object):
             start = (int(start[0]), int(start[1]))
             end = (int(end[0]), int(end[1]))
 
-            cv2.arrowedLine(G_agg_viz, start, end, color=colors[i], thickness=1, line_type=cv2.LINE_AA)
+            cv2.arrowedLine(G_agg_viz, start, end, color=colors[i], thickness=4, line_type=cv2.LINE_AA)
+
+        if len(self.graphs) > 1:
+            curr_graph = self.graphs[-1].copy()
+            for edge in curr_graph.edges:
+                start = curr_graph.nodes[edge[0]]["pos"]
+                end = curr_graph.nodes[edge[1]]["pos"]
+                start = (int(start[0]), int(start[1]))
+                end = (int(end[0]), int(end[1]))
+                cv2.arrowedLine(G_agg_viz, start, end, color=(255, 255, 255), thickness=4, line_type=cv2.LINE_AA)
+
 
         for p in self.pose_history:
             x_0, y_0, _ = p
@@ -545,19 +558,19 @@ class AerialDriver(object):
             y_0 = int(y_0)
             cv2.circle(G_agg_viz, (x_0, y_0), 2, (0, 255, 0), -1)
 
-        # also visualize queued poses
-        arrow_length = 30
-        for p in self.future_poses:
-            x_0, y_0, yaw = p
-            x_0 = int(x_0)
-            y_0 = int(y_0)
-            start = (x_0, y_0)
-            end = (x_0 + arrow_length * np.sin(yaw),
-                   y_0 - arrow_length * np.cos(yaw))
-            start = (int(start[0]), int(start[1]))
-            end = (int(end[0]), int(end[1]))
-
-            cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
+        # # also visualize queued poses
+        # arrow_length = 30
+        # for p in self.future_poses:
+        #     x_0, y_0, yaw = p
+        #     x_0 = int(x_0)
+        #     y_0 = int(y_0)
+        #     start = (x_0, y_0)
+        #     end = (x_0 + arrow_length * np.sin(yaw),
+        #            y_0 - arrow_length * np.cos(yaw))
+        #     start = (int(start[0]), int(start[1]))
+        #     end = (int(end[0]), int(end[1]))
+        #
+        #     cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
         cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{:04d}_{}_viz.png".format(self.data_source,
                                                                                        self.tile_id,
@@ -652,6 +665,8 @@ class AerialDriver(object):
         print("Step: {} | FPS = {:.1f} | Pose: {:.0f}, {:.0f}, {:.1f} | {}".format(self.step, fps, self.pose[0],
                                                                                    self.pose[1], self.pose[2],
                                                                                    self.tile_id))
+
+        self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
 
         if self.graph_skeleton is None:
             self.make_step()

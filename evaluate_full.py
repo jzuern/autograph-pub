@@ -290,8 +290,8 @@ if __name__ == "__main__":
     split = 'test'
     tile_ids = glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/{}/*.png".format(split))
 
-    data_source = "lanegraph"
-    # data_source = "tracklets"
+    # data_source = "lanegraph"
+    data_source = "tracklets"
 
     tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
@@ -300,8 +300,8 @@ if __name__ == "__main__":
             graph_gt = glob('/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.gpickle'.format(tile_id))[0]
             aerial_image = glob('/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png'.format(tile_id))[0]
 
-            graph_pred = '/data/autograph/evaluations/G_agg/{}/{}/G_agg_naive_cleanup.pickle'.format(data_source, tile_id)
-            #graph_pred = '/data/autograph/evaluations/G_agg/{}/{}/G_agg_naive_raw.pickle'.format(model, tile_id)
+            # graph_pred = '/data/autograph/evaluations/G_agg/{}/{}/G_agg_naive_cleanup.pickle'.format(data_source, tile_id)
+            graph_pred = '/data/autograph/evaluations/G_agg/{}/{}/G_agg_naive_raw.pickle'.format(data_source, tile_id)
 
             print("Analyzing tile: {}".format(graph_pred))
 
@@ -324,7 +324,6 @@ if __name__ == "__main__":
 
         graph_gt = adjust_node_positions(graph_gt, x_offset, y_offset)
         graph_pred = adjust_node_positions(graph_pred, 500, 500)
-
         graph_pred_filtered = filter_graph(target=graph_gt, source=graph_pred, threshold=50)
 
         #metrics_dict = evaluate_single_full_lgp(graph_gt, graph_pred)
@@ -336,7 +335,7 @@ if __name__ == "__main__":
         if split not in results_dict[city]:
             results_dict[city][split] = {}
 
-        results_dict[city][split][tile_id] = graph_pred
+        results_dict[city][split][tile_id] = graph_pred_filtered
 
         fig, ax = plt.subplots(1, 3, figsize=(60, 20), sharex=True, sharey=True, dpi=200)
         for a in ax:
