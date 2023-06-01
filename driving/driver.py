@@ -28,11 +28,11 @@ keyboard = Controller()
 skeleton_threshold = 0.08  # 0.08  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
-write_every = 1           # write to disk every n steps
+write_every = 10           # write to disk every n steps
 waitkey_ms = 1
 step_size = 40           # step size along ego edge in pixels
 max_edge_length = 100    # max length of any graph edge in pixels
-succ_graph_weight_threshold = 50  # threshold for successor graph edge weight below which we abandon branch
+succ_graph_weight_threshold = 20  # default: 50, threshold for successor graph edge weight below which we abandon branch
 
 
 # CVPR graph aggregation
@@ -141,6 +141,8 @@ class AerialDriver(object):
         self.dumpdir = "/data/autograph/evaluations/G_agg/{}/{}".format(self.data_source, self.tile_id)
         os.makedirs(self.dumpdir, exist_ok=True)
         os.makedirs(self.dumpdir + "/debug/", exist_ok=True)
+
+        print("Dumpdir: {}".format(self.dumpdir))
 
 
         if os.path.exists("{}/G_agg_naive_cleanup.pickle".format(self.dumpdir)):
@@ -523,7 +525,7 @@ class AerialDriver(object):
         G_agg_viz = self.aerial_image.copy()
 
         # make darker
-        G_agg_viz = G_agg_viz // 4
+        G_agg_viz = G_agg_viz // 3
 
         # if len(G_agg.edges) == 0:
         #     return
@@ -540,7 +542,7 @@ class AerialDriver(object):
             start = (int(start[0]), int(start[1]))
             end = (int(end[0]), int(end[1]))
 
-            cv2.arrowedLine(G_agg_viz, start, end, color=colors[i], thickness=4, line_type=cv2.LINE_AA)
+            cv2.arrowedLine(G_agg_viz, start, end, color=colors[i], thickness=3, line_type=cv2.LINE_AA)
 
         if len(self.graphs) > 1:
             curr_graph = self.graphs[-1].copy()
@@ -549,7 +551,7 @@ class AerialDriver(object):
                 end = curr_graph.nodes[edge[1]]["pos"]
                 start = (int(start[0]), int(start[1]))
                 end = (int(end[0]), int(end[1]))
-                cv2.arrowedLine(G_agg_viz, start, end, color=(255, 255, 255), thickness=4, line_type=cv2.LINE_AA)
+                cv2.arrowedLine(G_agg_viz, start, end, color=(255, 255, 255), thickness=3, line_type=cv2.LINE_AA)
 
 
         for p in self.pose_history:
@@ -558,19 +560,19 @@ class AerialDriver(object):
             y_0 = int(y_0)
             cv2.circle(G_agg_viz, (x_0, y_0), 2, (0, 255, 0), -1)
 
-        # # also visualize queued poses
-        # arrow_length = 30
-        # for p in self.future_poses:
-        #     x_0, y_0, yaw = p
-        #     x_0 = int(x_0)
-        #     y_0 = int(y_0)
-        #     start = (x_0, y_0)
-        #     end = (x_0 + arrow_length * np.sin(yaw),
-        #            y_0 - arrow_length * np.cos(yaw))
-        #     start = (int(start[0]), int(start[1]))
-        #     end = (int(end[0]), int(end[1]))
-        #
-        #     cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
+        # also visualize queued poses
+        arrow_length = 30
+        for p in self.future_poses:
+            x_0, y_0, yaw = p
+            x_0 = int(x_0)
+            y_0 = int(y_0)
+            start = (x_0, y_0)
+            end = (x_0 + arrow_length * np.sin(yaw),
+                   y_0 - arrow_length * np.cos(yaw))
+            start = (int(start[0]), int(start[1]))
+            end = (int(end[0]), int(end[1]))
+
+            cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
         cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{:04d}_{}_viz.png".format(self.data_source,
                                                                                        self.tile_id,
@@ -665,8 +667,6 @@ class AerialDriver(object):
         print("Step: {} | FPS = {:.1f} | Pose: {:.0f}, {:.0f}, {:.1f} | {}".format(self.step, fps, self.pose[0],
                                                                                    self.pose[1], self.pose[2],
                                                                                    self.tile_id))
-
-        self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
 
         if self.graph_skeleton is None:
             self.make_step()
@@ -975,18 +975,20 @@ class AerialDriver(object):
 
 if __name__ == "__main__":
 
-    tile_ids = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/*.png")
-    tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
 
     if len(sys.argv) > 1:
         tile_ids = [sys.argv[1]]
-
     if len(sys.argv) > 2:
         data_source = sys.argv[2]
     else:
         data_source = "tracklets"
 
     # tile_ids = ['freiburg_8057_7995']  # freiburg
+    # tile_ids = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/*.png")
+
+    # tile_ids = glob.glob("/data/lanegraph/freiburg/*.png")
+    # tile_ids = [os.path.basename(t).split(".")[0] for t in tile_ids]
+
 
     for tile_id in tile_ids:
 
@@ -1018,7 +1020,7 @@ if __name__ == "__main__":
 
 
         if "freiburg" in tile_id:
-            driver.load_satellite(impath="/data/lanegraph/freiburg/{}.png".format(tile_id))
+            driver.load_satellite(impath="/data/freiburg/{}.png".format(tile_id))
         else:
             driver.load_satellite(
                 impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])

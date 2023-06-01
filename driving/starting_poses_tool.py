@@ -6,10 +6,10 @@ import pprint
 
 
 # read image
-tiles = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/test/*.png")
+# tiles = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/test/*.png")
 # tiles = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/eval/*.png")
 
-# tiles = glob.glob("/data/lanegraph/freiburg/freiburg_*.png")
+tiles = glob.glob("/data/lanegraph/freiburg/freiburg_*.png")
 
 tile_ids = [os.path.basename(t).split(".")[0] for t in tiles]
 

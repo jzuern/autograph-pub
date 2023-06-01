@@ -16,7 +16,8 @@ EVALTILES=(
   washington_55_41634_69625
 )
 
-TESTTILES=(austin_41_14021_56605
+TESTTILES=(
+austin_41_14021_56605
   austin_72_29021_46605
   detroit_135_10700_30709
   detroit_204_45700_25709
@@ -29,40 +30,61 @@ TESTTILES=(austin_41_14021_56605
   washington_48_36634_69625
 )
 
+FREIBURGTILES=(
+freiburg_0_0
+freiburg_0_10661
+freiburg_0_2665
+freiburg_0_5330
+freiburg_0_7995
+freiburg_12086_0
+freiburg_12086_10661
+freiburg_12086_2665
+freiburg_12086_5330
+freiburg_12086_7995
+freiburg_16115_0
+freiburg_16115_10661
+freiburg_16115_2665
+freiburg_16115_5330
+freiburg_16115_7995
+freiburg_4028_0
+freiburg_4028_10661
+freiburg_4028_2665
+freiburg_4028_5330
+freiburg_4028_7995
+freiburg_8057_0
+freiburg_8057_10661
+freiburg_8057_2665
+freiburg_8057_5330
+freiburg_8057_7995
+)
 
-task(){
-   ~/anaconda3/envs/geometric/bin/python driver.py "$1" "$2"
-}
+
+N_PARALLEL=6
 
 
-# initialize a semaphore with a given number of tokens
-open_sem(){
-    mkfifo pipe-$$
-    exec 3<>pipe-$$
-    rm pipe-$$
-    local i=$1
-    for((;i>0;i--)); do
-        printf %s 000 >&3
+# Function to execute commands in parallel
+execute_commands() {
+    for TILE in "${FREIBURGTILES[@]}"; do
+        # Execute command in the background
+        ~/anaconda3/envs/geometric/bin/python driver.py $TILE tracklets &
+
+        # Store the process ID
+        pids+=($!)
+
+        # Limit the number of parallel processes
+        if [ ${#pids[@]} -eq $N_PARALLEL ]; then
+            # Wait for any of the processes to finish
+            wait -n
+
+            # Remove the finished process from the list
+            pids=("${pids[@]:1}")
+        fi
     done
+
+    # Wait for all remaining processes to finish
+    wait
 }
 
-# run the given command asynchronously and pop/push tokens
-run_with_lock(){
-    local x
-    # this read waits until there is something to read
-    read -u 3 -n 3 x && ((0==x)) || exit $x
-    (
-     ( "$@"; )
-    # push the return code of the command to the semaphore
-    printf '%.3d' $? >&3
-    )&
-}
+# Execute the commands
+execute_commands
 
-open_sem $N_PARALLEL
-
-
-for TILE in "${TESTTILES[@]}"
-do
-  ~/anaconda3/envs/geometric/bin/python driver.py $TILE lanegraph &
-  sleep 10
-done
