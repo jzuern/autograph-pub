@@ -28,7 +28,7 @@ keyboard = Controller()
 skeleton_threshold = 0.08  # 0.08  # threshold for skeletonization
 edge_start_idx = 10        # start index for selecting edge as future pose
 edge_end_idx = 50          # end index for selecting edge as future pose
-write_every = 10           # write to disk every n steps
+write_every = 1           # write to disk every n steps
 waitkey_ms = 1
 step_size = 40           # step size along ego edge in pixels
 max_edge_length = 100    # max length of any graph edge in pixels
@@ -531,9 +531,20 @@ class AerialDriver(object):
         #     return
 
         # history colors linearly interpolated
-        colors = matplotlib.cm.get_cmap('jet')(np.linspace(0, 1, len(list(G_agg.edges))))
-        colors = (colors[:, 0:3] * 255).astype(np.uint8)
-        colors = [tuple(color.tolist()) for color in colors]
+        # colors = matplotlib.cm.get_cmap('jet')(np.linspace(0, 1, len(list(G_agg.edges))))
+        # colors = (colors[:, 0:3] * 255).astype(np.uint8)
+        # colors = [tuple(color.tolist()) for color in colors]
+        colors = [(142, 0, 255)] * len(G_agg.edges)
+
+        # # fade to white for the last 5 edges
+        # num_fade = max(5, len(self.graphs))
+        # for i in range(num_fade):
+        #     c = np.array([255, 0, 142]) - (255 - 142) * i / num_fade
+        #     c = c.astype(np.uint8)
+        #     try:
+        #         colors[-i] = (c[0], c[1], c[2])
+        #     except:
+        #         colors[-i] = (255, 0, 142)
 
         for i, edge in enumerate(G_agg.edges):
             # edge as arrow
@@ -554,25 +565,25 @@ class AerialDriver(object):
                 cv2.arrowedLine(G_agg_viz, start, end, color=(255, 255, 255), thickness=3, line_type=cv2.LINE_AA)
 
 
-        for p in self.pose_history:
-            x_0, y_0, _ = p
-            x_0 = int(x_0)
-            y_0 = int(y_0)
-            cv2.circle(G_agg_viz, (x_0, y_0), 2, (0, 255, 0), -1)
+        # for p in self.pose_history:
+        #     x_0, y_0, _ = p
+        #     x_0 = int(x_0)
+        #     y_0 = int(y_0)
+        #     cv2.circle(G_agg_viz, (x_0, y_0), 2, (0, 255, 0), -1)
 
-        # also visualize queued poses
-        arrow_length = 30
-        for p in self.future_poses:
-            x_0, y_0, yaw = p
-            x_0 = int(x_0)
-            y_0 = int(y_0)
-            start = (x_0, y_0)
-            end = (x_0 + arrow_length * np.sin(yaw),
-                   y_0 - arrow_length * np.cos(yaw))
-            start = (int(start[0]), int(start[1]))
-            end = (int(end[0]), int(end[1]))
-
-            cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
+        # # also visualize queued poses
+        # arrow_length = 30
+        # for p in self.future_poses:
+        #     x_0, y_0, yaw = p
+        #     x_0 = int(x_0)
+        #     y_0 = int(y_0)
+        #     start = (x_0, y_0)
+        #     end = (x_0 + arrow_length * np.sin(yaw),
+        #            y_0 - arrow_length * np.cos(yaw))
+        #     start = (int(start[0]), int(start[1]))
+        #     end = (int(end[0]), int(end[1]))
+        #
+        #     cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
         cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{:04d}_{}_viz.png".format(self.data_source,
                                                                                        self.tile_id,

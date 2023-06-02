@@ -1,0 +1,415 @@
+<!DOCTYPE HTML>
+<!--
+	Industrious by TEMPLATED
+	templated.co @templatedco
+	Released for free under the Creative Commons Attribution 3.0 license (templated.co/license)
+-->
+<html>
+
+<script>
+    MathJax = {
+        tex: {inlineMath: [['$', '$'], ['\\(', '\\)']]}
+    };
+</script>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+
+
+<script type="text/javascript">
+    function toggle_visibility(id) {
+        var e = document.getElementById(id);
+        if (e.style.display == 'block')
+            e.style.display = 'none';
+        else
+            e.style.display = 'block';
+    }
+</script>
+
+
+<head>
+    <title>AutoGraph</title>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"/>
+    <meta name="keywords"
+          content="robotics, computer vision, self-supervised learning, model-distillation, corl2022"/>
+    <link rel="stylesheet" href="static/css/main.css"/>
+    <link rel="stylesheet" href="static/css/main_mm.css"/>
+
+
+    <style>
+        .container {
+            display: flex;
+            justify-content: center;
+        }
+
+        .column {
+            flex: 1;
+            margin: 0 10px; /* Adjust the margin as per your design */
+        }
+    </style>
+
+
+
+</head>
+<body class="is-preload">
+
+<!-- Header -->
+<header id="header">
+    <a class="logo" href="index.html">AutoGraph</a>
+    <nav>
+        <a href="#">Home</a>
+        <a href="#approach">Approach</a>
+        <a href="#video">Video</a>
+        <a href="#dataset">Dataset</a>
+        <a href="#people">People</a>
+    </nav>
+</header>
+
+<!-- Heading -->
+<section id="banner" class="wrapper">
+    <div class="inner">
+        <h1 style="text-transform: none">AutoGraph: <br>Predicting Lane Graphs from Traffic</h1>
+        <!--        <p style="text-transform: none">Predicting Lane Graphs from Traffic</p>-->
+    </div>
+    <video width="600" playsinline autoplay muted loop src="static/images/out.mp4"></video>
+</section>
+
+
+
+
+
+<section class="hero">
+    <div class="hero-body">
+        <div class="container is-max-desktop">
+            <div class="columns is-centered">
+              <span class="author-block">
+                <a href="http://www2.informatik.uni-freiburg.de/~huang/">Chenguang Huang</a><sup>1</sup>,</span>
+                <span class="author-block">
+                <a href="https://www.oiermees.com/">Oier Mees</a><sup>1</sup>,</span>
+                <span class="author-block">
+                <a href="https://andyzeng.github.io/">Andy Zeng</a><sup>2</sup>,
+              </span>
+                <span class="author-block">
+                <a href="https://www.utn.de/1/wolfram-burgard/">Wolfram Burgard</a><sup>3</sup>,
+              </span>
+            </div>
+
+            <div class="is-size-5 publication-authors">
+                <span class="author-block"><sup>1</sup>Freiburg University,</span>
+                <span class="author-block"><sup>2</sup>Google Research,</span>
+                <span class="author-block"><sup>3</sup>University of Technology Nuremberg</span>
+            </div>
+
+            <div class="column has-text-centered">
+                <div class="publication-links">
+                    <!-- PDF Link. -->
+                    <span class="link-block">
+                  <a href="https://arxiv.org/pdf/2303.07522.pdf" class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                    </span>
+                    <span>Paper</span>
+                  </a>
+                </span>
+                    <!-- Video Link. -->
+                    <span class="link-block">
+                  <a href="https://avlmaps.github.io/" class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="fab fa-youtube"></i>
+                    </span>
+                    <span>Video</span>
+                  </a>
+                </span>
+                    <!-- Code Link. -->
+                    <span class="link-block">
+                  <a href="https://github.com/" class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <i class="fab fa-github"></i>
+                    </span>
+                    <span>Code (Coming Soon)</span>
+                  </a>
+                </span>
+                    <!-- CoLab Link. -->
+                    <span class="link-block">
+                  <a href="https://colab.research.google.com/drive/1gdtLvg_Fbl16N3ITp5FsU9ZAG6HmspVb?usp=sharing" class="external-link button is-normal is-rounded is-dark">
+                    <span class="icon">
+                      <!-- <i class="fab fa-github"></i> -->
+                      <img src="static/images/colab_icon.png" />
+                    </span>
+                    <span>CoLab</span>
+                  </a>
+                </span>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    </div>
+    </div>
+</section>
+
+
+
+
+
+
+<!-- Main -->
+<section id="approach" class="wrapper style special">
+    <div class="inner">
+        <div class="content">
+
+            <header class="special">
+                <h2>Idea</h2>
+            </header>
+            <p>Lane graph estimation is a highly challenging problem in autonomous driving. Existing methods require large-scale (human) annotations of lane graphs for learning to predict lane graphs from aerial imagery. We propose to use tracklets of vehicles as the annotation source and demonstrate model performance similar to human-supervised methods without requiring any graph annotations.</p>
+        </div>
+
+
+        <header class="special">
+            <h2>Technical Approach</h2>
+        </header>
+        <p>
+            Lane graph estimation is a long-standing problem
+            in the context of autonomous driving in urban environments.
+            Previous works aimed at solving this problem by relying on
+            large-scale human-annotated graph annotations, introducing
+            the bottleneck of limited available annotations for training
+            models to solve this task. To overcome this limitation, we
+            propose a novel data source for lane graph annotations: the
+            movement of traffic participants. In our AutoGraph approach,
+            we employ a pre-trained object tracker and collect the tracklets
+            of traffic participants such as vehicles and trucks. We show that
+            it is possible to train a successor lane graph prediction model
+            from this data without requiring any human supervision. In
+            the second stage, we show how the single successor predic-
+            tions can be aggregated into an accurate and consistent lane
+            graph. We demonstrate the efficacy of our approach on the
+            UrbanLaneGraph dataset and perform extensive quantitative
+            and qualitative evaluations.</p>
+    </div>
+
+
+    <div class="inner" style="width: 60%" align="center">
+        <img align="center" class="image fit" src="static/images/teaser.png" alt="Teaser"/>
+        <div>Our approach AutoGraph aggregates tracked vehicle tracklets and predicts complex lane graphs without requiring any lane graph annotations.
+        </div>
+    </div>
+
+    <div class="inner" style="width: 60%" align="center">
+        <img align="center" class="image fit" src="static/images/approach.png" alt="Approach"/>
+        <div>Illustration of our successor graph prediction approach. We first predict the Drivable and Angles map layers from the aerial image crop with a fully convolutional neural network. We subsequently predict the successor lane heatmap from the aerial image crop, the predicted drivable surface, and lane angles. The successor lane heatmap is post-processed into a skeleton graph, encoding the position of the successor lanes and any lane split points.
+        </div>
+    </div>
+
+
+
+    <div class="inner" style="width: 60%" align="center">
+        <img align="center" class="image fit" src="static/images/results.png" alt="Results"/>
+        <div>x
+        </div>
+    </div>
+
+
+</section>
+
+
+
+<!-- Video -->
+<section id="video" class="wrapper">
+    <div class="inner">
+        <div class="content">
+            <header class="special">
+                <h2>Video</h2>
+            </header>
+        </div>
+
+
+        <!-- Play video with 1000px width. -->
+
+
+
+
+        <div class="inner" style="width: 1000px" align="center">
+            <video playsinline autoplay muted loop src="static/images/out.mp4"></video>
+        </div>
+        <div>Visualization of our graph aggregation procedure. Iteratively, we explore the whole area and join graph fragments to a single connected lane graph.
+        </div>
+
+
+    </div>
+</section>
+
+
+
+<!-- Dataset -->
+<section id="dataset" class="wrapper">
+    <div class="inner">
+        <div class="content">
+            <header class="special">
+                <h2>UrbanTracklet Dataset</h2>
+            </header>
+        </div>
+
+
+
+
+        <!--        <div class="content">-->
+        <!--            <header>-->
+        <!--                <h3>Download</h3>-->
+        <!--                <div class="container">-->
+        <!--                    <div class="row">-->
+        <!--                        &lt;!&ndash;                        <div class="col-sm">&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                            <header class="special">&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                                <p><a href="static/README.md">&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                                    <img style="border-radius: 2%; width: 150px; height: 150px;"&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                                         src="static/images/readme.png" alt="Readme"/>&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                                </a></p>&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                                <h3><a href="static/README.md">Readme.md</a></h3>&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                            </header>&ndash;&gt;-->
+        <!--                        &lt;!&ndash;                        </div>&ndash;&gt;-->
+        <!--                        <div class="col-sm">-->
+        <!--                            <header class="special">-->
+        <!--                                <p><a href="http://aisdatasets.informatik.uni-freiburg.de/trackletmapper/dataset_train.zip">-->
+        <!--                                    <img style="border-radius: 2%; width: 150px; height: 150px;"-->
+        <!--                                         src="static/images/zip.png" alt="Train"/>-->
+        <!--                                </a></p>-->
+        <!--                                <h3><a href="http://aisdatasets.informatik.uni-freiburg.de/trackletmapper/dataset_train.zip">Training Data</a></h3>-->
+        <!--                            </header>-->
+        <!--                        </div>-->
+        <!--                        <div class="col-sm">-->
+        <!--                            <header class="special">-->
+        <!--                                <p><a href="http://aisdatasets.informatik.uni-freiburg.de/trackletmapper/testdata.zip">-->
+        <!--                                    <img style="border-radius: 2%; width: 150px; height: 150px;"-->
+        <!--                                         src="static/images/zip.png" alt="Test"/>-->
+        <!--                                </a></p>-->
+        <!--                                <h3><a href="http://aisdatasets.informatik.uni-freiburg.de/trackletmapper/testdata.zip">Test Data</a></h3>-->
+        <!--                            </header>-->
+        <!--                        </div>-->
+        <!--                        <div class="col-sm">-->
+        <!--                            <header class="special">-->
+        <!--                                <p><a href="http://aisdatasets.informatik.uni-freiburg.de/trackletmapper/gt-map.zip">-->
+        <!--                                    <img style="border-radius: 2%; width: 150px; height: 150px;"-->
+        <!--                                         src="static/images/gt-map.png" alt="Train"/>-->
+        <!--                                </a></p>-->
+        <!--                                <h3><a href="http://aisdatasets.informatik.uni-freiburg.de/trackletmapper/gt-map.zip">Map Annotations</a></h3>-->
+        <!--                            </header>-->
+        <!--                        </div>-->
+
+        <!--                    </div>-->
+        <!--                </div>-->
+        <!--            </header>-->
+        <!--        </div>-->
+
+
+
+
+        <div class="content">
+            <header>
+                <h3>Overview</h3>
+            </header>
+            <p>We present the <b>UrbanTracklet</b> dataset, generated from the Argoverse2 dataset
+
+
+            <div align="center" class="inner" style="width: 80%">
+                <img align="center" alt="Overview of the System" class="image fit" src="static/images/tracklets2.png"/>
+                <div>xxxxx</div>
+            </div>
+
+            <br><br><br>
+            XXXX
+
+        </div>
+    </div>
+
+</section>
+
+
+
+
+<section id="bibtex" class="wrapper">
+    <div class="inner">
+        <div class="content">
+            <header class="special">
+                <h2>BibTeX</h2>
+            </header>
+            <pre><code>@article{zuern2023autograph,
+  author    = {Zuern, Jannik and Posner, Ingmar and Burgard, Wolfram},
+  title     = {AutoGraph: Predicting Lane Graphs from Traffic},
+  journal   = {XX},
+  year      = {2023},
+}</code></pre>
+
+        </div>
+    </div>
+</section>
+
+
+
+
+<!-- PEOPLE -->
+<section id="people" class="wrapper">
+    <div class="inner">
+        <header class="special">
+            <h2>People</h2>
+        </header>
+        <div class="container">
+            <div class="row">
+                <div class="col">
+                    <header class="special">
+                        <a href="http://www2.informatik.uni-freiburg.de/~zuern/">
+                            <img style="border-radius: 50%; width: 200px; height: 200px;"
+                                 src="static/images/people/zuern.jpg" alt="Zürn"/>
+                        </a>
+                        <h3><a href="http://www2.informatik.uni-freiburg.de/~zuern/">Jannik Zürn</a></h3>
+                        <p class="font-weight-light mb-0">University of Freiburg</p>
+                    </header>
+                </div>
+                <div class="col">
+                    <header class="special">
+                        <a href="https://eng.ox.ac.uk/people/ingmar-posner/">
+                            <img style="border-radius: 50%; width: 200px; height: 200px;"
+                                 src="static/images/people/posner.jpg" alt="Posner"/>
+                        </a>
+                        <h3><a href="https://eng.ox.ac.uk/people/ingmar-posner/">Ingmar Posner</a></h3>
+                        <p class="font-weight-light mb-0">Oxford University</p>
+                    </header>
+                </div>
+                <div class="col">
+                    <header class="special">
+                        <a href="https://www.utn.de/person/wolfram-burgard/">
+                            <img style="border-radius: 50%; width: 200px; height: 200px;"
+                                 src="static/images/people/burgard.jpg" alt="Burgard"/>
+                        </a>
+                        <h3><a href="https://www.utn.de/person/wolfram-burgard/">Wolfram Burgard</a></h3>
+                        <p class="font-weight-light mb-0">University of Technology Nuremberg</p>
+                    </header>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+
+
+
+
+
+
+<!-- Footer -->
+<footer id="footer" style="padding: 0rem 0 1rem 0 ;">
+    <div class="inner">
+        <div class="copyright">
+            &copy; Autonomous Intelligent Systems 2023. All rights reserved. | Contact: <a
+                href="mailto:zuern@cs.uni-freiburg.de">zuern@cs.uni-freiburg.de</a>
+        </div>
+    </div>
+</footer>
+
+<!-- Scripts -->
+<script src="static/js/jquery.min.js"></script>
+<script src="static/js/browser.min.js"></script>
+<script src="static/js/breakpoints.min.js"></script>
+<script src="static/js/util.js"></script>
+<script src="static/js/main.js"></script>
+
+</body>
+</html>

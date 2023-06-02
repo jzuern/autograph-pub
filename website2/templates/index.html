@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="description"
+        content="Deformable Neural Radiance Fields creates free-viewpoint portraits (nerfies) from casually captured videos.">
+  <meta name="keywords" content="Nerfies, D-NeRF, NeRF">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoGraph: Predicting Lane Graphs from Traffic</title>
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-PYVRSFMDRL"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+
+    function gtag() {
+      dataLayer.push(arguments);
+    }
+
+    gtag('js', new Date());
+
+    gtag('config', 'G-PYVRSFMDRL');
+  </script>
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans|Castoro"
+        rel="stylesheet">
+
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <link rel="icon" href="./static/images/favicon.svg">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <script src="./static/js/index.js"></script>
+</head>
+<body>
+
+<nav class="navbar" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </a>
+  </div>
+  <div class="navbar-menu">
+    <div class="navbar-start" style="flex-grow: 1; justify-content: center;">
+      <a class="navbar-item" href="https://jannik-zuern.com">
+      <span class="icon">
+          <i class="fas fa-home"></i>
+      </span>
+      </a>
+
+      <div class="navbar-item has-dropdown is-hoverable">
+        <a class="navbar-link">
+          More Research
+        </a>
+        <div class="navbar-dropdown">
+          <a class="navbar-item" href="http://trackletmapper.cs.uni-freiburg.de">
+            TrackletMapper
+          </a>
+          <a class="navbar-item" href="http://urbanlanegraph.cs.uni-freiburg.de">
+            UrbanLaneGraph
+          </a>
+          <a class="navbar-item" href="http://av-vehicles.cs.uni-freiburg.de/">
+            AVDet
+          </a>
+          <a class="navbar-item" href="http://deepterrain.cs.uni-freiburg.de/">
+            DeepTerrain
+          </a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</nav>
+
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">AutoGraph: Predicting Lane Graphs from Traffic</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">
+              <a href="https://jannik-zuern.com">Jannik Zürn</a><sup>1</sup>,</span>
+            <span class="author-block">
+              <a href="https://eng.ox.ac.uk/people/ingmar-posner/">Ingmar Posner</a><sup>2</sup>,</span>
+            <span class="author-block">
+              <a href="https://www.utn.de/person/wolfram-burgard/">Wolfram Burgard</a><sup>3</sup>
+            </span>
+          </div>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>1</sup>University of Freiburg, Germany,</span>
+            <span class="author-block"><sup>2</sup>University of Oxford,</span>
+            <span class="author-block"><sup>3</sup>University of Technology Nuremberg</span>
+          </div>
+
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <!-- PDF Link. -->
+              <span class="link-block">
+                <a href="https://arxiv.org/pdf/2011.12948"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>Paper</span>
+                </a>
+              </span>
+              <span class="link-block">
+                <a href="https://arxiv.org/abs/2011.12948"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="ai ai-arxiv"></i>
+                  </span>
+                  <span>arXiv</span>
+                </a>
+              </span>
+              <!--              &lt;!&ndash; Video Link. &ndash;&gt;-->
+              <!--              <span class="link-block">-->
+              <!--                <a href="https://www.youtube.com/watch?v=MrKrnHhk8IA"-->
+              <!--                   class="external-link button is-normal is-rounded is-dark">-->
+              <!--                  <span class="icon">-->
+              <!--                      <i class="fab fa-youtube"></i>-->
+              <!--                  </span>-->
+              <!--                  <span>Video</span>-->
+              <!--                </a>-->
+              <!--              </span>-->
+              <!-- Code Link. -->
+              <!--              <span class="link-block">-->
+              <!--                <a href="https://github.com/google/nerfies"-->
+              <!--                   class="external-link button is-normal is-rounded is-dark">-->
+              <!--                  <span class="icon">-->
+              <!--                      <i class="fab fa-github"></i>-->
+              <!--                  </span>-->
+              <!--                  <span>Code</span>-->
+              <!--                  </a>-->
+              <!--              </span>-->
+              <!-- Dataset Link. -->
+              <span class="link-block">
+                <a href="http://urbanlanegraph.cs.uni-freiburg.de"
+                   class="external-link button is-normal is-rounded is-dark">
+                  <span class="icon">
+                      <i class="far fa-images"></i>
+                  </span>
+                  <span>Dataset</span>
+                  </a>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <!-- <video id="teaser" autoplay muted loop playsinline height="100%">
+      <source src=""
+              type="video/mp4">
+    </video> -->
+
+      <img src="static/images/teaser.png" />
+
+      <h2 class="subtitle has-text-centered">
+        AutoGraph aggregates tracked vehicle
+        tracklets and predicts complex lane graphs without requiring
+        any lane graph annotations.
+      </h2>
+    </div>
+  </div>
+</section>
+
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+
+    <div class="column is-four-fifths">
+      <h2 class="title is-3">Abstract</h2>
+      <div class="content has-text-justified">
+        <p>
+          Lane graph estimation is a long-standing problem
+          in the context of autonomous driving in urban environments.
+          Previous works aimed at solving this problem by relying on
+          large-scale human-annotated graph annotations, introducing
+          the bottleneck of limited available annotations for training
+          models to solve this task. To overcome this limitation, we
+          propose a novel data source for lane graph annotations: the
+          movement of traffic participants.        </p>
+        <p>
+          In our AutoGraph approach,
+          we employ a pre-trained object tracker and collect the tracklets
+          of traffic participants such as vehicles and trucks. We show that
+          it is possible to train a successor lane graph prediction model
+          from this data without requiring any human supervision. In
+          the second stage, we show how the single successor predictions can be aggregated into an accurate and consistent lane
+          graph. We demonstrate the efficacy of our approach on the
+          UrbanLaneGraph dataset and perform extensive quantitative
+          and qualitative evaluations.
+        </p>
+      </div>
+    </div>
+
+
+  </div>
+  <!--/ Abstract. -->
+
+  <!--    &lt;!&ndash; Paper video. &ndash;&gt;-->
+  <!--    <div class="columns is-centered has-text-centered">-->
+  <!--      <div class="column is-four-fifths">-->
+  <!--        <h2 class="title is-3">Video</h2>-->
+  <!--        <div class="publication-video">-->
+  <!--          <iframe src="https://www.youtube.com/embed/MrKrnHhk8IA?rel=0&amp;showinfo=0"-->
+  <!--                  frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>-->
+  <!--        </div>-->
+  <!--      </div>-->
+  <!--    </div>-->
+  <!--    &lt;!&ndash;/ Paper video. &ndash;&gt;-->
+
+  </div>
+</section>
+
+
+
+
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">Approach</h2>
+
+        <p>
+        Our approach can be split into three distinct stages: First,
+tracklet parsing and merging, where we track traffic participants through all scenes in the dataset and prepare the data
+for model training. Second, model training, where we train
+the proposed models with data obtained in the first stage.
+Third, we perform inference with our trained models and
+aggregate the graphs into a globally consistent representation.
+In the following, we detail each component of our approach. <br><br>
+        </p>
+
+
+                <h3 class="title is-4">Tracklet Parsing and Merging</h3>
+        <p>
+          We start our data processing pipeline by tracking traffic participants in all available scenes of the Argoverse2
+dataset [21] across all six available cities. Each scene in
+the dataset consists of approximately 20 seconds of driving.
+For each scene, we track vehicles such as cars, trucks, motorcycles, and busses using a pre-trained LiDAR-based
+object detector[19]. We transform all tracklets into a global
+coordinate frame. Subsequently, we smooth the tracklets with
+a moving average filter in order to minimize the amount
+of observation noise and the influence of erradic driving
+behavior (i.e. steering inaccuracies).
+          <br>
+
+
+
+
+        </p>
+        <div class="content has-text-justified has-text-centered"> <img src="static/images/merging.png" width="50%" />
+
+
+
+
+        <h3 class="title is-4">Successor Lane Graph Prediction</h3>
+        <p>
+          The whole training pipeline is visualized in the figure below. After
+our aggregation step, we are able to query all tracklets that
+are visible in an aerial image crop, starting from a given
+querying position q. To obtain a training dataset for our
+models, for each query pose q, we crop an aerial image
+RGBq, from the aerial image,centered and oriented around
+the query pose. In the same way, we crop and center the
+drivable map and obtain Dq, and the angle map and obtain
+Aq.
+
+Our model consists of two sub-networks. As a first step,
+we train a DeepLabv3+ model [7] to predict the pixel-wise
+drivable and angle maps from an RGB aerial image input,
+using Dq and Aq as the learning targets. We denote this
+model as TrackletNet. This initial task is identified as an
+auxiliary task, leveraging the vast amount of tracklets readily
+available for a given crop. For training, we use a binary
+cross-entropy loss to guide the prediction of the drivable map
+
+layer and a mean squared error loss for the prediction of
+the angle map. We encode the Drivable layer as a tensor
+Dij ∈ {0, 1}
+H×W . To circumvent the discontinuous angles
+at the singularity α = ±π, we encode the angle at pixel
+location (i, j) as a value pair [sin(α), cos(α)]T
+, producing
+the Angles layer Ak
+ij ∈ R
+H×W×2
+
+
+
+
+
+        </p>
+        <div class="content has-text-justified has-text-centered"> <img src="static/images/approach.png" width="100%" />
+        </div>
+        <h3 class="title is-4"> Graph Exploration and Aggregation</h3>
+        <p>
+          The approach described in the previous sections is capable
+          of inferring the graph structure of the successor graph from
+          a given query position. In this section, we illustrate how
+          a complete lane graph can be obtained from running our
+          AutoGraph model iteratively on its own predictions and
+          subsequently aggregating these predictions into a globally
+          consistent graph representation. To this end, we leverage a
+          depth-first exploration algorithm: We initialize our model by
+          selecting start poses, which can either be selected manually
+          or obtained from our TrackletNet model. We predict the
+          successor graph from this initial position and query our
+          model along the successor graph and repeat the process. In
+          the case of a straight road section, for each forward pass
+          of our model, a single future query pose is added to the
+          list of query poses to process. If a lane split is encountered,
+          for each of the successor subgraphs starting at lane splits, a
+          query pose is added to the list. If a lane ends or no successor
+          graphs are found, the respective branch of the aggregated
+          lane graph terminates and the next pose in the list is queried.
+          The exploration terminates once the list of future query poses
+          is empty. In contrast to prior work [3], where the complete set
+          of successor graphs is aggregated according to an elaborate
+          graph aggregation scheme, we instead only add graph nodes
+          to the global graph where the virtual agent was placed at a
+          given time. Therefore, we add edges between graph nodes
+          according to the movement of the successor graph query
+          position. This aggregation formulation simplifies the graph
+          aggregation scheme since the number of nodes to integrate
+          into the global graph is greatly reduced.
+
+
+
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+
+<section class="hero teaser">
+  <div class="container is-two-fifths-desktop">
+    <div class="hero-body">
+      <video id="teaser" autoplay muted loop playsinline width="100%">
+        <source src="./static/videos/out.mp4"
+                type="video/mp4">
+      </video>
+      <h2 class="subtitle is-two-fifths-desktop has-text-centered">
+        AutoGraph learns to predict successor graphs from vehicle tracklets and aggregates them into a single consistent lane graph
+      </h2>
+    </div>
+  </div>
+</section>
+
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">UrbanTracklets Dataset</h2>
+        <div class="content has-text-justified has-text-centered"> <img src="static/images/tracklets.png" /></div>
+        <p>
+          We evaluate our proposed method on a large-scale dataset
+          for lane graph estimation from traffic participants. We use
+          the RGB aerial images and the ground-truth lane graph
+          annotations from the UrbanLaneGraph dataset [3]. To obtain
+          the traffic participant tracklets, we leverage the LiDAR
+          dataset split of the Argoverse2 dataset. The dataset
+          contains consecutive LiDAR scans for hundreds of driving
+          scenarios. A single driving scenario entails approx. 20 s
+          of real-world driving. We leverage the OpenPCDet
+          detection and tracking suite for LiDAR point clouds with
+          a CenterPoint model, pre-trained on the NuScenes
+          dataset. We track the vehicle classes of Car, Bus, Trailer,
+          and Motorcycle. Subsequently, we transform the respective
+          LiDAR-centric tracklet coordinates to a global reference
+          frame that is aligned with the aerial image coordinates.
+          We smooth each tracklet with a mean filter approach to
+          account for sensor noise and tracking inaccuracies. We call
+          our tracklet dataset the UrbanTracklet dataset and make it
+          publicly available as an addition to the UrbanLaneGraph
+          dataset [3]. In Tab. I, we list all relevant metrics of our UrbanTracklet dataset. In total, our dataset entails tracklets with
+          an accumulated total length of approximately 12 000 km.
+        </p>
+
+        <div class="content"> <img src="static/images/dataset-stats.png" width="50%" />
+
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+
+
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+
+    <div class="columns is-centered">
+
+
+      <div class="columns is-centered">
+        <div class="column is-full-width">
+          <h2 class="title is-3">Experiments</h2>
+
+          We evaluate our model on the well-established tasks for
+          lane graph estimation: Successor Lane Graph Prediction and
+          Full Lane Graph Prediction. <br> <br>
+
+
+          Below, we visualize qualitative results of our AutoGraph model for the Successor-LGP task on the UrbanLaneGraph dataset.
+          We visualize the successor heatmap and the graph generated from it for our human-supervised model
+          AutoGraph-GT and our tracklet-supervised model AutoGraph.
+
+
+          <div class="is-vcentered interpolation-panel">
+            <!-- <p>Sequence 1</p> -->
+            <div class="has-text-centered">
+              <img width="100%" src="static/images/results.png"> </div>
+            <p>Qualitative results of our AutoGraph model for the Successor-LGP task on the UrbanLaneGraph dataset. We visualize
+the successor heatmap and the graph generated from it for our human-supervised model AutoGraph-GT and our trackletsupervised model AutoGraph.</p>
+            <hr>
+          </div>
+
+
+
+          <p>Below, we illustrate two exemplary visualizations of
+            predicted lane graphs for the cities of Washington, D.C., and
+            Miami. We observe that our approach is capable of accurately
+            reconstructing the lane graph in visually challenging environments. Large scenes with multiple blocks are handled well
+            and clearly reflect the underlying lane graph topology. The
+            detail view for a complex intersection in Miami illustrates that almost
+            all major intersection arms are covered even in
+the presence of visual clutter such as water, boats, parking
+lots, and concrete-colored buildings. Minor inaccuracies are
+produced at the five-armed intersection at the bottom of the
+aerial image, where not all connections between intersection
+arms are present in the inferred lane graph.
+
+          </p>
+
+          <div class="is-vcentered interpolation-panel">
+            <!-- <p>Sequence 1</p> -->
+            <div class="has-text-centered">
+              <img width="100%" src="static/images/washington.png"> </div>
+            <p>Full lane graph prediction result - Washington, D.C.</p>
+            <hr>
+            <!-- <p>Sequence 2</p> -->
+            <div class="has-text-centered">
+              <img width="100%" src="static/images/miami.png"> </div>
+            <p>Full lane graph prediction result - Miami, detail view.</p>
+          </div>
+        </div>
+
+        <hr>
+        <!-- <p>Sequence 3</p> -->
+      </div>
+      <hr>
+    </div>
+  </div>
+</section>
+
+
+
+
+
+
+
+
+
+<section class="section" id="BibTeX">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>@article{zuern2023autograph,
+  author    = {Zuern, Jannik and Posner, Ingmar and Burgard, Wolfram},
+  title     = {AutoGraph: Predicting Lane Graphs from Traffic},
+  journal   = {XX},
+  year      = {2023},
+}</code></pre>
+  </div>
+</section>
+
+
+
+
+<!-- Concurrent Work. -->
+<section class="section" id="ack">
+  <div class="container is-max-desktop content">
+
+    <div class="columns is-centered">
+      <div class="column is-full-width">
+        <h2 class="title is-3">Acknowledgements</h2>
+
+        <div class="content has-text-justified">
+          We thank the Argoverse2 team for making the Argoverse2 datset (<a href="https://www.argoverse.org/av2.html">https://www.argoverse.org/av2.html</a>)
+          publicly available and for allowing the re-distribution of their dataset in remixed form.
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <h2 class="title is-3">People</h2>
+    <div class="columns container">
+      <div class="column has-text-centered profile">
+        <a href="http://www2.informatik.uni-freiburg.de/~huang/"><img src="static/images/people/zuern.jpg"
+                                                                      alt="Jannik Zürn" /></a>
+        <h3><a href="http://jannik-zuern.com/">Jannik Zürn</a></h3>
+      </div>
+
+      <div class="column has-text-centered profile">
+        <a href="http://www.oiermees.com"><img src="static/images/people/posner.jpg" alt="Ingmar Posner" /></a>
+        <h3><a href="https://eng.ox.ac.uk/people/ingmar-posner">Ingmar Posner</a></h3>
+      </div>
+
+      <div class="column has-text-centered profile">
+        <a href="https://www.utn.de/1/wolfram-burgard/"><img src="static/images/people/burgard.jpg"
+                                                             alt="Wolfram Burgard" /></a>
+        <h3><a href="https://www.utn.de/1/wolfram-burgard/">Wolfram Burgard</a></h3>
+      </div>
+
+    </div>
+
+  </div>
+</section>
+
+
+
+
+
+
+<footer class="footer">
+  <div class="container">
+    <div class="content has-text-centered">
+      <a class="icon-link"
+         href="./static/videos/nerfies_paper.pdf">
+        <i class="fas fa-file-pdf"></i>
+      </a>
+      <a class="icon-link" href="https://github.com/keunhong" class="external-link" disabled>
+        <i class="fab fa-github"></i>
+      </a>
+    </div>
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <p>
+            This website is licensed under a <a rel="license"
+                                                href="http://creativecommons.org/licenses/by-sa/4.0/">Creative
+            Commons Attribution-ShareAlike 4.0 International License</a>.
+          </p>
+          <p>
+            This means you are free to borrow the <a
+                  href="https://github.com/nerfies/nerfies.github.io">source code</a> of this website,
+            we just ask that you link back to this page in the footer.
+            Please remember to remove the analytics code included in the header of the website which
+            you do not want on your website.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
