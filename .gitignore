@@ -146,3 +146,7 @@ aggregation/sat_image.png
 /aerial_image.png
 
 *.pickle
+
+aggregation/data/trajectories.zip
+
+website2/static/images/out.mp4
