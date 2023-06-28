@@ -851,10 +851,10 @@ if __name__ == "__main__":
 
     # Visualize tracklets
     fig, ax = plt.subplots()
-    ax.imshow(sat_image_)
+    ax.imshow(sat_image_ // 3)
     ax.axis('off')
     ax.set_aspect('equal')
-    for t in tqdm(trajectories_pred_[::10]):
+    for t in tqdm(trajectories_pred_[::3]):
         ax.plot(t[:, 0], t[:, 1], color="blue", linewidth=2, alpha=0.5)
     plt.show()
 
