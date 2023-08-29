@@ -7,27 +7,43 @@ import torch
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.nn import DataParallel
-from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 import torchvision.models as models
 from torchmetrics import JaccardIndex, Precision, Recall, F1Score
 import matplotlib.pyplot as plt
 import cv2
 from collections import OrderedDict
 from matplotlib import cm
-from aggregation.utils import AngleColorizer
 from data.datasets import SuccessorRegressorDataset, SuccessorGraphDataset
-from lanegnn.utils import ParamLib, make_image_grid
 import glob
-from evaluate_full import evaluate_successor_lgp
-from driving.utils import skeletonize_prediction, skeleton_to_graph
 import pickle
+
+# local imports
+from regressors.deeplabv3.deeplabv3 import DeepLabv3Plus
+from lanegnn.utils import ParamLib, make_image_grid
+from evaluate_full import evaluate_successor_lgp
+from aggregation.utils import AngleColorizer
+from driving.utils import skeletonize_prediction, skeleton_to_graph
 
 
 def weighted_mse_loss(input, target, weight):
+    """
+    https://discuss.pytorch.org/t/custom-loss-function-with-additional-parameter/3585/2
+    :param input:
+    :param target:
+    :param weight:
+    :return:
+    """
+
     return torch.mean(weight * (input - target) ** 2)
 
 
 def torch_to_cv2(pred):
+
+    """
+    Convert torch tensor to cv2 image
+    :param pred:
+    :return:
+    """
     pred = pred[0].detach().cpu().numpy()
     pred = np.concatenate([pred[..., np.newaxis], pred[..., np.newaxis], pred[..., np.newaxis]], axis=2)
     pred = (pred * 255).astype(np.uint8)
@@ -36,6 +52,14 @@ def torch_to_cv2(pred):
 
 
 def calc_torchmetrics_mask(seg_preds, seg_gts, name):
+
+    """
+    Calculate metrics for segmentation
+    :param seg_preds:
+    :param seg_gts:
+    :param name:
+    :return:
+    """
     precision = Precision(task="binary", average='macro', mdmc_average='global')
     recall = Recall(task="binary", average='none', mdmc_average='global')
     iou = JaccardIndex(task="binary", reduction='none', num_classes=2, ignore_index=0)
@@ -64,6 +88,15 @@ def calc_torchmetrics_mask(seg_preds, seg_gts, name):
 
 
 def calc_torchmetrics_angles(angle_preds, angle_gts, name):
+
+    """
+    Calculate metrics for lane angles evaluation
+    :param angle_preds:
+    :param angle_gts:
+    :param name:
+    :return:
+    """
+
     # move all to CPU
     angle_preds = [angle_pred.cpu() for angle_pred in angle_preds]
     angle_gts = [angle_gt.cpu() for angle_gt in angle_gts]
@@ -103,6 +136,11 @@ def calc_torchmetrics_angles(angle_preds, angle_gts, name):
 
 
 class Trainer():
+
+    """
+    Model trainer class
+    """
+
     def __init__(self, params, model, dataloader_train, dataloader_val, optimizer, dataloader_graph=None, model_full=None):
         self.model = model
         self.dataloader_train = dataloader_train
@@ -252,7 +290,6 @@ class Trainer():
 
     def evaluate_full(self, epoch):
 
-        print("evaluate_full...")
 
         self.model.eval()
 
@@ -372,7 +409,13 @@ class Trainer():
         return metrics_tracklet_drivable
 
     def evaluate_heatmap_succ(self, epoch):
-        print("evaluate_heatmap_succ...")
+
+        """
+        Evaluate successor heatmap
+        :param epoch:
+        :return:
+        """
+
         self.model.eval()
 
         val_losses = []
@@ -464,7 +507,13 @@ class Trainer():
 
 
     def evaluate_graph_succ(self, epoch):
-        print("evaluate_graph_succ...")
+
+        """
+        Evaluate successor graph
+        :param epoch:
+        :return:
+        """
+
         self.model.eval()
 
         graphs_gt = {}
@@ -753,6 +802,7 @@ def main():
     if opt.inference:
         trainer.inference()
 
+    # Train loop
     for epoch in range(params.model.num_epochs):
 
         # Evaluate

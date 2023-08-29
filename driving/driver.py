@@ -35,14 +35,23 @@ max_edge_length = 100    # max length of any graph edge in pixels
 succ_graph_weight_threshold = 20  # default: 50, threshold for successor graph edge weight below which we abandon branch
 
 
-# CVPR graph aggregation
+# graph aggregation
 threshold_px = 30
 threshold_rad = 0.2
 closest_lat_thresh = 30
 
 init_poses = json.load(open('starting_poses.json', 'r'))
 
+
 def move_graph_nodes(g, delta):
+
+    """
+    Move all nodes of graph g by delta
+    :param g:
+    :param delta:
+    :return:
+    """
+
     g_ = g.copy(as_view=False)
     for node in g_.nodes():
         g_.nodes[node]['pos'] += delta
@@ -50,6 +59,11 @@ def move_graph_nodes(g, delta):
 
 
 class AerialDriver(object):
+
+    """
+    Class for driving in aerial images
+    """
+
     def __init__(self, debug=False, input_layers=None, tile_id=None, data_source=None):
         self.aerial_image = None
 
@@ -96,6 +110,14 @@ class AerialDriver(object):
 
     def load_model(self, model_path, type=None, input_layers="rgb"):
 
+        """
+        Load model from path
+        :param model_path:
+        :param type:
+        :param input_layers:
+        :return:
+        """
+
         state_dict = torch.load(model_path)
         new_state_dict = OrderedDict()
         for k, v in state_dict.items():
@@ -131,6 +153,12 @@ class AerialDriver(object):
         print("Model {} loaded".format(model_path))
 
     def load_satellite(self, impath):
+
+        """
+        Load satellite image
+        :param impath:
+        :return:
+        """
         print("Loading aerial image {}".format(impath))
         self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
         self.tile_id = impath.split("/")[-1].split(".")[0]
@@ -163,6 +191,12 @@ class AerialDriver(object):
 
 
     def generate_pos_encoding(self):
+
+        """
+        Generate position encoding
+        :return:
+        """
+
         q = [self.crop_shape[0]-1,
              self.crop_shape[1]//2 - 1]
 
@@ -177,6 +211,11 @@ class AerialDriver(object):
         return pos_encoding
 
     def pose_to_transform(self):
+
+        """
+        Convert pose to transform matrix
+        :return:
+        """
 
         x, y, yaw = self.pose
 
@@ -211,6 +250,12 @@ class AerialDriver(object):
 
     def add_pred_to_canvas(self, pred):
 
+        """
+        Add prediction to canvas
+        :param pred:
+        :return:
+        """
+
         M = np.linalg.inv(self.pose_to_transform())
 
         pred_roi = (np.ones_like(pred) * 255).astype(np.uint8)
@@ -242,6 +287,12 @@ class AerialDriver(object):
             cv2.circle(canvas_viz, (x_0, y_0), 3, (0, 255, 0), -1)
 
     def crop_satellite_at_pose(self, pose):
+
+        """
+        Crop satellite image at pose
+        :param pose:
+        :return:
+        """
 
         M = self.pose_to_transform()
         aerial_image = self.aerial_image.copy()
@@ -987,12 +1038,31 @@ class AerialDriver(object):
 if __name__ == "__main__":
 
 
+
+
     if len(sys.argv) > 1:
         tile_ids = [sys.argv[1]]
     if len(sys.argv) > 2:
         data_source = sys.argv[2]
     else:
         data_source = "tracklets"
+
+    checkpoint_path = "/data/autograph/checkpoints/"
+
+
+    best_models = {
+        "tracklets": {
+            "full": "serene-voice-204/e-016.pth", # trained on all
+            "successor": "visionary-voice-212/e-030.pth"# trained on all
+        },
+
+        "lanegraph": {
+            "full": "dulcet-water-210/e-058.pth", # trained on all
+            "successor": "fallen-oath-217/e-050.pth" # trained on all
+        }
+    }
+
+
 
     # tile_ids = ['freiburg_8057_7995']  # freiburg
     # tile_ids = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/*.png")
@@ -1013,34 +1083,36 @@ if __name__ == "__main__":
         # Tracklets_joint
         if data_source == "tracklets":
             print("Using tracklets model")
-            driver.load_model(model_path="/data/autograph/checkpoints/serene-voice-204/e-016.pth",  # (all-3004)
+            driver.load_model(model_path=os.path.join(checkpoint_path, best_models["tracklets"]["full"]),
                               type="full")
-            driver.load_model(model_path="/data/autograph/checkpoints/visionary-voice-212/e-030.pth",  # (all-3004)
+            driver.load_model(model_path=os.path.join(checkpoint_path, best_models["tracklets"]["successor"]),
                               type="successor",
                               input_layers="rgb")
         # Lanegraph
         elif data_source == "lanegraph":
             print("Using lanegraph model")
-            driver.load_model(model_path="/data/autograph/checkpoints/dulcet-water-210/e-058.pth",  # (all-3004)
+            driver.load_model(model_path=os.path.join(checkpoint_path, best_models["lanegraph"]["full"]),
                               type="full")
-            driver.load_model(model_path="/data/autograph/checkpoints/fallen-oath-217/e-050.pth",  # (all-3004)
+            driver.load_model(model_path=os.path.join(checkpoint_path, best_models["lanegraph"]["successor"]),
                               type="successor",
                               input_layers="rgb")
         else:
             raise ValueError("Unknown data_source {}".format(data_source))
 
+        # load satellite image
+        driver.load_satellite(
+            impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
 
-        if "freiburg" in tile_id:
-            driver.load_satellite(impath="/data/freiburg/{}.png".format(tile_id))
-        else:
-            driver.load_satellite(
-                impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
 
+        # enter driving loop
         while True:
             driver.drive_freely()
             if driver.done:
                 driver.cleanup()
                 break
+
+
+        # debugging code
 
 
         # # load files from disk

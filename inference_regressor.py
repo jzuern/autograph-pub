@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import torch
-from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
 from collections import OrderedDict
 import torchvision.models as models
 from glob import glob
@@ -10,16 +9,17 @@ Image.MAX_IMAGE_PIXELS = None
 import networkx as nx
 import pickle
 import os
-from evaluate_full import evaluate
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import pprint
 from random import shuffle
 import pandas as pd
 
-from aggregation.utils import visualize_graph, AngleColorizer
+# local imports
+from regressors.deeplabv3.deeplabv3 import DeepLabv3Plus
+from evaluate_full import evaluate
+from aggregation.utils import visualize_graph
 from driving.utils import skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
-
 
 
 class FormatPrinter(pprint.PrettyPrinter):
@@ -102,15 +102,14 @@ def load_succ_model(model_path, full_model=False, input_layers="rgb+drivable+ang
 
 def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_threshold, picklefile, split):
 
+
+    do_visualization = False
+
     # Image folder
     test_images = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*-rgb.png".format(split)))
     test_graphs = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*.gpickle".format(split)))
-    # test_images = sorted(glob("//data/autograph/all-3004/lanegraph/pittsburgh/test/branching/*-rgb.png"))
-    # test_graphs = sorted(glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/successor-lgp/{}/*.gpickle".format(split)))
 
-    ac = AngleColorizer()
-
-    # jointly shuffle them
+    # jointly shuffle images
     joint = list(zip(test_images, test_graphs))
     shuffle(joint)
     test_images, test_graphs = zip(*joint)
@@ -127,10 +126,10 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_thr
     images_succ = []
     graphs_pred = []
     graphs_gt = []
-    preds_angles_color = []
-    preds_drivable = []
     sample_ids = []
 
+
+    # iterate over samples
     for image_counter, (test_image, test_graph) in tqdm(enumerate(zip(test_images, test_graphs)),
                                                         total=len(test_images),
                                                         desc="Inference on samples"):
@@ -156,13 +155,13 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_thr
             rgb_torch = torch.from_numpy(img).permute(2, 0, 1).float().cuda() / 255.
             rgb_torch = rgb_torch.unsqueeze(0)
 
-            # (pred, _) = model_full(rgb_torch)
-            # pred = torch.nn.functional.interpolate(pred,
-            #                                        size=rgb_torch.shape[2:],
-            #                                        mode='bilinear',
-            #                                        align_corners=True)
-            # pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
-            # pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
+            (pred, _) = model_succ(rgb_torch)
+            pred = torch.nn.functional.interpolate(pred,
+                                                   size=rgb_torch.shape[2:],
+                                                   mode='bilinear',
+                                                   align_corners=True)
+            pred_angles = torch.nn.Tanh()(pred[0:1, 0:2, :, :])
+            pred_drivable = torch.nn.Sigmoid()(pred[0:1, 2:3, :, :])
 
             if input_layers == "rgb":
                 in_tensor = rgb_torch
@@ -194,13 +193,11 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_thr
         # pred_angles_color = ac.angle_to_color(pred_angles, mask=pred_drivable > 0.3)
 
 
-
         # relabel nodes
         mapping = {n: i for i, n in enumerate(succ_graph.nodes)}
         succ_graph = nx.relabel_nodes(succ_graph, mapping)
 
         pred_dict[city_name][split][sample_id] = succ_graph
-
 
         images.append(img)
         # images_succ.append(np.digitize(pred_succ, np.arange(0, 1.1, 0.1)))
@@ -211,36 +208,37 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_thr
         # preds_drivable.append(pred_drivable)
         sample_ids.append(sample_id)
 
-        # # Visualize
-        # print(sample_id)
-        # plot_every = 10
-        # if image_counter % plot_every == 0 and image_counter > 0:
-        #     fig, ax = plt.subplots(plot_every, 4, sharex=True, sharey=True, figsize=(10, 30), dpi=600)
-        #     plt.tight_layout()
-        #     plt.subplots_adjust(wspace=0, hspace=0)
-        #     for i in range(plot_every):
-        #         [ax[i, j].axis("off") for j in range(4)]
-        #         ax[i, 0].set_title(sample_ids[image_counter-i])
-        #         img = cv2.cvtColor(images[image_counter-i], cv2.COLOR_BGR2RGB)
-        #         visualize_graph(graphs_gt[image_counter-i], ax[i, 0], aerial_image=img, node_color='white', edge_color='white')
-        #         visualize_graph(graphs_pred[image_counter-i], ax[i, 1], aerial_image=img)
-        #         visualize_graph(graphs_gt[image_counter-i], ax[i, 2], aerial_image=img, node_color='white', edge_color='white')
-        #         visualize_graph(graphs_pred[image_counter-i], ax[i, 2], aerial_image=img)
-        #         ax[i, 3].imshow(images_succ[image_counter-i], cmap="viridis")
-        #         # ax[i, 4].imshow(preds_drivable[image_counter - i])
-        #         # ax[i, 5].imshow(preds_angles_color[image_counter - i])
-        #
-        #     svg_filename = "/data/autograph/evaluations/eval_succ/viz/{:04d}.svg".format(image_counter)
-        #     # plt.savefig(svg_filename)
-        #     # # open svg file and delete line containing "<g id="figure_1">"
-        #     # with open(svg_filename, "r") as f:
-        #     #     lines = f.readlines()
-        #     # with open(svg_filename, "w") as f:
-        #     #     for line in lines:
-        #     #         if "<g id=\"figure_1\">" not in line:
-        #     #             f.write(line)
-        #
-        #     plt.savefig(svg_filename.replace(".svg", ".png"))
+        # Visualize
+        if do_visualization:
+            print(sample_id)
+            plot_every = 10
+            if image_counter % plot_every == 0 and image_counter > 0:
+                fig, ax = plt.subplots(plot_every, 4, sharex=True, sharey=True, figsize=(10, 30), dpi=600)
+                plt.tight_layout()
+                plt.subplots_adjust(wspace=0, hspace=0)
+                for i in range(plot_every):
+                    [ax[i, j].axis("off") for j in range(4)]
+                    ax[i, 0].set_title(sample_ids[image_counter-i])
+                    img = cv2.cvtColor(images[image_counter-i], cv2.COLOR_BGR2RGB)
+                    visualize_graph(graphs_gt[image_counter-i], ax[i, 0], aerial_image=img, node_color='white', edge_color='white')
+                    visualize_graph(graphs_pred[image_counter-i], ax[i, 1], aerial_image=img)
+                    visualize_graph(graphs_gt[image_counter-i], ax[i, 2], aerial_image=img, node_color='white', edge_color='white')
+                    visualize_graph(graphs_pred[image_counter-i], ax[i, 2], aerial_image=img)
+                    ax[i, 3].imshow(images_succ[image_counter-i], cmap="viridis")
+                    # ax[i, 4].imshow(preds_drivable[image_counter - i])
+                    # ax[i, 5].imshow(preds_angles_color[image_counter - i])
+
+                svg_filename = "/data/autograph/evaluations/eval_succ/viz/{:04d}.svg".format(image_counter)
+                # plt.savefig(svg_filename)
+                # # open svg file and delete line containing "<g id="figure_1">"
+                # with open(svg_filename, "r") as f:
+                #     lines = f.readlines()
+                # with open(svg_filename, "w") as f:
+                #     for line in lines:
+                #         if "<g id=\"figure_1\">" not in line:
+                #             f.write(line)
+
+                plt.savefig(svg_filename.replace(".svg", ".png"))
 
 
     pickle.dump(pred_dict, open(picklefile, "wb"))
@@ -249,12 +247,10 @@ def run_successor_lgp(full_model_pth, succ_model_pth, input_layers, skeleton_thr
 if __name__ == "__main__":
 
     split = "test"
-    skeleton_thresholds = np.arange(0.0, 0.2, 0.01)
-    #skeleton_thresholds = [0.05]
+    skeleton_thresholds = [0.05]
 
     # best threshold tracklets: 0.02
     # best threshold lanegraph: 0.02
-
 
     model_dicts = [
         {"model_path": "/data/autograph/checkpoints/visionary-voice-212/e-030.pth",    # tracklets
