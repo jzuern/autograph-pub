@@ -1,6 +1,6 @@
 import cv2
 import torch
-from regressors.reco.deeplabv3.deeplabv3 import DeepLabv3Plus
+from regressors.deeplabv3.deeplabv3 import DeepLabv3Plus
 from collections import OrderedDict
 import torchvision.models as models
 import numpy as np
@@ -17,6 +17,7 @@ import glob
 import os
 from aggregation.utils import similarity_check, out_of_bounds_check, AngleColorizer
 from utils import aggregate, colorize, skeleton_to_graph, skeletonize_prediction, roundify_skeleton_graph
+from aggregation.utils import visualize_graph
 import sys
 import json
 
@@ -43,6 +44,7 @@ closest_lat_thresh = 30
 init_poses = json.load(open('starting_poses.json', 'r'))
 
 
+
 def move_graph_nodes(g, delta):
 
     """
@@ -65,7 +67,17 @@ class AerialDriver(object):
     """
 
     def __init__(self, debug=False, input_layers=None, tile_id=None, data_source=None):
+
+        """
+        Initialize driver
+        :param debug:
+        :param input_layers:
+        :param tile_id:
+        :param data_source:
+        """
+
         self.aerial_image = None
+        self.tracklets_image = None
 
         my_init_poses = np.array(init_poses[tile_id])
         my_init_poses = my_init_poses + np.array([500, 500, 0])
@@ -152,7 +164,7 @@ class AerialDriver(object):
 
         print("Model {} loaded".format(model_path))
 
-    def load_satellite(self, impath):
+    def load_satellite(self, impath, impath_tracklets):
 
         """
         Load satellite image
@@ -161,6 +173,14 @@ class AerialDriver(object):
         """
         print("Loading aerial image {}".format(impath))
         self.aerial_image = np.asarray(Image.open(impath)).astype(np.uint8)
+        self.tracklets_image = np.asarray(Image.open(impath_tracklets)).astype(np.uint8)
+
+        self.tracklets_image = self.tracklets_image[46605:46605 + 5000, 29021:29021 + 5000, :]
+
+        plt.imshow(self.tracklets_image)
+        plt.show()
+
+
         self.tile_id = impath.split("/")[-1].split(".")[0]
         self.city_name = self.tile_id.split("_")[0]
         print("Tile ID: {}".format(self.tile_id))
@@ -168,14 +188,15 @@ class AerialDriver(object):
 
         self.dumpdir = "/data/autograph/evaluations/G_agg/{}/{}".format(self.data_source, self.tile_id)
         os.makedirs(self.dumpdir, exist_ok=True)
-        os.makedirs(self.dumpdir + "/debug/", exist_ok=True)
+        os.makedirs(self.dumpdir + "/inference/", exist_ok=True)
+        os.makedirs(self.dumpdir + "/G_agg_local/", exist_ok=True)
+        os.makedirs(self.dumpdir + "/G_agg_global/", exist_ok=True)
 
         print("Dumpdir: {}".format(self.dumpdir))
 
-
-        if os.path.exists("{}/G_agg_naive_cleanup.pickle".format(self.dumpdir)):
-            print("G_agg_naive_cleanup already exists. Exiting.")
-            sys.exit(0)
+        # if os.path.exists("{}/G_agg_naive_cleanup.pickle".format(self.dumpdir)):
+        #     print("G_agg_naive_cleanup already exists. Exiting.")
+        #     sys.exit(0)
 
         # Embed the aerial image into a larger image to avoid edge effects
         self.aerial_image = np.pad(self.aerial_image, ((500, 500), (500, 500),
@@ -184,11 +205,12 @@ class AerialDriver(object):
         print("Aerial image shape: {}".format(self.aerial_image.shape))
 
         self.aerial_image = cv2.cvtColor(self.aerial_image, cv2.COLOR_BGR2RGB)
+        self.tracklets_image = cv2.cvtColor(self.aerial_image, cv2.COLOR_BGR2RGB)
+
         self.canvas_log_odds = np.ones([self.aerial_image.shape[0], self.aerial_image.shape[1]], dtype=np.float32)
         self.canvas_angles = np.zeros([self.aerial_image.shape[0], self.aerial_image.shape[1], 3], dtype=np.uint8)
 
         self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
-
 
     def generate_pos_encoding(self):
 
@@ -311,6 +333,30 @@ class AerialDriver(object):
         return rgb
 
 
+    def crop_tracklets_image_at_pose(self, pose):
+
+        """
+        Crop tracklets image at pose
+        :param pose:
+        :return:
+        """
+
+        M = self.pose_to_transform()
+        tracklets_image = self.tracklets_image.copy()
+
+        try:
+            rgb_tracklets = cv2.warpPerspective(tracklets_image, M, (self.crop_shape[0], self.crop_shape[1]),
+                                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_TRANSPARENT)
+
+        except:
+            print("Error in warpPerspective. Resetting position")
+            self.pose = self.init_pose
+            rgb_tracklets = self.crop_satellite_at_pose(self.pose)
+
+        return rgb_tracklets
+
+
+
     def add_graph_to_angle_canvas(self):
 
         g = self.graph_skeleton
@@ -390,6 +436,9 @@ class AerialDriver(object):
 
         self.pose_history = np.concatenate([self.pose_history, [self.pose]])
         rgb = self.crop_satellite_at_pose(self.pose)
+        rgb_tracklets = self.crop_tracklets_image_at_pose(self.pose)
+
+
         rgb_torch = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).float().cuda() / 255
 
         with torch.no_grad():
@@ -441,7 +490,7 @@ class AerialDriver(object):
         skeleton = (skeleton / 255.0).astype(np.float32)
 
         pred_angles = self.ac.xy_to_angle(pred_angles[0].cpu().detach().numpy())
-        pred_angles_succ_color = self.ac.angle_to_color(pred_angles, mask=pred_succ > skeleton_threshold)
+        # pred_angles_succ_color = self.ac.angle_to_color(pred_angles, mask=pred_succ > skeleton_threshold)
         pred_angles_color = self.ac.angle_to_color(pred_angles, mask=pred_drivable > 0.3)
 
         cv2.imshow("skeleton", skeleton)
@@ -464,13 +513,13 @@ class AerialDriver(object):
         nodes = self.graph_skeleton.nodes()
         node_positions = np.array([nodes[i]['o'] for i in nodes])
         [cv2.circle(pred_succ_viz, (int(p[0]), int(p[1])), 4, (0, 255, 0), -1) for p in node_positions]
-
-
-        skeleton_drivable_weight = np.sum(skeleton * pred_drivable)
-        skeleton_succ_weight = np.sum(skeleton * pred_succ / 255.)
+        #
+        #
+        # skeleton_drivable_weight = np.sum(skeleton * pred_drivable)
+        # skeleton_succ_weight = np.sum(skeleton * pred_succ / 255.)
 
         if self.debug:
-            fig, axarr = plt.subplots(1, 5, figsize=(20, 5), sharex=True, sharey=True)
+            fig, axarr = plt.subplots(1, 5, figsize=(20, 6), sharex=True, sharey=True)
             fig.subplots_adjust(left=0, right=1, bottom=0, top=1, wspace=0, hspace=0)
             [axi.set_axis_off() for axi in axarr.ravel()]
 
@@ -482,14 +531,24 @@ class AerialDriver(object):
             axarr[2].title.set_text('Angles')
             axarr[3].imshow(pred_succ, cmap='gray')
             axarr[3].title.set_text('Successor Heatmap')
-            axarr[4].imshow(skeleton, cmap='gray')
-            axarr[4].title.set_text('Successor Skeleton')
-            plt.savefig("/data/autograph/evaluations/G_agg/{}/{}/debug/{:04d}.png".format(self.data_source,
-                                                                                          self.tile_id,
-                                                                                          self.step))
-            plt.close(fig)
+            axarr[4].imshow(cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB))
+            axarr[4].title.set_text('Successor Graph')
 
-        # cv2.imwrite("/data/autograph/evaluations/debug/{}-{:04d}_pred_succ_viz.png".format(self.tile_id, self.step), pred_succ_viz)
+            visualize_graph(self.graph_skeleton,
+                            ax=axarr[4],
+                            width=3,
+                            head_width=10,
+                            head_length=10,
+                            )
+
+            axarr[5].imshow(cv2.cvtColor(rgb_tracklets, cv2.COLOR_BGR2RGB))
+            axarr[5].title.set_text('RGB Tracklets')
+
+
+            plt.savefig("/data/autograph/evaluations/G_agg/{}/{}/inference/{:04d}.png".format(self.data_source,
+                                                                                              self.tile_id,
+                                                                                              self.step))
+            plt.close(fig)
 
         self.step += 1
 
@@ -568,7 +627,11 @@ class AerialDriver(object):
             pos = (int(self.pose_history[i, 0]), int(self.pose_history[i, 1]) - 10)
             cv2.putText(G_agg_viz, "{} - {:.0f}".format(i, graph.graph["succ_graph_weight"]), pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
-        cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{:04d}_{}_viz.png".format(self.data_source, self.tile_id, self.step, name), G_agg_viz)
+        cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{}/{:04d}_{}_viz.png".format(self.data_source,
+                                                                                       self.tile_id,
+                                                                                       name,
+                                                                                       self.step,
+                                                                                       name), G_agg_viz)
 
 
     def visualize_write_G_agg(self, G_agg, name="G_agg"):
@@ -636,15 +699,27 @@ class AerialDriver(object):
         #
         #     cv2.arrowedLine(G_agg_viz, start, end, color=(0, 0, 255), thickness=3, line_type=cv2.LINE_AA)
 
-        cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/{:04d}_{}_viz.png".format(self.data_source,
-                                                                                       self.tile_id,
-                                                                                       self.step, name), G_agg_viz)
+        cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/G_agg_global/{:04d}_{}_viz.png".format(self.data_source,
+                                                                                          self.tile_id,
+                                                                                          self.step,
+                                                                                          name),
+                    G_agg_viz)
 
         margin = 400
         G_agg_viz = G_agg_viz[int(self.pose[1]) - margin:int(self.pose[1]) + margin,
                     int(self.pose[0]) - margin:int(self.pose[0]) + margin]
 
         cv2.imshow("G_agg_viz", G_agg_viz)
+
+
+        cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{}/G_agg_local/{:04d}_{}_viz.png".format(self.data_source,
+                                                                                          self.tile_id,
+                                                                                          self.step,
+                                                                                          name),
+                    G_agg_viz)
+
+
+
 
         # serialize graph
         # pickle.dump(G_agg, open("/data/autograph/evaluations/G_agg/{}/{:04d}_{}.pickle".format(self.tile_id, self.step, name), "wb"))
@@ -935,8 +1010,8 @@ class AerialDriver(object):
 
             if self.step % write_every == 0:
                 self.render_poses_in_aerial()
-                self.visualize_write_G_agg(self.G_agg_naive, "G_agg_naive")
-                # self.visualize_write_G_single(self.graphs, "G_single")
+                self.visualize_write_G_agg(self.G_agg_naive, "G_agg_global")
+                # self.visualize_write_G_single(self.graphs, "G_agg_local")
 
                 # cv2.imwrite("/data/autograph/evaluations/G_agg/{}/{:04d}_angle_canvas.png".format(self.tile_id, self.step), self.canvas_angles)
 
@@ -1100,8 +1175,9 @@ if __name__ == "__main__":
             raise ValueError("Unknown data_source {}".format(data_source))
 
         # load satellite image
-        driver.load_satellite(
-            impath=glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0])
+        impath = glob.glob("/data/lanegraph/urbanlanegraph-dataset-dev/*/tiles/*/{}.png".format(tile_id))[0]
+        driver.load_satellite(impath=impath,
+                              impath_tracklets="/data/lanegraph/urbanlanegraph-dataset-dev/austin/austin-viz-tracklets.png")
 
 
         # enter driving loop

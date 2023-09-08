@@ -1,18 +1,17 @@
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
 from shapely.geometry import MultiLineString
 import osmnx.distance
 import math
 from collections import defaultdict
-import json
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = pow(2, 35).__int__()
 from scipy.spatial.distance import cdist
 import cv2
 import sknw
-from aggregation.utils import smooth_trajectory, resample_trajectory
 from skimage.morphology import skeletonize
+
+from aggregation.utils import smooth_trajectory, resample_trajectory
 
 
 def roundify_skeleton_graph(skeleton_graph: nx.DiGraph):

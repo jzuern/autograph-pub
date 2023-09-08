@@ -1,6 +1,5 @@
 from pathlib import Path
 import matplotlib.pyplot as plt
-import numpy as np
 import psutil
 from tqdm import tqdm
 from PIL import Image
@@ -849,36 +848,48 @@ if __name__ == "__main__":
     viz_file = os.path.join(args.urbanlanegraph_root, "{}/{}-viz-tracklets.png".format(city_name, city_name))
     tracklet_file = os.path.join(args.urbanlanegraph_root, "{}/{}-tracklets.png".format(city_name, city_name))
 
-    # Visualize tracklets
-    fig, ax = plt.subplots()
-    ax.imshow(sat_image_ // 3)
-    ax.axis('off')
-    ax.set_aspect('equal')
-    for t in tqdm(trajectories_pred_[::3]):
-        ax.plot(t[:, 0], t[:, 1], color="blue", linewidth=2, alpha=0.5)
-    plt.show()
-
-
-
-
-
     # # Visualize tracklets
-    # sat_image_viz = sat_image_.copy()
-    #
-    # tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
-    #
-    # for t in tqdm(trajectories_):
-    #     rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
-    #     rc = (int(rc[0]), int(rc[1]), int(rc[2]))
-    #     for i in range(len(t)-1):
-    #         cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), rc, 1, cv2.LINE_AA)
-    #         cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 7)
-    #
-    # cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
-    # print("Saved tracklet visualization to {}".format(viz_file))
-    # cv2.imwrite(tracklet_file, tracklets_image)
-    # print("Saved tracklet visualization to {}".format(tracklet_file))
-    # del sat_image_viz
+    # fig, ax = plt.subplots()
+    # # ax.imshow(sat_image_ // 3)
+    # ax.axis('off')
+    # ax.set_aspect('equal')
+    # # for t in tqdm(trajectories_pred_[::3]):
+    # for t in tqdm(trajectories_pred_):
+    #     ax.plot(t[:, 0], t[:, 1], color="blue", linewidth=2, alpha=0.5)
+    # plt.show()
+
+
+    # use predicted trajectories
+    trajectories_ = trajectories_pred_
+    trajectories_ped_ = trajectories_ped_pred_
+
+    trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
+    trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
+
+
+
+
+    # Visualize tracklets
+    print("Visualizing tracklets")
+
+    sat_image_viz = sat_image_.copy()
+
+    tracklets_image = np.zeros_like(sat_image_viz).astype(np.uint8)
+
+    for t in tqdm(trajectories_pred_):
+        # rc = (np.array(plt.get_cmap('viridis')(np.random.rand())) * 255)[0:3]
+        # rc = (int(rc[0]), int(rc[1]), int(rc[2]))
+        for i in range(len(t)-1):
+            cv2.line(tracklets_image, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (255, 0, 0), 1, cv2.LINE_AA)
+            cv2.line(sat_image_viz, (int(t[i, 0]), int(t[i, 1])), (int(t[i+1, 0]), int(t[i+1, 1])), (0, 0, 255), 1, cv2.LINE_AA)
+
+    cv2.imwrite(viz_file, cv2.cvtColor(sat_image_viz, cv2.COLOR_RGB2BGR))
+    print("Saved tracklet visualization to {}".format(viz_file))
+    cv2.imwrite(tracklet_file, tracklets_image)
+    print("Saved tracklet visualization to {}".format(tracklet_file))
+    del sat_image_viz
+
+    exit()
 
     tracklets_image_ = np.asarray(Image.open(tracklet_file)).astype(np.uint8)
     tracklets_image_ = cv2.cvtColor(tracklets_image_, cv2.COLOR_BGR2RGB)
@@ -890,12 +901,6 @@ if __name__ == "__main__":
                 G_annot_.nodes[node]['pos'][1] < 0 or G_annot_.nodes[node]['pos'][1] > sat_image_.shape[0]:
             G_annot.remove_node(node)
 
-    # use predicted trajectories
-    trajectories_ = trajectories_pred_
-    trajectories_ped_ = trajectories_ped_pred_
-
-    trajectories_ = np.array([smooth_trajectory(t, window_size=6) for t in trajectories_])
-    trajectories_ped_ = np.array([smooth_trajectory(t, window_size=4) for t in trajectories_ped_])
 
     y_min_cut = 0
 

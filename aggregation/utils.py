@@ -1091,7 +1091,11 @@ def out_of_bounds_check(pose, satellite_shape, oob_margin=400):
         return False
 
 
-def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color=np.array([255, 0, 142]) / 255.):
+def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255.,
+                    edge_color=np.array([255, 0, 142]) / 255.,
+                    head_width=2,
+                    head_length=1,
+                    width=0.01,) -> None:
 
     '''
     Visualize a lane graph on an axis
@@ -1117,9 +1121,10 @@ def visualize_graph(G, ax, node_color=np.array([255, 0, 142]) / 255., edge_color
         start = G.nodes[e[0]]["pos"]
         end = G.nodes[e[1]]["pos"]
         ax.arrow(start[0], start[1], end[0] - start[0], end[1] - start[1],
-                 head_width=2,
-                 head_length=1,
-                 width=0.01,
-                 fc=edge_color, ec=node_color)
+                 head_width=head_width,
+                 head_length=head_length,
+                 width=width,
+                 fc=edge_color,
+                 ec=node_color)
 
 
